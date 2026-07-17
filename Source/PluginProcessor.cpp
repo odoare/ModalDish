@@ -199,7 +199,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout FemPlateAudioProcessor::crea
         juce::ParameterID (fem::id::cascWindow, 1), "Casc Win", 1, 7, 4));
     p.push_back (std::make_unique<FloatParam> (
         juce::ParameterID (fem::id::cascDeplete, 1), "Casc Depl",
-        juce::NormalisableRange<float> (0.0f, 1.0f, 0.0f, 0.5f), 0.25f));
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.0f, 0.5f), 0.07f));
 
     // Default high enough that the statistical tail (above the FEM modes)
     // takes part out of the box.

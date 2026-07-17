@@ -115,7 +115,7 @@ public:
         float cascReleaseMs = 2000.0f; // gate release
         float cascOverlap   = 0.1f;    // target bandwidth floor, x local spacing
         int   cascWindow    = 4;       // source window, bands below each rung
-        float cascDeplete   = 0.25f;   // source-band energy loss while pumping
+        float cascDeplete   = 0.07f;   // source-band energy loss while pumping
 
         float outX      = 0.5f;     // output point (plate coordinates)
         float outY      = 0.47f;

@@ -19,6 +19,13 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     topBar.setBackgroundColour (fem::theme::topBarBg);
     topBar.setAccentColour (fem::theme::accent);
 
+    // Advanced toggle: shows the cascade tuning column, widening the window.
+    fem::theme::styleButton (advancedButton, fem::theme::cascAccent);
+    advancedButton.setClickingTogglesState (true);
+    advancedButton.setMouseClickGrabsKeyboardFocus (false);
+    advancedButton.onClick = [this] { setAdvancedVisible (advancedButton.getToggleState()); };
+    topBar.setRightControls (nullptr, 0, &advancedButton, 86);
+
     // --- left: views ---------------------------------------------------------
     addAndMakeVisible (canvas);
     addChildComponent (plateView);   // hidden until a mesh exists
@@ -187,7 +194,7 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     showShapeView (processor.getCurrentModel() == nullptr);
     startTimerHz (30);
 
-    setSize (1290, 730);
+    setAdvancedVisible (false);   // also sets the window size
 }
 
 FemPlateAudioProcessorEditor::~FemPlateAudioProcessorEditor()
@@ -197,6 +204,17 @@ FemPlateAudioProcessorEditor::~FemPlateAudioProcessorEditor()
 }
 
 //==============================================================================
+void FemPlateAudioProcessorEditor::setAdvancedVisible (bool shouldShow)
+{
+    advancedVisible = shouldShow;
+    advancedButton.setToggleState (shouldShow, juce::dontSendNotification);
+    for (auto* k : { &cascAmpKnob, &cascDriveKnob, &cascWinKnob,
+                     &cascAttKnob, &cascRelKnob, &cascOverKnob, &cascDeplKnob })
+        k->setVisible (shouldShow);
+    setSize (shouldShow ? 1290 : 1020, 730);   // triggers resized()
+    repaint();
+}
+
 void FemPlateAudioProcessorEditor::showShapeView (bool showShape)
 {
     canvas.setVisible (showShape);
@@ -428,9 +446,14 @@ void FemPlateAudioProcessorEditor::resized()
     topBar.setBounds (area.removeFromTop (54));
     area.reduce (10, 10);
 
-    // Two right-hand columns: A = geometry + modes, B = cascade + output.
-    auto colB = area.removeFromRight (270);
-    area.removeFromRight (10);
+    // Column A = geometry + modes + output; column B (Advanced only) =
+    // cascade tuning.
+    juce::Rectangle<int> colB;
+    if (advancedVisible)
+    {
+        colB = area.removeFromRight (270);
+        area.removeFromRight (10);
+    }
     auto colA = area.removeFromRight (270);
     area.removeFromRight (10);
 
@@ -472,8 +495,21 @@ void FemPlateAudioProcessorEditor::resized()
         modesKnob.setBounds (row3.reduced (2));
     }
 
-    cascPanel = colB.removeFromTop (330);
+    colA.removeFromTop (10);
+    ioPanel = colA.removeFromTop (130);
     {
+        auto r = ioPanel.reduced (10);
+        r.removeFromTop (22);
+        const int w = r.getWidth() / 4;
+        outXKnob.setBounds (r.removeFromLeft (w).reduced (2));
+        outYKnob.setBounds (r.removeFromLeft (w).reduced (2));
+        inGainKnob.setBounds (r.removeFromLeft (w).reduced (2));
+        outGainKnob.setBounds (r.reduced (2));
+    }
+
+    if (advancedVisible)
+    {
+        cascPanel = colB.removeFromTop (330);
         auto r = cascPanel.reduced (10);
         r.removeFromTop (22);
         const int rowH = r.getHeight() / 3;
@@ -492,17 +528,9 @@ void FemPlateAudioProcessorEditor::resized()
         auto row3 = r;
         cascDeplKnob.setBounds (row3.removeFromLeft (w).reduced (2));
     }
-    colB.removeFromTop (10);
-
-    ioPanel = colB.removeFromTop (130);
+    else
     {
-        auto r = ioPanel.reduced (10);
-        r.removeFromTop (22);
-        const int w = r.getWidth() / 4;
-        outXKnob.setBounds (r.removeFromLeft (w).reduced (2));
-        outYKnob.setBounds (r.removeFromLeft (w).reduced (2));
-        inGainKnob.setBounds (r.removeFromLeft (w).reduced (2));
-        outGainKnob.setBounds (r.reduced (2));
+        cascPanel = {};
     }
 
     // Left: action strip at the bottom, views above.

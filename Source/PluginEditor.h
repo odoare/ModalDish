@@ -41,6 +41,7 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
 
     void showShapeView (bool showShape);
+    void setAdvancedVisible (bool shouldShow);
     void syncShapeToProcessor (bool geometryChanged);
     void refreshMeshAndField();
     void refreshField();
@@ -90,6 +91,11 @@ private:
     fxme::FxmeSlider modeViewKnob;
 
     juce::Rectangle<int> geomPanel, modalPanel, cascPanel, ioPanel, legendArea;
+
+    // "Advanced" toggle (parked in the top bar): shows the cascade tuning
+    // column and widens the window.
+    juce::TextButton advancedButton { "Advanced" };
+    bool advancedVisible = false;
 
     int displayedModeCount = -1;         // status refresh bookkeeping
     juce::uint32 lastStrikeMs = 0;       // strike marker fade
