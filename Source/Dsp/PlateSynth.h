@@ -10,36 +10,49 @@
     input signal is injected the same way at the last hit point, which makes
     the plugin usable as an effect.
 
-    Frequency / damping laws (see doc/starting_spec.md and
+    Frequency / damping laws (see doc/technical.tex and
     FxmeTools/acoustics/PlateModes.h):
 
         omega_k(T)^2 = lambda_k + (T - Tref) g_k          (scaled units)
-        nu_k         = omega_k / omega_1                  (frequency ratios)
-        f_k          = f1 * nu_k                          (Hz; f1 is a knob)
+        f_k          = f1 * omega_k(T_eff) / omega_1(T_knob)
         zeta_k       = zetaV / nu_k + zetaM * nu_k
 
-    zetaV is the viscous-damping knob (a term in d w/dt: constant absolute
-    bandwidth, so relative damping falls with frequency) and zetaM the
-    material-damping knob (a term in Delta^2 dw/dt ~ omega^2 dw/dt: damping
-    grows with frequency). Both equal the damping ratio of mode 1.
+    The frequency map is normalised by the fundamental at the *static* knob
+    tension: turning the Tension knob keeps mode 1 at f1 (it reshapes the
+    overtone ratios, i.e. the timbre), while the *dynamic* Berger tension
+    below shifts the whole spectrum, fundamental included — that absolute
+    shift is the audible hardening glide. zetaV is the viscous-damping knob
+    (a term in d w/dt: relative damping falls with frequency) and zetaM the
+    material-damping knob (a term in Delta^2 dw/dt: damping grows with
+    frequency); both equal the damping ratio of mode 1.
 
     Geometric nonlinearity (Berger / von Karman, simplified)
     --------------------------------------------------------
-    * Dynamic tension ("nonlin" knob): Berger's approximation replaces the
-      von Karman membrane coupling by a spatially uniform tension
-      proportional to the integrated stretching  ~ integral |grad w|^2
-      = sum_kl q_k q_l phi_k' G phi_l  ~=  sum_k g_k q_k^2  (diagonal
-      approximation) — the same g_k the linear tension law already uses.
-      Per-mode energies are envelope-followed on the audio thread and the
-      resulting T_dyn drives the ordinary retune law at a decimated rate,
-      throttled and slewed so coefficient rewrites stay inaudible. Large
-      hits therefore glide the whole spectrum up and relax as the plate
-      rings out (gong / tom pitch bend).
+    * Dynamic tension ("nonlin" knob). Berger's approximation replaces the
+      von Karman membrane coupling by a spatially uniform tension that grows
+      with the vibration amplitude, parameterised as a *relative* stiffening
+      gamma of mode 1:
 
-    * Mode cascade ("cascade" knob): a memoryless cubic of the output,
-      tanh-bounded, is re-injected at the last hit point like the external
-      input. At high amplitude its intermodulation products excite high
-      modes (cymbal-like crash brightness); at low amplitude it vanishes.
+          T_dyn = gamma * omega_1^2(T_knob) / g_1 ,
+          gamma = nlGain * nonlin * <out^2>
+
+      so mode 1 glides up by sqrt(1 + gamma) on a hard hit and relaxes as
+      the ring decays (hardening), and every other mode follows its own
+      tension sensitivity g_k. gamma is dimensionless and plate-independent.
+      T_dyn drives the ordinary first-order retune law at a decimated rate,
+      slewed and throttled (only rewrite coefficients above ~2 cents).
+
+    * Mode cascade ("cascade" knob): the low-mode part of the output (the
+      loud, struck modes) is passed through a tanh-bounded cubic and
+      injected into the *higher* modes only, at the last hit point. The
+      transfer graph low -> high is acyclic — no feedback loop exists — so
+      the scheme is unconditionally stable with no gain restriction, unlike
+      a full-output feedback (which needs a small-gain bound that renders it
+      inaudible). Each target mode's injection is divided by its bandwidth
+      compensation so the audible cascade level is damping-independent.
+      This mimics the upward energy transfer of von Karman plates: loud low
+      modes continuously pump the high ones, and the shimmer decays with
+      the low-mode ring.
 
     Everything here runs on the audio thread and is allocation-free; the
     model pointer is published by the processor (see PluginProcessor).
@@ -73,7 +86,7 @@ public:
         float hammerMs  = 3.0f;     // half-sine shock duration
         float force     = 1.0f;     // hammer force amplitude
         float nonlin    = 0.0f;     // 0..1 dynamic-tension (Berger) amount
-        float cascade   = 0.0f;     // 0..1 cubic-feedback amount
+        float cascade   = 0.0f;     // 0..1 upward-cascade amount
         float outX      = 0.5f;     // output point (plate coordinates)
         float outY      = 0.47f;
         int   numModes  = 32;       // active modes (<= model modes, <= fem::maxModes)
@@ -95,15 +108,16 @@ public:
     /** Audio thread: one sample of external input in, one plate sample out. */
     float processSample (float input) noexcept;
 
-    /** Current dynamic (Berger) tension, for display/debugging. */
-    float getDynamicTension() const noexcept { return (float) tensionDyn; }
+    /** Current relative stiffening of mode 1 (0 = linear), for display. */
+    float getNonlinearGamma() const noexcept { return (float) gamma; }
 
 private:
     void retune();                    // full: mode count, weights, then bank
-    void retuneBank();                // coefficients/amps at tension + tensionDyn
+    void retuneBank();                // coefficients/amps at tension + T_dyn(gamma)
     void computeOutputWeights();      // phi_k(out) -> phiOut
     void computeInputWeights (float x, float y);
-    void updateDynamicTension() noexcept;   // decimated Berger feedback step
+    void updateCascadeWeights() noexcept;    // injection weights of the target modes
+    void updateDynamicTension() noexcept;    // decimated Berger feedback step
 
     // Allocation-free RBJ band-pass (constant 0 dB peak), one per mode.
     struct Resonator
@@ -139,21 +153,22 @@ private:
     Resonator filters[fem::maxModes];
     float phiOut[fem::maxModes] {};      // phi_k(out)
     float outAmp[fem::maxModes] {};      // phi_k(out) * bandwidth compensation
-    float inWeights[fem::maxModes] {};   // phi_k(last hit) for input + cascade
+    float inWeights[fem::maxModes] {};   // phi_k(last hit) for the external input
+    float compensation[fem::maxModes] {};// bandwidth gain compensation per mode
     float lastHitX = 0.5f, lastHitY = 0.5f;
     Hammer hammers[maxStrikes];
     int nextHammer = 0;
 
-    // Nonlinear state (Berger dynamic tension + cubic cascade).
-    static constexpr int nlUpdatePeriod = 32;   // samples between T_dyn steps
-    float env[fem::maxModes] {};         // smoothed squared modal responses
-    float nlWeight[fem::maxModes] {};    // g_k / omega_k^2 at the applied tension
-    float maxNlWeight = 0.0f;
-    float envCoef = 0.001f;
-    double tensionDyn = 0.0;             // slewed dynamic tension
-    double appliedTensionDyn = 0.0;      // value the bank is currently tuned at
+    // Nonlinear state (Berger dynamic tension + upward cubic cascade).
+    static constexpr int nlUpdatePeriod = 32;   // samples between gamma steps
+    float envCoef = 0.001f;              // output-energy follower coefficient
+    float envOut = 0.0f;                 // smoothed out^2
+    double gamma = 0.0;                  // slewed relative stiffening of mode 1
+    double appliedGamma = 0.0;           // value the bank is currently tuned at
     int nlCountdown = nlUpdatePeriod;
-    float prevOut = 0.0f;
+    int cascadeSplit = 0;                // modes < split are cascade sources
+    float cascadeW[fem::maxModes] {};    // injection weights (targets only)
+    float prevOutLow = 0.0f;             // last sample of the low-mode output
 };
 
 } // namespace fem

@@ -31,17 +31,18 @@ namespace
     // keeps a velocity-1, force-1 hit around unity peak output.
     constexpr float hammerGain = 0.4f;
 
-    // Calibration of the Berger feedback: T_dyn = nlScale * nonlin * sum_k
-    // nlWeight_k * env_k. With nlWeight ~ 1/omega1^2-ish and env ~ squared
-    // signal level, nlScale = 1500 makes nonlin = 1 glide a hard hit by
-    // roughly a fifth on a default plate.
-    constexpr double nlScale = 1500.0;
-    constexpr double maxDynTension = 2000.0;   // hard safety cap
+    // Berger calibration, in audible terms: gamma = nlGain * nonlin * <out^2>.
+    // A hit ringing around out ~ 0.5 with nonlin = 1 gives gamma ~ 2 (mode 1
+    // up ~9 semitones, relaxing as the ring decays). gammaCap bounds the
+    // total glide whatever the level.
+    constexpr double nlGain = 8.0;
+    constexpr double gammaCap = 4.0;
 
-    // Cascade feedback level: fb = cascade * cascadeGain * tanh(out)^3, so
-    // the injected signal is bounded by cascade * cascadeGain whatever the
-    // ring amplitude.
-    constexpr float cascadeGain = 2.0f;
+    // Upward cascade: fb = cascade * cascadeAmp * tanh(cascadeB * outLow)^3,
+    // injected into the modes above cascadeSplit only (acyclic: no stability
+    // constraint). cascadeB places the knee around outLow ~ 1/cascadeB.
+    constexpr float cascadeB = 2.0f;
+    constexpr float cascadeAmp = 3.0f;
 }
 
 void PlateSynth::prepare (double sampleRate)
@@ -60,11 +61,10 @@ void PlateSynth::reset()
         f.reset();
     for (auto& h : hammers)
         h.active = false;
-    for (float& e : env)
-        e = 0.0f;
-    tensionDyn = appliedTensionDyn = 0.0;
+    envOut = 0.0f;
+    gamma = appliedGamma = 0.0;
     nlCountdown = nlUpdatePeriod;
-    prevOut = 0.0f;
+    prevOutLow = 0.0f;
 }
 
 void PlateSynth::update (const ModalModel* newModel, const Params& params)
@@ -102,6 +102,9 @@ void PlateSynth::retune()
 
     activeModes = juce::jlimit (0, juce::jmin (model->numModes(), fem::maxModes),
                                 current.numModes);
+    // The lowest quarter of the bank (the loud, struck modes) drives the
+    // cascade; everything above it receives.
+    cascadeSplit = juce::jmax (1, activeModes / 4);
 
     computeOutputWeights();
     computeInputWeights (lastHitX, lastHitY);
@@ -115,28 +118,38 @@ void PlateSynth::retuneBank()
 
     const auto& lambda = model->modes.lambda;
     const auto& g = model->modes.tensionG;
-    const double tEff = (double) current.tension + tensionDyn;
-    const double dT = tEff - model->modes.tensionRef;
 
-    const double omega1Sq = juce::jmax (1.0e-12, lambda[0] + dT * g[0]);
+    // Static part: the knob tension. The fundamental at this tension is the
+    // reference the f1 mapping is pinned to (the knob reshapes ratios only).
+    const double dTknob = (double) current.tension - model->modes.tensionRef;
+    const double base1 = juce::jmax (1.0e-12, lambda[0] + dTknob * g[0]);
+
+    // Dynamic part: T_dyn = gamma * base1 / g_1, so mode 1's stiffness is
+    // base1 * (1 + gamma) — the whole spectrum (fundamental included)
+    // glides up with gamma. That absolute shift is the hardening glide;
+    // normalising by the instantaneous fundamental instead would pin mode 1
+    // and leave only the overtone-ratio compression, which is heard as a
+    // *softening* — the wrong direction.
+    const double tDyn = gamma * base1 / juce::jmax (g[0], 1.0e-12);
+    const double dT = dTknob + tDyn;
+
+    // Instantaneous fundamental, used for the damping law's ratios.
+    const double omega1SqEff = juce::jmax (1.0e-12, lambda[0] + dT * g[0]);
     const double maxFreq = 0.47 * fs;
 
-    maxNlWeight = 0.0f;
     for (int k = 0; k < activeModes; ++k)
     {
         const double omegaSq = juce::jmax (0.0, lambda[(size_t) k] + dT * g[(size_t) k]);
-        const double nu = std::sqrt (omegaSq / omega1Sq);
-        const double freq = (double) current.f1 * nu;
-
-        nlWeight[k] = (float) (g[(size_t) k] / juce::jmax (1.0e-12, omegaSq));
-        maxNlWeight = juce::jmax (maxNlWeight, nlWeight[k]);
+        const double freq = (double) current.f1 * std::sqrt (omegaSq / base1);
+        const double nu = std::sqrt (omegaSq / omega1SqEff);
 
         if (nu <= 0.0 || freq < 20.0 || freq > maxFreq)
         {
             // Keep the bank index aligned with the mode index so the shape
             // weights stay matched; the mode is silent and its filter is
-            // muted (b0 = 0) so it cannot feed the Berger energy tracker.
+            // muted (b0 = 0) so it cannot feed the feedback paths.
             outAmp[k] = 0.0f;
+            compensation[k] = 1.0f;
             filters[k].c = fxme::BiquadCoeffs();
             filters[k].c.b0 = 0.0f;
             continue;
@@ -147,10 +160,12 @@ void PlateSynth::retuneBank()
                                                 + (double) current.matDamp * nu));
         const float q = juce::jlimit (0.5f, 1.0e5f, 1.0f / (2.0f * zeta));
         filters[k].c = fxme::BiquadCoeffs::bandpass (fs, (float) freq, q);
-        outAmp[k] = phiOut[k] * gainCompensation (zeta);
+        compensation[k] = gainCompensation (zeta);
+        outAmp[k] = phiOut[k] * compensation[k];
     }
 
-    appliedTensionDyn = tensionDyn;
+    appliedGamma = gamma;
+    updateCascadeWeights();
 }
 
 void PlateSynth::computeOutputWeights()
@@ -167,6 +182,21 @@ void PlateSynth::computeInputWeights (float x, float y)
         w = 0.0f;
     if (model != nullptr)
         model->evalShapes (x, y, inWeights, activeModes);
+    updateCascadeWeights();
+}
+
+void PlateSynth::updateCascadeWeights() noexcept
+{
+    // Target (high) modes receive the distorted low-mode signal at the hit
+    // point; dividing by each target's bandwidth compensation makes the
+    // audible cascade level independent of the damping settings (the
+    // compensation is re-applied on output). Source modes get zero: the
+    // low -> high transfer graph stays acyclic, hence unconditionally
+    // stable with no gain restriction.
+    for (int k = 0; k < fem::maxModes; ++k)
+        cascadeW[k] = (k >= cascadeSplit && k < activeModes)
+                        ? inWeights[k] / juce::jmax (compensation[k], 0.5f)
+                        : 0.0f;
 }
 
 void PlateSynth::strike (float x, float y, float velocity)
@@ -198,20 +228,15 @@ void PlateSynth::updateDynamicTension() noexcept
     if (model == nullptr || activeModes < 1)
         return;
 
-    // Berger tension target from the diagonal modal stretching estimate.
-    double e = 0.0;
-    for (int k = 0; k < activeModes; ++k)
-        e += (double) nlWeight[k] * (double) env[k];
-    const double target = juce::jlimit (0.0, maxDynTension,
-                                        nlScale * (double) current.nonlin * e);
+    const double target = juce::jlimit (0.0, gammaCap,
+                                        nlGain * (double) current.nonlin * (double) envOut);
 
     // Slew over a few updates (~ a couple of ms) so the glide is smooth.
-    tensionDyn += 0.2 * (target - tensionDyn);
+    gamma += 0.2 * (target - gamma);
 
-    // Retune only when the induced pitch shift exceeds ~2 cents:
-    // d(omega)/omega ~= dT * nlWeight / 2.
-    const double shift = 0.5 * std::abs (tensionDyn - appliedTensionDyn) * (double) maxNlWeight;
-    if (shift > 0.0012)
+    // Retune only when mode 1 moved by more than ~2 cents:
+    // d(omega)/omega = 0.5 * d(gamma) / (1 + gamma).
+    if (std::abs (gamma - appliedGamma) > 0.0024 * (1.0 + appliedGamma))
         retuneBank();
 }
 
@@ -223,17 +248,17 @@ float PlateSynth::processSample (float input) noexcept
     if (--nlCountdown <= 0)
     {
         nlCountdown = nlUpdatePeriod;
-        if (current.nonlin > 0.0f || tensionDyn > 1.0e-6)
+        if (current.nonlin > 0.0f || gamma > 1.0e-4)
             updateDynamicTension();
     }
 
-    // Cubic cascade feedback of the previous output sample, tanh-bounded so
-    // the loop injection can never exceed cascade * cascadeGain.
-    float feedback = 0.0f;
+    // Upward cascade: cubic of the previous sample's low-mode output,
+    // injected into the high modes only (weights in cascadeW).
+    float cascadeFb = 0.0f;
     if (current.cascade > 0.0f)
     {
-        const float t = std::tanh (prevOut);
-        feedback = current.cascade * cascadeGain * t * t * t;
+        const float t = std::tanh (cascadeB * prevOutLow);
+        cascadeFb = current.cascade * cascadeAmp * t * t * t;
     }
 
     // Per-strike half-sine force pulses, shared by all modes this sample.
@@ -254,19 +279,20 @@ float PlateSynth::processSample (float input) noexcept
             h.active = false;
     }
 
-    const float inject = input + feedback;
-
     float out = 0.0f;
+    float outLow = 0.0f;
     for (int k = 0; k < activeModes; ++k)
     {
-        float x = inWeights[k] * inject;
+        float x = inWeights[k] * input + cascadeW[k] * cascadeFb;
         for (int p = 0; p < numPulses; ++p)
             x += pulse[p] * hammers[pulseSlot[p]].weights[k];
-        const float y = filters[k].process (x);
-        env[k] += envCoef * (y * y - env[k]);
-        out += outAmp[k] * y;
+        const float contrib = outAmp[k] * filters[k].process (x);
+        out += contrib;
+        if (k < cascadeSplit)
+            outLow += contrib;
     }
-    prevOut = out;
+    prevOutLow = outLow;
+    envOut += envCoef * (out * out - envOut);
     return out;
 }
 
