@@ -151,6 +151,7 @@ private:
     std::atomic<float>* pCascRelease = nullptr;
     std::atomic<float>* pCascOverlap = nullptr;
     std::atomic<float>* pCascWindow = nullptr;
+    std::atomic<float>* pCascDeplete = nullptr;
     std::atomic<float>* pNumModes = nullptr;
     std::atomic<float>* pOutX = nullptr;
     std::atomic<float>* pOutY = nullptr;

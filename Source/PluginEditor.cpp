@@ -165,6 +165,7 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     addCasc (cascAttKnob, "Attack", fem::id::cascAttack, cascAttAtt);
     addCasc (cascRelKnob, "Release", fem::id::cascRelease, cascRelAtt);
     addCasc (cascOverKnob, "Overlap", fem::id::cascOverlap, cascOverAtt);
+    addCasc (cascDeplKnob, "Deplete", fem::id::cascDeplete, cascDeplAtt);
 
     // --- right: I/O --------------------------------------------------------------
     auto addIo = [&] (fxme::FxmeSlider& s, const char* text, const char* id,
@@ -471,11 +472,11 @@ void FemPlateAudioProcessorEditor::resized()
         modesKnob.setBounds (row3.reduced (2));
     }
 
-    cascPanel = colB.removeFromTop (240);
+    cascPanel = colB.removeFromTop (330);
     {
         auto r = cascPanel.reduced (10);
         r.removeFromTop (22);
-        const int rowH = r.getHeight() / 2;
+        const int rowH = r.getHeight() / 3;
         const int w = r.getWidth() / 3;
 
         auto row1 = r.removeFromTop (rowH);
@@ -483,10 +484,13 @@ void FemPlateAudioProcessorEditor::resized()
         cascDriveKnob.setBounds (row1.removeFromLeft (w).reduced (2));
         cascWinKnob.setBounds (row1.reduced (2));
 
-        auto row2 = r;
+        auto row2 = r.removeFromTop (rowH);
         cascAttKnob.setBounds (row2.removeFromLeft (w).reduced (2));
         cascRelKnob.setBounds (row2.removeFromLeft (w).reduced (2));
         cascOverKnob.setBounds (row2.reduced (2));
+
+        auto row3 = r;
+        cascDeplKnob.setBounds (row3.removeFromLeft (w).reduced (2));
     }
     colB.removeFromTop (10);
 

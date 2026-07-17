@@ -45,9 +45,9 @@
     * Mode cascade ("cascade" knob): a windowed multi-band ladder with
       transfer inertia. The bank is split into numCascadeBands frequency
       bands; band b is pumped by a tanh-bounded cubic of the output of the
-      *two bands directly below it only* — summing all lower bands would
-      let the loud strike band drive the top almost directly, making the
-      whole spectrum light up at once. With the window, energy genuinely
+      *cascWindow bands directly below it only* — summing all lower bands
+      would let the loud strike band drive the top almost directly, making
+      the whole spectrum light up at once. With the window, energy genuinely
       climbs rung by rung (a cubic only reaches 3x its source band), like
       the real von Karman cascade. Each band's injection gain additionally
       passes through an attack/release envelope whose attack time grows
@@ -60,10 +60,19 @@
       bound that renders it inaudible). Each target mode's injection is
       divided by its bandwidth compensation so the audible cascade level
       is damping-independent, and target bandwidths are floored —
-      proportionally to the cascade knob — at ~0.3x the local mode spacing
-      (see cascadeOverlap in the .cpp): enough overlap for the receiving
+      proportionally to the cascade knob and the Overlap parameter — at a
+      fraction of the local mode spacing: enough overlap for the receiving
       comb to catch the broadband products, low enough that the pumped
       modes keep a natural ring once the pumping stops.
+
+      Depletion ("Deplete" parameter): the transfer is otherwise purely
+      additive, so the low modes would ring on untouched while the shimmer
+      floats on top — an audible disconnect. While band b's gates draw
+      from a source band, that band's filter states receive an extra
+      per-sample exponential decay proportional to the mean gate activity
+      of the bands it feeds: energy audibly *leaves* the lows as the
+      shimmer blooms, gluing the two. Purely dissipative, so it cannot
+      affect stability.
 
     Everything here runs on the audio thread and is allocation-free; the
     model pointer is published by the processor (see PluginProcessor).
@@ -92,20 +101,21 @@ public:
     {
         float f1        = 110.0f;   // Hz
         float tension   = 0.0f;     // T (scaled units)
-        float viscDamp  = 1.0e-3f;  // zeta of mode 1, viscous term
-        float matDamp   = 1.0e-4f;  // zeta of mode 1, material term
+        float viscDamp  = 1.0e-4f;  // zeta of mode 1, viscous term
+        float matDamp   = 7.0e-6f;  // zeta of mode 1, material term
         float hammerMs  = 3.0f;     // half-sine shock duration
         float force     = 1.0f;     // hammer force amplitude
         float nonlin    = 0.0f;     // 0..1 dynamic-tension (Berger) amount
         float cascade   = 0.0f;     // 0..1 upward-cascade amount
 
         // Cascade tuning set (see the class comment; defaults = voiced values).
-        float cascAmp       = 6.0f;    // injection gain A
-        float cascDrive     = 2.0f;    // tanh knee B
-        float cascAttackMs  = 15.0f;   // gate attack per band rung
-        float cascReleaseMs = 200.0f;  // gate release
-        float cascOverlap   = 0.3f;    // target bandwidth floor, x local spacing
-        int   cascWindow    = 2;       // source window, bands below each rung
+        float cascAmp       = 1.1f;    // injection gain A
+        float cascDrive     = 16.0f;   // tanh knee B
+        float cascAttackMs  = 30.0f;   // gate attack per band rung
+        float cascReleaseMs = 2000.0f; // gate release
+        float cascOverlap   = 0.1f;    // target bandwidth floor, x local spacing
+        int   cascWindow    = 4;       // source window, bands below each rung
+        float cascDeplete   = 0.25f;   // source-band energy loss while pumping
 
         float outX      = 0.5f;     // output point (plate coordinates)
         float outY      = 0.47f;

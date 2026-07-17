@@ -78,9 +78,9 @@ private:
 
     // Right column — cascade tuning.
     fxme::FxmeSlider cascAmpKnob, cascDriveKnob, cascAttKnob, cascRelKnob,
-                     cascOverKnob, cascWinKnob;
+                     cascOverKnob, cascWinKnob, cascDeplKnob;
     std::unique_ptr<SliderAttachment> cascAmpAtt, cascDriveAtt, cascAttAtt,
-                                      cascRelAtt, cascOverAtt, cascWinAtt;
+                                      cascRelAtt, cascOverAtt, cascWinAtt, cascDeplAtt;
 
     // Right column — I/O.
     fxme::FxmeSlider outXKnob, outYKnob, inGainKnob, outGainKnob;

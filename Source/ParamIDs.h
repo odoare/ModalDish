@@ -30,6 +30,7 @@ namespace fem::id
     inline constexpr const char* cascRelease = "cascrel";   // gate release, ms
     inline constexpr const char* cascOverlap = "cascover";  // target bandwidth floor
     inline constexpr const char* cascWindow  = "cascwin";   // source window, bands
+    inline constexpr const char* cascDeplete = "cascdepl";  // source-band energy loss
     inline constexpr const char* numModes  = "nmodes";    // active modes
     inline constexpr const char* outX      = "outx";      // output position on the plate
     inline constexpr const char* outY      = "outy";

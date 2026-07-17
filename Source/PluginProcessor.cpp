@@ -110,6 +110,7 @@ FemPlateAudioProcessor::FemPlateAudioProcessor()
     pCascRelease = apvts.getRawParameterValue (fem::id::cascRelease);
     pCascOverlap = apvts.getRawParameterValue (fem::id::cascOverlap);
     pCascWindow  = apvts.getRawParameterValue (fem::id::cascWindow);
+    pCascDeplete = apvts.getRawParameterValue (fem::id::cascDeplete);
     pNumModes = apvts.getRawParameterValue (fem::id::numModes);
     pOutX     = apvts.getRawParameterValue (fem::id::outX);
     pOutY     = apvts.getRawParameterValue (fem::id::outY);
@@ -153,9 +154,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout FemPlateAudioProcessor::crea
     // Both damping knobs are the damping ratio of mode 1 (dimensionless,
     // scaled equations): viscous ~ dw/dt, material ~ Delta^2 dw/dt.
     p.push_back (std::make_unique<FloatParam> (
-        juce::ParameterID (fem::id::viscDamp, 1), "Viscous", logRange (1.0e-6f, 0.1f), 1.0e-3f));
+        juce::ParameterID (fem::id::viscDamp, 1), "Viscous", logRange (1.0e-6f, 0.1f), 1.0e-4f));
     p.push_back (std::make_unique<FloatParam> (
-        juce::ParameterID (fem::id::matDamp, 1), "Material", logRange (1.0e-6f, 0.1f), 1.0e-4f));
+        juce::ParameterID (fem::id::matDamp, 1), "Material", logRange (1.0e-6f, 0.1f), 7.0e-6f));
 
     p.push_back (std::make_unique<FloatParam> (
         juce::ParameterID (fem::id::hammerMs, 1), "Hammer", logRange (0.1f, 50.0f), 3.0f,
@@ -177,24 +178,28 @@ juce::AudioProcessorValueTreeState::ParameterLayout FemPlateAudioProcessor::crea
         juce::ParameterID (fem::id::cascade, 1), "Cascade",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.0f, 0.5f), 0.0f));
 
-    // Cascade tuning set (see PlateSynth.h); defaults match the voiced
-    // constants the effect shipped with.
+    // Cascade tuning set (see PlateSynth.h); defaults are the voiced values.
+    // Amp is deliberately capped at 1.5: higher injection gains combined
+    // with a hot Drive get loud enough to be unpleasant.
     p.push_back (std::make_unique<FloatParam> (
         juce::ParameterID (fem::id::cascAmp, 1), "Casc Amp",
-        juce::NormalisableRange<float> (0.0f, 24.0f, 0.0f, 0.5f), 6.0f));
+        juce::NormalisableRange<float> (0.0f, 1.5f, 0.0f, 0.7f), 1.1f));
     p.push_back (std::make_unique<FloatParam> (
-        juce::ParameterID (fem::id::cascDrive, 1), "Casc Drive", logRange (0.25f, 16.0f), 2.0f));
+        juce::ParameterID (fem::id::cascDrive, 1), "Casc Drive", logRange (0.25f, 20.0f), 16.0f));
     p.push_back (std::make_unique<FloatParam> (
-        juce::ParameterID (fem::id::cascAttack, 1), "Casc Att", logRange (1.0f, 200.0f), 15.0f,
+        juce::ParameterID (fem::id::cascAttack, 1), "Casc Att", logRange (1.0f, 200.0f), 30.0f,
         juce::AudioParameterFloatAttributes().withLabel ("ms/band")));
     p.push_back (std::make_unique<FloatParam> (
-        juce::ParameterID (fem::id::cascRelease, 1), "Casc Rel", logRange (20.0f, 4000.0f), 200.0f,
+        juce::ParameterID (fem::id::cascRelease, 1), "Casc Rel", logRange (20.0f, 4000.0f), 2000.0f,
         juce::AudioParameterFloatAttributes().withLabel ("ms")));
     p.push_back (std::make_unique<FloatParam> (
         juce::ParameterID (fem::id::cascOverlap, 1), "Casc Ovl",
-        juce::NormalisableRange<float> (0.0f, 1.0f, 0.0f, 0.5f), 0.3f));
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.0f, 0.5f), 0.1f));
     p.push_back (std::make_unique<juce::AudioParameterInt> (
-        juce::ParameterID (fem::id::cascWindow, 1), "Casc Win", 1, 7, 2));
+        juce::ParameterID (fem::id::cascWindow, 1), "Casc Win", 1, 7, 4));
+    p.push_back (std::make_unique<FloatParam> (
+        juce::ParameterID (fem::id::cascDeplete, 1), "Casc Depl",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.0f, 0.5f), 0.25f));
 
     // Default high enough that the statistical tail (above the FEM modes)
     // takes part out of the box.
@@ -282,6 +287,7 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     params.cascReleaseMs = pCascRelease->load();
     params.cascOverlap   = pCascOverlap->load();
     params.cascWindow    = (int) pCascWindow->load();
+    params.cascDeplete   = pCascDeplete->load();
     params.outX     = pOutX->load();
     params.outY     = pOutY->load();
     params.numModes = (int) pNumModes->load();

@@ -56,6 +56,14 @@ namespace
     // audibly damp the high end, low values keep the pumped modes ringing
     // naturally after the pumping stops.
     //
+    // Depletion couples the two ends of the ladder: a source band's filter
+    // states decay by an extra factor (1 - deplete * cascade * depleteRate
+    // * activity) per sample, activity being the mean gate level of the
+    // bands it feeds. At full depletion/activity the extra decay time is
+    // 1/(depleteRate * fs) ~ 70 ms at 48 kHz: the lows audibly hand their
+    // energy to the shimmer instead of ringing on untouched.
+    constexpr float depleteRate = 3.0e-4f;
+
     // All of these are exposed as plugin parameters (CASCADE panel) while
     // the effect is being voiced; Params holds the defaults.
 }
@@ -372,6 +380,29 @@ float PlateSynth::processSample (float input) noexcept
             h.active = false;
     }
 
+    // Depletion: extra per-sample state decay of each source band,
+    // proportional to the mean gate activity of the bands it feeds.
+    float bandDecay[numCascadeBands];
+    for (int b = 0; b < numCascadeBands; ++b)
+        bandDecay[b] = 1.0f;
+    if (current.cascade > 0.0f && current.cascDeplete > 0.0f)
+    {
+        const int window = juce::jlimit (1, numCascadeBands, current.cascWindow);
+        for (int b = 0; b < numCascadeBands; ++b)
+        {
+            float act = 0.0f;
+            int n = 0;
+            for (int t = b + 1; t < numCascadeBands && t <= b + window; ++t)
+            {
+                act += gateEnv[t];
+                ++n;
+            }
+            if (n > 0)
+                bandDecay[b] = 1.0f - current.cascDeplete * current.cascade
+                                      * depleteRate * (act / (float) n);
+        }
+    }
+
     float out = 0.0f;
     float bandOut[numCascadeBands] = {};
     int band = 0;
@@ -383,6 +414,8 @@ float PlateSynth::processSample (float input) noexcept
         for (int p = 0; p < numPulses; ++p)
             x += pulse[p] * hammers[pulseSlot[p]].weights[k];
         const float contrib = outAmp[k] * filters[k].process (x);
+        filters[k].z1 *= bandDecay[band];
+        filters[k].z2 *= bandDecay[band];
         out += contrib;
         bandOut[band] += contrib;
     }
