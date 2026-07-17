@@ -71,8 +71,10 @@ private:
     fxme::FxmeSlider aspectKnob, pointsKnob, densityKnob;
 
     // Right column — modal parameters.
-    fxme::FxmeSlider f1Knob, tensionKnob, hammerKnob, viscKnob, matKnob, modesKnob;
-    std::unique_ptr<SliderAttachment> f1Att, tensionAtt, hammerAtt, viscAtt, matAtt, modesAtt;
+    fxme::FxmeSlider f1Knob, tensionKnob, hammerKnob, forceKnob, nonlinKnob,
+                     cascadeKnob, viscKnob, matKnob, modesKnob;
+    std::unique_ptr<SliderAttachment> f1Att, tensionAtt, hammerAtt, forceAtt,
+                                      nonlinAtt, cascadeAtt, viscAtt, matAtt, modesAtt;
 
     // Right column — I/O.
     fxme::FxmeSlider outXKnob, outYKnob, inGainKnob, outGainKnob;

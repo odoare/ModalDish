@@ -144,6 +144,9 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     addModal (f1Knob, "Freq", fem::id::f1, f1Att);
     addModal (tensionKnob, "Tension", fem::id::tension, tensionAtt);
     addModal (hammerKnob, "Hammer", fem::id::hammerMs, hammerAtt);
+    addModal (forceKnob, "Force", fem::id::force, forceAtt);
+    addModal (nonlinKnob, "Nonlinear", fem::id::nonlin, nonlinAtt);
+    addModal (cascadeKnob, "Cascade", fem::id::cascade, cascadeAtt);
     addModal (viscKnob, "Viscous", fem::id::viscDamp, viscAtt);
     addModal (matKnob, "Material", fem::id::matDamp, matAtt);
     addModal (modesKnob, "Modes", fem::id::numModes, modesAtt);
@@ -168,7 +171,7 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     showShapeView (processor.getCurrentModel() == nullptr);
     startTimerHz (30);
 
-    setSize (1020, 660);
+    setSize (1020, 730);
 }
 
 FemPlateAudioProcessorEditor::~FemPlateAudioProcessorEditor()
@@ -424,19 +427,27 @@ void FemPlateAudioProcessorEditor::resized()
     }
     right.removeFromTop (10);
 
-    modalPanel = right.removeFromTop (240);
+    modalPanel = right.removeFromTop (310);
     {
         auto r = modalPanel.reduced (10);
         r.removeFromTop (22);
-        auto row1 = r.removeFromTop (r.getHeight() / 2);
-        const int w = row1.getWidth() / 3;
+        const int rowH = r.getHeight() / 3;
+        const int w = r.getWidth() / 3;
+
+        auto row1 = r.removeFromTop (rowH);          // excitation
         f1Knob.setBounds (row1.removeFromLeft (w).reduced (2));
-        tensionKnob.setBounds (row1.removeFromLeft (w).reduced (2));
-        hammerKnob.setBounds (row1.reduced (2));
-        auto row2 = r;
-        viscKnob.setBounds (row2.removeFromLeft (w).reduced (2));
-        matKnob.setBounds (row2.removeFromLeft (w).reduced (2));
-        modesKnob.setBounds (row2.reduced (2));
+        hammerKnob.setBounds (row1.removeFromLeft (w).reduced (2));
+        forceKnob.setBounds (row1.reduced (2));
+
+        auto row2 = r.removeFromTop (rowH);          // tension / nonlinearity
+        tensionKnob.setBounds (row2.removeFromLeft (w).reduced (2));
+        nonlinKnob.setBounds (row2.removeFromLeft (w).reduced (2));
+        cascadeKnob.setBounds (row2.reduced (2));
+
+        auto row3 = r;                               // damping / bank size
+        viscKnob.setBounds (row3.removeFromLeft (w).reduced (2));
+        matKnob.setBounds (row3.removeFromLeft (w).reduced (2));
+        modesKnob.setBounds (row3.reduced (2));
     }
     right.removeFromTop (10);
 

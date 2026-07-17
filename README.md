@@ -34,10 +34,27 @@ against analytic plates in `Tests/FemTests.cpp`.
 * **Viscous / Material** are the damping ratio of mode 1; viscous damping
   (`dw/dt`) decays relatively slower for high modes (ζ ∝ 1/ν), material
   damping (`Δ² dw/dt`) faster (ζ ∝ ν).
-* **Hammer** is the duration of the half-sine shock of a mouse hit.
+* **Hammer** is the duration of the half-sine shock of a mouse hit, and
+  **Force** its amplitude (past unity it drives the nonlinearities hard).
 * **Out X/Y** is the pickup point (also right-click/ctrl-drag on the plate).
 * **In** injects the external audio input at the last hit point — the
   effect mode.
+
+### Geometric nonlinearity
+
+Two efficient, audio-thread-only approximations of the von Kármán plate
+nonlinearity (both 0 = exactly the linear model):
+
+* **Nonlinear** — Berger dynamic tension: deflection stretches the
+  mid-plane, modelled as a uniform tension `T_dyn ∝ Σₖ gₖ⟨qₖ²⟩` estimated
+  from per-mode energy followers and fed into the *same* first-order
+  tension law used by the Tension knob (throttled/slewed retunes, ≥ ~2
+  cents per coefficient rewrite). Hard hits glide the whole spectrum up
+  and relax as the plate rings out — the gong / tom pitch bend.
+* **Cascade** — inter-mode energy transfer surrogate: a tanh-bounded cubic
+  of the output is re-injected at the last hit point like the external
+  input. Loud hits generate intermodulation that excites high modes
+  (cymbal-like crash brightness) and vanishes at low amplitude.
 
 ## GUI workflow
 

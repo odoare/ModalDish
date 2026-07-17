@@ -30,6 +30,9 @@ FemPlateAudioProcessor::FemPlateAudioProcessor()
     pViscDamp = apvts.getRawParameterValue (fem::id::viscDamp);
     pMatDamp  = apvts.getRawParameterValue (fem::id::matDamp);
     pHammer   = apvts.getRawParameterValue (fem::id::hammerMs);
+    pForce    = apvts.getRawParameterValue (fem::id::force);
+    pNonlin   = apvts.getRawParameterValue (fem::id::nonlin);
+    pCascade  = apvts.getRawParameterValue (fem::id::cascade);
     pNumModes = apvts.getRawParameterValue (fem::id::numModes);
     pOutX     = apvts.getRawParameterValue (fem::id::outX);
     pOutY     = apvts.getRawParameterValue (fem::id::outY);
@@ -80,6 +83,22 @@ juce::AudioProcessorValueTreeState::ParameterLayout FemPlateAudioProcessor::crea
     p.push_back (std::make_unique<FloatParam> (
         juce::ParameterID (fem::id::hammerMs, 1), "Hammer", logRange (0.1f, 50.0f), 3.0f,
         juce::AudioParameterFloatAttributes().withLabel ("ms")));
+
+    // Hammer force amplitude. With the nonlinearities engaged the absolute
+    // level matters (it drives the dynamic tension and the cascade), so this
+    // goes well past unity.
+    p.push_back (std::make_unique<FloatParam> (
+        juce::ParameterID (fem::id::force, 1), "Force",
+        juce::NormalisableRange<float> (0.0f, 4.0f, 0.0f, 0.5f), 1.0f));
+
+    // Geometric nonlinearity (see PlateSynth.h): Berger dynamic tension and
+    // cubic mode-cascade feedback, both 0 = linear model.
+    p.push_back (std::make_unique<FloatParam> (
+        juce::ParameterID (fem::id::nonlin, 1), "Nonlinear",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.0f, 0.5f), 0.0f));
+    p.push_back (std::make_unique<FloatParam> (
+        juce::ParameterID (fem::id::cascade, 1), "Cascade",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.0f, 0.5f), 0.0f));
 
     p.push_back (std::make_unique<juce::AudioParameterInt> (
         juce::ParameterID (fem::id::numModes, 1), "Modes", 1, fem::maxModes, 32));
@@ -156,6 +175,9 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     params.viscDamp = pViscDamp->load();
     params.matDamp  = pMatDamp->load();
     params.hammerMs = pHammer->load();
+    params.force    = pForce->load();
+    params.nonlin   = pNonlin->load();
+    params.cascade  = pCascade->load();
     params.outX     = pOutX->load();
     params.outY     = pOutY->load();
     params.numModes = (int) pNumModes->load();

@@ -142,6 +142,9 @@ private:
     std::atomic<float>* pViscDamp = nullptr;
     std::atomic<float>* pMatDamp = nullptr;
     std::atomic<float>* pHammer = nullptr;
+    std::atomic<float>* pForce = nullptr;
+    std::atomic<float>* pNonlin = nullptr;
+    std::atomic<float>* pCascade = nullptr;
     std::atomic<float>* pNumModes = nullptr;
     std::atomic<float>* pOutX = nullptr;
     std::atomic<float>* pOutY = nullptr;
