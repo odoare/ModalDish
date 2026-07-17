@@ -43,6 +43,16 @@ namespace
     // constraint). cascadeB places the knee around outLow ~ 1/cascadeB.
     constexpr float cascadeB = 2.0f;
     constexpr float cascadeAmp = 3.0f;
+
+    // Modal-overlap floor for the cascade targets: the cubic's products are
+    // broadband, but at plate dampings the target resonances are needles a
+    // few Hz wide spaced ~0.64*f1 apart (overlap ~0.1), so most of the
+    // injected energy falls between modes and is rejected — heard as
+    // "distortion of some partials" instead of a wash. At full cascade the
+    // target bandwidths are floored to cascadeOverlap times the local mode
+    // spacing, turning the receiving comb into a quasi-continuum (and,
+    // physically enough, shortening the high modes' ring).
+    constexpr double cascadeOverlap = 0.7;
 }
 
 void PlateSynth::prepare (double sampleRate)
@@ -82,6 +92,7 @@ void PlateSynth::update (const ModalModel* newModel, const Params& params)
         || ! juce::approximatelyEqual (params.tension,  current.tension)
         || ! juce::approximatelyEqual (params.viscDamp, current.viscDamp)
         || ! juce::approximatelyEqual (params.matDamp,  current.matDamp)
+        || ! juce::approximatelyEqual (params.cascade,  current.cascade)   // overlap floor
         || ! juce::approximatelyEqual (params.outX,     current.outX)
         || ! juce::approximatelyEqual (params.outY,     current.outY)
         || params.numModes != current.numModes;
@@ -137,13 +148,19 @@ void PlateSynth::retuneBank()
     const double omega1SqEff = juce::jmax (1.0e-12, lambda[0] + dT * g[0]);
     const double maxFreq = 0.47 * fs;
 
+    // First pass: frequencies (needed for the local mode spacing below).
+    double freq[fem::maxModes];
+    double nu[fem::maxModes];
     for (int k = 0; k < activeModes; ++k)
     {
         const double omegaSq = juce::jmax (0.0, lambda[(size_t) k] + dT * g[(size_t) k]);
-        const double freq = (double) current.f1 * std::sqrt (omegaSq / base1);
-        const double nu = std::sqrt (omegaSq / omega1SqEff);
+        freq[k] = (double) current.f1 * std::sqrt (omegaSq / base1);
+        nu[k] = std::sqrt (omegaSq / omega1SqEff);
+    }
 
-        if (nu <= 0.0 || freq < 20.0 || freq > maxFreq)
+    for (int k = 0; k < activeModes; ++k)
+    {
+        if (nu[k] <= 0.0 || freq[k] < 20.0 || freq[k] > maxFreq)
         {
             // Keep the bank index aligned with the mode index so the shape
             // weights stay matched; the mode is silent and its filter is
@@ -155,11 +172,26 @@ void PlateSynth::retuneBank()
             continue;
         }
 
-        const float zeta = juce::jlimit (1.0e-6f, 0.5f,
-                                         (float) ((double) current.viscDamp / nu
-                                                + (double) current.matDamp * nu));
+        float zeta = juce::jlimit (1.0e-6f, 0.5f,
+                                   (float) ((double) current.viscDamp / nu[k]
+                                          + (double) current.matDamp * nu[k]));
+
+        // Cascade targets: floor the bandwidth (2 zeta f) at cascadeOverlap
+        // times the local mode spacing, scaled by the cascade knob, so the
+        // receiving comb overlaps into a quasi-continuum when driven.
+        if (k >= cascadeSplit && current.cascade > 0.0f)
+        {
+            const double spAbove = k + 1 < activeModes ? freq[k + 1] - freq[k]
+                                 : k > 0               ? freq[k] - freq[k - 1] : 0.0;
+            const double spBelow = k > 0 ? freq[k] - freq[k - 1] : spAbove;
+            const double spacing = juce::jmax (0.0, 0.5 * (spAbove + spBelow));
+            const double zetaFloor = (double) current.cascade * cascadeOverlap
+                                     * spacing / (2.0 * freq[k]);
+            zeta = juce::jmax (zeta, (float) juce::jlimit (0.0, 0.5, zetaFloor));
+        }
+
         const float q = juce::jlimit (0.5f, 1.0e5f, 1.0f / (2.0f * zeta));
-        filters[k].c = fxme::BiquadCoeffs::bandpass (fs, (float) freq, q);
+        filters[k].c = fxme::BiquadCoeffs::bandpass (fs, (float) freq[k], q);
         compensation[k] = gainCompensation (zeta);
         outAmp[k] = phiOut[k] * compensation[k];
     }

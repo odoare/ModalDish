@@ -257,8 +257,13 @@ void FemPlateAudioProcessor::computeModes()
         bc.segmentBc.push_back ((fxme::acoustics::BoundaryCondition) juce::jlimit (0, 3, b));
 
     fxme::acoustics::ModalOptions opt;
-    opt.numModes = fem::maxModes;   // solve the full bank once; the Modes knob
-                                    // then selects without recomputing
+    // Solve the full bank once (the Modes knob then selects without
+    // recomputing), but never ask for more modes than the mesh can resolve:
+    // the top discrete modes need several DOFs per half-wave to be physical,
+    // ~6 DOFs per mode in practice. A finer Grid setting unlocks more modes.
+    opt.numModes = juce::jmin (fem::maxModes,
+                               juce::jmax (8, (displayMesh->numVertices()
+                                               + displayMesh->numEdges()) / 6));
     opt.tension = pTension->load();
     opt.progress = [this] (float pr) { computeProgress.store (pr); };
 

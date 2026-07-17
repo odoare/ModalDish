@@ -31,5 +31,5 @@ namespace fem::id
 
 namespace fem
 {
-    inline constexpr int maxModes = 64;
+    inline constexpr int maxModes = 128;
 }

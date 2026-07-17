@@ -52,7 +52,12 @@
       compensation so the audible cascade level is damping-independent.
       This mimics the upward energy transfer of von Karman plates: loud low
       modes continuously pump the high ones, and the shimmer decays with
-      the low-mode ring.
+      the low-mode ring. Because the cubic's products are broadband while
+      the target resonances are needles (modal overlap ~0.1 at plate
+      dampings), the targets' bandwidths are floored — proportionally to
+      the cascade knob — at ~0.7x the local mode spacing, so the receiving
+      comb overlaps into a quasi-continuum instead of picking out isolated
+      partials (see cascadeOverlap in the .cpp).
 
     Everything here runs on the audio thread and is allocation-free; the
     model pointer is published by the processor (see PluginProcessor).
