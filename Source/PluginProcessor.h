@@ -145,6 +145,12 @@ private:
     std::atomic<float>* pForce = nullptr;
     std::atomic<float>* pNonlin = nullptr;
     std::atomic<float>* pCascade = nullptr;
+    std::atomic<float>* pCascAmp = nullptr;
+    std::atomic<float>* pCascDrive = nullptr;
+    std::atomic<float>* pCascAttack = nullptr;
+    std::atomic<float>* pCascRelease = nullptr;
+    std::atomic<float>* pCascOverlap = nullptr;
+    std::atomic<float>* pCascWindow = nullptr;
     std::atomic<float>* pNumModes = nullptr;
     std::atomic<float>* pOutX = nullptr;
     std::atomic<float>* pOutY = nullptr;

@@ -22,6 +22,14 @@ namespace fem::id
     inline constexpr const char* force     = "force";     // hammer force amplitude
     inline constexpr const char* nonlin    = "nonlin";    // Berger tension feedback amount
     inline constexpr const char* cascade   = "cascade";   // cubic feedback (mode cascade) amount
+
+    // Cascade tuning set (exposed at least while voicing the effect).
+    inline constexpr const char* cascAmp     = "cascamp";   // injection gain
+    inline constexpr const char* cascDrive   = "cascdrive"; // tanh knee (B)
+    inline constexpr const char* cascAttack  = "cascatt";   // gate attack, ms per band rung
+    inline constexpr const char* cascRelease = "cascrel";   // gate release, ms
+    inline constexpr const char* cascOverlap = "cascover";  // target bandwidth floor
+    inline constexpr const char* cascWindow  = "cascwin";   // source window, bands
     inline constexpr const char* numModes  = "nmodes";    // active modes
     inline constexpr const char* outX      = "outx";      // output position on the plate
     inline constexpr const char* outY      = "outy";
@@ -31,5 +39,10 @@ namespace fem::id
 
 namespace fem
 {
-    inline constexpr int maxModes = 128;
+    // Synthesis bank capacity: FEM-computed modes plus the statistical
+    // (Berry random-wave) tail appended above them — see ModalModel.h.
+    inline constexpr int maxModes = 256;
+    // Modes actually solved by the finite-element eigensolver (the dense
+    // solver stops being reasonable much beyond this).
+    inline constexpr int maxFemModes = 128;
 }

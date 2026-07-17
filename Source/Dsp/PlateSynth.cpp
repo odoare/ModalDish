@@ -38,21 +38,26 @@ namespace
     constexpr double nlGain = 8.0;
     constexpr double gammaCap = 4.0;
 
-    // Upward cascade: fb = cascade * cascadeAmp * tanh(cascadeB * outLow)^3,
-    // injected into the modes above cascadeSplit only (acyclic: no stability
-    // constraint). cascadeB places the knee around outLow ~ 1/cascadeB.
-    constexpr float cascadeB = 2.0f;
-    constexpr float cascadeAmp = 3.0f;
-
-    // Modal-overlap floor for the cascade targets: the cubic's products are
-    // broadband, but at plate dampings the target resonances are needles a
-    // few Hz wide spaced ~0.64*f1 apart (overlap ~0.1), so most of the
-    // injected energy falls between modes and is rejected — heard as
-    // "distortion of some partials" instead of a wash. At full cascade the
-    // target bandwidths are floored to cascadeOverlap times the local mode
-    // spacing, turning the receiving comb into a quasi-continuum (and,
-    // physically enough, shortening the high modes' ring).
-    constexpr double cascadeOverlap = 0.7;
+    // Windowed cascade ladder: band b is driven by
+    // fb_b = cascade * cascAmp * gate_b * tanh(cascDrive * src_b)^3, with
+    // src_b the output of the cascWindow bands directly below b (a wide
+    // source window lets the loud strike band drive the top bands almost
+    // directly and the whole spectrum lights up at once). A cubic only
+    // reaches 3x its source band, so the windowed ladder makes energy climb
+    // rung by rung; the transfer graph stays a DAG, so there is no
+    // stability constraint. gate_b is an attack/release envelope on the
+    // source presence: attack grows with the band's height on the ladder
+    // (progressive glow), release lets the pumping tail off smoothly.
+    //
+    // The modal-overlap floor (cascOverlap, in retuneBank) widens the
+    // cascade targets to catch the broadband cubic products (at plate
+    // dampings the resonances are needles spaced ~0.64*f1 apart, overlap
+    // ~0.1, so most injected energy would fall between modes); high values
+    // audibly damp the high end, low values keep the pumped modes ringing
+    // naturally after the pumping stops.
+    //
+    // All of these are exposed as plugin parameters (CASCADE panel) while
+    // the effect is being voiced; Params holds the defaults.
 }
 
 void PlateSynth::prepare (double sampleRate)
@@ -61,8 +66,23 @@ void PlateSynth::prepare (double sampleRate)
     // ~20 ms energy follower: fast enough for the attack glide, slow enough
     // not to track individual cycles of the low modes.
     envCoef = 1.0f - std::exp ((float) (-1.0 / (0.02 * fs)));
+    updateCascadeEnvelopes();
     reset();
     dirty = true;
+}
+
+void PlateSynth::updateCascadeEnvelopes()
+{
+    // Cascade transfer inertia: band b's injection gate attacks over
+    // b * cascAttackMs and releases over cascReleaseMs.
+    for (int b = 0; b < numCascadeBands; ++b)
+    {
+        const double tauSec = 1.0e-3 * juce::jmax (0.1f, current.cascAttackMs)
+                              * juce::jmax (1, b);
+        attackCoef[b] = 1.0f - (float) std::exp (-1.0 / (tauSec * fs));
+    }
+    releaseCoef = 1.0f - (float) std::exp (
+        -1.0 / (1.0e-3 * juce::jmax (1.0f, current.cascReleaseMs) * fs));
 }
 
 void PlateSynth::reset()
@@ -74,7 +94,10 @@ void PlateSynth::reset()
     envOut = 0.0f;
     gamma = appliedGamma = 0.0;
     nlCountdown = nlUpdatePeriod;
-    prevOutLow = 0.0f;
+    for (float& b : prevBandOut)
+        b = 0.0f;
+    for (float& g : gateEnv)
+        g = 0.0f;
 }
 
 void PlateSynth::update (const ModalModel* newModel, const Params& params)
@@ -92,12 +115,19 @@ void PlateSynth::update (const ModalModel* newModel, const Params& params)
         || ! juce::approximatelyEqual (params.tension,  current.tension)
         || ! juce::approximatelyEqual (params.viscDamp, current.viscDamp)
         || ! juce::approximatelyEqual (params.matDamp,  current.matDamp)
-        || ! juce::approximatelyEqual (params.cascade,  current.cascade)   // overlap floor
+        || ! juce::approximatelyEqual (params.cascade,  current.cascade)      // overlap floor
+        || ! juce::approximatelyEqual (params.cascOverlap, current.cascOverlap)
         || ! juce::approximatelyEqual (params.outX,     current.outX)
         || ! juce::approximatelyEqual (params.outY,     current.outY)
         || params.numModes != current.numModes;
 
+    const bool envChanged =
+           ! juce::approximatelyEqual (params.cascAttackMs,  current.cascAttackMs)
+        || ! juce::approximatelyEqual (params.cascReleaseMs, current.cascReleaseMs);
+
     current = params;
+    if (envChanged)
+        updateCascadeEnvelopes();
     if (dirty || tuningChanged)
     {
         retune();
@@ -113,9 +143,14 @@ void PlateSynth::retune()
 
     activeModes = juce::jlimit (0, juce::jmin (model->numModes(), fem::maxModes),
                                 current.numModes);
-    // The lowest quarter of the bank (the loud, struck modes) drives the
-    // cascade; everything above it receives.
-    cascadeSplit = juce::jmax (1, activeModes / 4);
+
+    // Cascade bands: equal index ranges (constant plate modal density makes
+    // them equal frequency ranges too). Band 0 is source-only; each higher
+    // band receives from all bands below it.
+    for (int b = 0; b <= numCascadeBands; ++b)
+        bandStart[b] = juce::jmin (activeModes,
+                                   juce::jmax (b, activeModes * b / numCascadeBands));
+    cascadeSplit = juce::jmax (1, bandStart[1]);
 
     computeOutputWeights();
     computeInputWeights (lastHitX, lastHitY);
@@ -176,7 +211,7 @@ void PlateSynth::retuneBank()
                                    (float) ((double) current.viscDamp / nu[k]
                                           + (double) current.matDamp * nu[k]));
 
-        // Cascade targets: floor the bandwidth (2 zeta f) at cascadeOverlap
+        // Cascade targets: floor the bandwidth (2 zeta f) at cascOverlap
         // times the local mode spacing, scaled by the cascade knob, so the
         // receiving comb overlaps into a quasi-continuum when driven.
         if (k >= cascadeSplit && current.cascade > 0.0f)
@@ -185,7 +220,8 @@ void PlateSynth::retuneBank()
                                  : k > 0               ? freq[k] - freq[k - 1] : 0.0;
             const double spBelow = k > 0 ? freq[k] - freq[k - 1] : spAbove;
             const double spacing = juce::jmax (0.0, 0.5 * (spAbove + spBelow));
-            const double zetaFloor = (double) current.cascade * cascadeOverlap
+            const double zetaFloor = (double) current.cascade
+                                     * (double) current.cascOverlap
                                      * spacing / (2.0 * freq[k]);
             zeta = juce::jmax (zeta, (float) juce::jlimit (0.0, 0.5, zetaFloor));
         }
@@ -284,13 +320,38 @@ float PlateSynth::processSample (float input) noexcept
             updateDynamicTension();
     }
 
-    // Upward cascade: cubic of the previous sample's low-mode output,
-    // injected into the high modes only (weights in cascadeW).
-    float cascadeFb = 0.0f;
+    // Cascade ladder: band b is pumped by the cubic of the two bands
+    // directly below it (previous sample's band sums), through its own
+    // attack/release gate. Band 0 receives nothing.
+    float cascadeFb[numCascadeBands];
+    cascadeFb[0] = 0.0f;
     if (current.cascade > 0.0f)
     {
-        const float t = std::tanh (cascadeB * prevOutLow);
-        cascadeFb = current.cascade * cascadeAmp * t * t * t;
+        const int window = juce::jlimit (1, numCascadeBands, current.cascWindow);
+        for (int b = 1; b < numCascadeBands; ++b)
+        {
+            float src = 0.0f;
+            for (int c = juce::jmax (0, b - window); c < b; ++c)
+                src += prevBandOut[c];
+            const float t = std::tanh (current.cascDrive * src);
+            const float carrier = t * t * t;
+
+            // Gate: rises towards 1 while the source is hot (faster near
+            // the bottom of the ladder), releases slowly.
+            const float target = juce::jmin (1.0f, 4.0f * std::abs (carrier));
+            gateEnv[b] += (target > gateEnv[b] ? attackCoef[b] : releaseCoef)
+                          * (target - gateEnv[b]);
+
+            cascadeFb[b] = current.cascade * current.cascAmp * gateEnv[b] * carrier;
+        }
+    }
+    else
+    {
+        for (int b = 1; b < numCascadeBands; ++b)
+        {
+            cascadeFb[b] = 0.0f;
+            gateEnv[b] = 0.0f;
+        }
     }
 
     // Per-strike half-sine force pulses, shared by all modes this sample.
@@ -312,18 +373,21 @@ float PlateSynth::processSample (float input) noexcept
     }
 
     float out = 0.0f;
-    float outLow = 0.0f;
+    float bandOut[numCascadeBands] = {};
+    int band = 0;
     for (int k = 0; k < activeModes; ++k)
     {
-        float x = inWeights[k] * input + cascadeW[k] * cascadeFb;
+        while (band + 1 < numCascadeBands && k >= bandStart[band + 1])
+            ++band;
+        float x = inWeights[k] * input + cascadeW[k] * cascadeFb[band];
         for (int p = 0; p < numPulses; ++p)
             x += pulse[p] * hammers[pulseSlot[p]].weights[k];
         const float contrib = outAmp[k] * filters[k].process (x);
         out += contrib;
-        if (k < cascadeSplit)
-            outLow += contrib;
+        bandOut[band] += contrib;
     }
-    prevOutLow = outLow;
+    for (int b = 0; b < numCascadeBands; ++b)
+        prevBandOut[b] = bandOut[b];
     envOut += envCoef * (out * out - envOut);
     return out;
 }

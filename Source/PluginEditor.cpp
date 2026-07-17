@@ -151,6 +151,21 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     addModal (matKnob, "Material", fem::id::matDamp, matAtt);
     addModal (modesKnob, "Modes", fem::id::numModes, modesAtt);
 
+    // --- right: cascade tuning ---------------------------------------------------
+    auto addCasc = [&] (fxme::FxmeSlider& s, const char* text, const char* id,
+                        std::unique_ptr<SliderAttachment>& att)
+    {
+        fem::theme::styleKnob (s, text, fem::theme::cascAccent);
+        addAndMakeVisible (s);
+        att = std::make_unique<SliderAttachment> (apvts, id, s);
+    };
+    addCasc (cascAmpKnob, "Amp", fem::id::cascAmp, cascAmpAtt);
+    addCasc (cascDriveKnob, "Drive", fem::id::cascDrive, cascDriveAtt);
+    addCasc (cascWinKnob, "Window", fem::id::cascWindow, cascWinAtt);
+    addCasc (cascAttKnob, "Attack", fem::id::cascAttack, cascAttAtt);
+    addCasc (cascRelKnob, "Release", fem::id::cascRelease, cascRelAtt);
+    addCasc (cascOverKnob, "Overlap", fem::id::cascOverlap, cascOverAtt);
+
     // --- right: I/O --------------------------------------------------------------
     auto addIo = [&] (fxme::FxmeSlider& s, const char* text, const char* id,
                       std::unique_ptr<SliderAttachment>& att)
@@ -171,7 +186,7 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     showShapeView (processor.getCurrentModel() == nullptr);
     startTimerHz (30);
 
-    setSize (1020, 730);
+    setSize (1290, 730);
 }
 
 FemPlateAudioProcessorEditor::~FemPlateAudioProcessorEditor()
@@ -219,7 +234,8 @@ void FemPlateAudioProcessorEditor::refreshField()
 {
     const auto* model = processor.getCurrentModel();
     const int k = (int) modeViewKnob.getValue();
-    if (model != nullptr && k >= 1 && k <= model->numModes())
+    // Only FEM modes have a mesh shape; tail modes show the bare grid.
+    if (model != nullptr && k >= 1 && k <= model->numFemModes())
         plateView.setField (model->modes.shapes[(size_t) (k - 1)]);
     else
         plateView.setField ({});
@@ -254,6 +270,8 @@ void FemPlateAudioProcessorEditor::refreshStatus()
                 const double fk = processor.apvts.getRawParameterValue (fem::id::f1)->load()
                                   * std::sqrt (w2k / w21);
                 text << " - mode " << k << ": " << juce::String (fk, 1) << " Hz";
+                if (k > model->numFemModes())
+                    text << " (statistical tail)";
             }
         }
         else
@@ -381,6 +399,7 @@ void FemPlateAudioProcessorEditor::paint (juce::Graphics& g)
 
     drawPanel (geomPanel, "GEOMETRY", fem::theme::geomAccent);
     drawPanel (modalPanel, "MODES", fem::theme::modesAccent);
+    drawPanel (cascPanel, "CASCADE", fem::theme::cascAccent);
     drawPanel (ioPanel, "OUTPUT", fem::theme::ioAccent);
 
     // Boundary-condition legend.
@@ -408,11 +427,13 @@ void FemPlateAudioProcessorEditor::resized()
     topBar.setBounds (area.removeFromTop (54));
     area.reduce (10, 10);
 
-    // Right column.
-    auto right = area.removeFromRight (300);
+    // Two right-hand columns: A = geometry + modes, B = cascade + output.
+    auto colB = area.removeFromRight (270);
+    area.removeFromRight (10);
+    auto colA = area.removeFromRight (270);
     area.removeFromRight (10);
 
-    geomPanel = right.removeFromTop (196);
+    geomPanel = colA.removeFromTop (196);
     {
         auto r = geomPanel.reduced (10);
         r.removeFromTop (22);
@@ -425,9 +446,9 @@ void FemPlateAudioProcessorEditor::resized()
         pointsKnob.setBounds (knobs.removeFromLeft (w).reduced (2));
         densityKnob.setBounds (knobs.reduced (2));
     }
-    right.removeFromTop (10);
+    colA.removeFromTop (10);
 
-    modalPanel = right.removeFromTop (310);
+    modalPanel = colA.removeFromTop (310);
     {
         auto r = modalPanel.reduced (10);
         r.removeFromTop (22);
@@ -449,9 +470,27 @@ void FemPlateAudioProcessorEditor::resized()
         matKnob.setBounds (row3.removeFromLeft (w).reduced (2));
         modesKnob.setBounds (row3.reduced (2));
     }
-    right.removeFromTop (10);
 
-    ioPanel = right;
+    cascPanel = colB.removeFromTop (240);
+    {
+        auto r = cascPanel.reduced (10);
+        r.removeFromTop (22);
+        const int rowH = r.getHeight() / 2;
+        const int w = r.getWidth() / 3;
+
+        auto row1 = r.removeFromTop (rowH);
+        cascAmpKnob.setBounds (row1.removeFromLeft (w).reduced (2));
+        cascDriveKnob.setBounds (row1.removeFromLeft (w).reduced (2));
+        cascWinKnob.setBounds (row1.reduced (2));
+
+        auto row2 = r;
+        cascAttKnob.setBounds (row2.removeFromLeft (w).reduced (2));
+        cascRelKnob.setBounds (row2.removeFromLeft (w).reduced (2));
+        cascOverKnob.setBounds (row2.reduced (2));
+    }
+    colB.removeFromTop (10);
+
+    ioPanel = colB.removeFromTop (130);
     {
         auto r = ioPanel.reduced (10);
         r.removeFromTop (22);

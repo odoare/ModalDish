@@ -42,22 +42,28 @@
       T_dyn drives the ordinary first-order retune law at a decimated rate,
       slewed and throttled (only rewrite coefficients above ~2 cents).
 
-    * Mode cascade ("cascade" knob): the low-mode part of the output (the
-      loud, struck modes) is passed through a tanh-bounded cubic and
-      injected into the *higher* modes only, at the last hit point. The
-      transfer graph low -> high is acyclic — no feedback loop exists — so
-      the scheme is unconditionally stable with no gain restriction, unlike
-      a full-output feedback (which needs a small-gain bound that renders it
-      inaudible). Each target mode's injection is divided by its bandwidth
-      compensation so the audible cascade level is damping-independent.
-      This mimics the upward energy transfer of von Karman plates: loud low
-      modes continuously pump the high ones, and the shimmer decays with
-      the low-mode ring. Because the cubic's products are broadband while
-      the target resonances are needles (modal overlap ~0.1 at plate
-      dampings), the targets' bandwidths are floored — proportionally to
-      the cascade knob — at ~0.7x the local mode spacing, so the receiving
-      comb overlaps into a quasi-continuum instead of picking out isolated
-      partials (see cascadeOverlap in the .cpp).
+    * Mode cascade ("cascade" knob): a windowed multi-band ladder with
+      transfer inertia. The bank is split into numCascadeBands frequency
+      bands; band b is pumped by a tanh-bounded cubic of the output of the
+      *two bands directly below it only* — summing all lower bands would
+      let the loud strike band drive the top almost directly, making the
+      whole spectrum light up at once. With the window, energy genuinely
+      climbs rung by rung (a cubic only reaches 3x its source band), like
+      the real von Karman cascade. Each band's injection gain additionally
+      passes through an attack/release envelope whose attack time grows
+      with the band's height on the ladder (~cascadeAttackMsPerBand x b),
+      so the brightening is a progressive glow rather than an instant
+      flash, and releases over ~cascadeReleaseMs so the pumping tails off
+      smoothly. The transfer graph remains a strict DAG (band b only ever
+      receives from below), so stability is unconditional with no gain
+      restriction, unlike a full-output feedback (which needs a small-gain
+      bound that renders it inaudible). Each target mode's injection is
+      divided by its bandwidth compensation so the audible cascade level
+      is damping-independent, and target bandwidths are floored —
+      proportionally to the cascade knob — at ~0.3x the local mode spacing
+      (see cascadeOverlap in the .cpp): enough overlap for the receiving
+      comb to catch the broadband products, low enough that the pumped
+      modes keep a natural ring once the pumping stops.
 
     Everything here runs on the audio thread and is allocation-free; the
     model pointer is published by the processor (see PluginProcessor).
@@ -92,6 +98,15 @@ public:
         float force     = 1.0f;     // hammer force amplitude
         float nonlin    = 0.0f;     // 0..1 dynamic-tension (Berger) amount
         float cascade   = 0.0f;     // 0..1 upward-cascade amount
+
+        // Cascade tuning set (see the class comment; defaults = voiced values).
+        float cascAmp       = 6.0f;    // injection gain A
+        float cascDrive     = 2.0f;    // tanh knee B
+        float cascAttackMs  = 15.0f;   // gate attack per band rung
+        float cascReleaseMs = 200.0f;  // gate release
+        float cascOverlap   = 0.3f;    // target bandwidth floor, x local spacing
+        int   cascWindow    = 2;       // source window, bands below each rung
+
         float outX      = 0.5f;     // output point (plate coordinates)
         float outY      = 0.47f;
         int   numModes  = 32;       // active modes (<= model modes, <= fem::maxModes)
@@ -122,6 +137,7 @@ private:
     void computeOutputWeights();      // phi_k(out) -> phiOut
     void computeInputWeights (float x, float y);
     void updateCascadeWeights() noexcept;    // injection weights of the target modes
+    void updateCascadeEnvelopes();           // attack/release coefficients from params
     void updateDynamicTension() noexcept;    // decimated Berger feedback step
 
     // Allocation-free RBJ band-pass (constant 0 dB peak), one per mode.
@@ -164,16 +180,21 @@ private:
     Hammer hammers[maxStrikes];
     int nextHammer = 0;
 
-    // Nonlinear state (Berger dynamic tension + upward cubic cascade).
+    // Nonlinear state (Berger dynamic tension + windowed cubic cascade).
     static constexpr int nlUpdatePeriod = 32;   // samples between gamma steps
+    static constexpr int numCascadeBands = 8;
     float envCoef = 0.001f;              // output-energy follower coefficient
     float envOut = 0.0f;                 // smoothed out^2
     double gamma = 0.0;                  // slewed relative stiffening of mode 1
     double appliedGamma = 0.0;           // value the bank is currently tuned at
     int nlCountdown = nlUpdatePeriod;
-    int cascadeSplit = 0;                // modes < split are cascade sources
-    float cascadeW[fem::maxModes] {};    // injection weights (targets only)
-    float prevOutLow = 0.0f;             // last sample of the low-mode output
+    int cascadeSplit = 0;                // first mode of band 1 (targets start here)
+    int bandStart[numCascadeBands + 1] {};        // mode-index range of each band
+    float cascadeW[fem::maxModes] {};    // injection weights (bands >= 1 only)
+    float prevBandOut[numCascadeBands] {};        // per-band output, last sample
+    float gateEnv[numCascadeBands] {};   // per-band injection envelope (0..1)
+    float attackCoef[numCascadeBands] {};// per-band attack one-pole coefficient
+    float releaseCoef = 0.001f;
 };
 
 } // namespace fem

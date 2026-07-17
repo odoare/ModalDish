@@ -16,6 +16,77 @@
 namespace
 {
     constexpr int stateVersion = 1;
+
+    // Deterministic uniform in [0,1) (splitmix-style), so a given plate
+    // always regenerates the same statistical tail.
+    double tailRand (std::uint64_t& s)
+    {
+        s += 0x9e3779b97f4a7c15ull;
+        std::uint64_t k = s;
+        k = (k ^ (k >> 30)) * 0xbf58476d1ce4e5b9ull;
+        k = (k ^ (k >> 27)) * 0x94d049bb133111ebull;
+        k ^= k >> 31;
+        return (double) (k & 0xffffffffull) / 4294967296.0;
+    }
+
+    /** Appends the statistical mode tail (Berry random-wave model) above
+        the FEM modes, up to `targetTotal` modes in all:
+          - frequencies continue at the Weyl spacing measured on the top
+            half of the FEM spectrum (plate modal density is constant in
+            omega), with +-40% jittered gaps;
+          - tension sensitivity g = sqrt(lambda), the exact high-frequency
+            asymptote (for a wavenumber kappa: lambda = kappa^4,
+            g = kappa^2);
+          - shapes are random plane waves with |k| = lambda^(1/4),
+            mass-normalised through amp = sqrt(2/area).
+        The tail gives the cascade a dense receiving continuum up to (and
+        beyond) Nyquist without solving for hundreds of FEM modes; the
+        identity-defining low modes stay exact. */
+    void appendStatisticalTail (fem::ModalModel& m, int targetTotal)
+    {
+        auto& lam = m.modes.lambda;
+        auto& g = m.modes.tensionG;
+        const int nFem = m.numFemModes();
+        if (m.mesh == nullptr || nFem < 8 || (int) lam.size() >= targetTotal)
+            return;
+
+        // Weyl spacing in omega from the top half of the FEM spectrum.
+        const size_t iA = lam.size() / 2;
+        const size_t iB = lam.size() - 1;
+        const double dOmega = (std::sqrt (lam[iB]) - std::sqrt (lam[iA]))
+                              / (double) juce::jmax ((size_t) 1, iB - iA);
+        if (! (dOmega > 0.0))
+            return;
+
+        double area = 0.0;
+        for (const auto& t : m.mesh->triangles)
+        {
+            const auto& a = m.mesh->vertices[(size_t) t[0]];
+            const auto& b = m.mesh->vertices[(size_t) t[1]];
+            const auto& c = m.mesh->vertices[(size_t) t[2]];
+            area += 0.5 * std::abs ((b.x - a.x) * (c.y - a.y)
+                                  - (c.x - a.x) * (b.y - a.y));
+        }
+        const float amp = (float) std::sqrt (2.0 / juce::jmax (area, 1.0e-6));
+
+        std::uint64_t seed = 0x5eedULL + (std::uint64_t) nFem;
+        double omega = std::sqrt (lam[iB]);
+        while ((int) lam.size() < targetTotal)
+        {
+            omega += dOmega * (0.6 + 0.8 * tailRand (seed));   // jittered gap
+            lam.push_back (omega * omega);
+            g.push_back (omega);                               // g = sqrt(lambda)
+
+            fem::ModalModel::TailWave w;
+            const double kappa = std::sqrt (omega);            // lambda^(1/4)
+            const double theta = juce::MathConstants<double>::twoPi * tailRand (seed);
+            w.kx = (float) (kappa * std::cos (theta));
+            w.ky = (float) (kappa * std::sin (theta));
+            w.phase = (float) (juce::MathConstants<double>::twoPi * tailRand (seed));
+            w.amp = amp;
+            m.tailWaves.push_back (w);
+        }
+    }
 }
 
 //==============================================================================
@@ -33,6 +104,12 @@ FemPlateAudioProcessor::FemPlateAudioProcessor()
     pForce    = apvts.getRawParameterValue (fem::id::force);
     pNonlin   = apvts.getRawParameterValue (fem::id::nonlin);
     pCascade  = apvts.getRawParameterValue (fem::id::cascade);
+    pCascAmp     = apvts.getRawParameterValue (fem::id::cascAmp);
+    pCascDrive   = apvts.getRawParameterValue (fem::id::cascDrive);
+    pCascAttack  = apvts.getRawParameterValue (fem::id::cascAttack);
+    pCascRelease = apvts.getRawParameterValue (fem::id::cascRelease);
+    pCascOverlap = apvts.getRawParameterValue (fem::id::cascOverlap);
+    pCascWindow  = apvts.getRawParameterValue (fem::id::cascWindow);
     pNumModes = apvts.getRawParameterValue (fem::id::numModes);
     pOutX     = apvts.getRawParameterValue (fem::id::outX);
     pOutY     = apvts.getRawParameterValue (fem::id::outY);
@@ -100,8 +177,29 @@ juce::AudioProcessorValueTreeState::ParameterLayout FemPlateAudioProcessor::crea
         juce::ParameterID (fem::id::cascade, 1), "Cascade",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.0f, 0.5f), 0.0f));
 
+    // Cascade tuning set (see PlateSynth.h); defaults match the voiced
+    // constants the effect shipped with.
+    p.push_back (std::make_unique<FloatParam> (
+        juce::ParameterID (fem::id::cascAmp, 1), "Casc Amp",
+        juce::NormalisableRange<float> (0.0f, 24.0f, 0.0f, 0.5f), 6.0f));
+    p.push_back (std::make_unique<FloatParam> (
+        juce::ParameterID (fem::id::cascDrive, 1), "Casc Drive", logRange (0.25f, 16.0f), 2.0f));
+    p.push_back (std::make_unique<FloatParam> (
+        juce::ParameterID (fem::id::cascAttack, 1), "Casc Att", logRange (1.0f, 200.0f), 15.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("ms/band")));
+    p.push_back (std::make_unique<FloatParam> (
+        juce::ParameterID (fem::id::cascRelease, 1), "Casc Rel", logRange (20.0f, 4000.0f), 200.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("ms")));
+    p.push_back (std::make_unique<FloatParam> (
+        juce::ParameterID (fem::id::cascOverlap, 1), "Casc Ovl",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.0f, 0.5f), 0.3f));
     p.push_back (std::make_unique<juce::AudioParameterInt> (
-        juce::ParameterID (fem::id::numModes, 1), "Modes", 1, fem::maxModes, 32));
+        juce::ParameterID (fem::id::cascWindow, 1), "Casc Win", 1, 7, 2));
+
+    // Default high enough that the statistical tail (above the FEM modes)
+    // takes part out of the box.
+    p.push_back (std::make_unique<juce::AudioParameterInt> (
+        juce::ParameterID (fem::id::numModes, 1), "Modes", 1, fem::maxModes, 192));
 
     p.push_back (std::make_unique<FloatParam> (
         juce::ParameterID (fem::id::outX, 1), "Out X",
@@ -178,6 +276,12 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     params.force    = pForce->load();
     params.nonlin   = pNonlin->load();
     params.cascade  = pCascade->load();
+    params.cascAmp       = pCascAmp->load();
+    params.cascDrive     = pCascDrive->load();
+    params.cascAttackMs  = pCascAttack->load();
+    params.cascReleaseMs = pCascRelease->load();
+    params.cascOverlap   = pCascOverlap->load();
+    params.cascWindow    = (int) pCascWindow->load();
     params.outX     = pOutX->load();
     params.outY     = pOutY->load();
     params.numModes = (int) pNumModes->load();
@@ -257,11 +361,12 @@ void FemPlateAudioProcessor::computeModes()
         bc.segmentBc.push_back ((fxme::acoustics::BoundaryCondition) juce::jlimit (0, 3, b));
 
     fxme::acoustics::ModalOptions opt;
-    // Solve the full bank once (the Modes knob then selects without
-    // recomputing), but never ask for more modes than the mesh can resolve:
-    // the top discrete modes need several DOFs per half-wave to be physical,
-    // ~6 DOFs per mode in practice. A finer Grid setting unlocks more modes.
-    opt.numModes = juce::jmin (fem::maxModes,
+    // Solve as many FEM modes as reasonable in one go (the Modes knob then
+    // selects without recomputing), but never ask for more than the mesh can
+    // resolve: the top discrete modes need several DOFs per half-wave to be
+    // physical, ~6 DOFs per mode in practice. A finer Grid setting unlocks
+    // more FEM modes; the statistical tail fills the bank above them.
+    opt.numModes = juce::jmin (fem::maxFemModes,
                                juce::jmax (8, (displayMesh->numVertices()
                                                + displayMesh->numEdges()) / 6));
     opt.tension = pTension->load();
@@ -283,7 +388,10 @@ void FemPlateAudioProcessor::computeModes()
                     {
                         computeProgress.store (-1.0f);
                         if (pendingModel != nullptr && pendingModel->modes.valid())
+                        {
+                            appendStatisticalTail (*pendingModel, fem::maxModes);
                             publishModel (std::move (pendingModel));
+                        }
                         else
                             pendingModel = nullptr;
                         sendChangeMessage();

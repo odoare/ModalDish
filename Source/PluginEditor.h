@@ -76,6 +76,12 @@ private:
     std::unique_ptr<SliderAttachment> f1Att, tensionAtt, hammerAtt, forceAtt,
                                       nonlinAtt, cascadeAtt, viscAtt, matAtt, modesAtt;
 
+    // Right column — cascade tuning.
+    fxme::FxmeSlider cascAmpKnob, cascDriveKnob, cascAttKnob, cascRelKnob,
+                     cascOverKnob, cascWinKnob;
+    std::unique_ptr<SliderAttachment> cascAmpAtt, cascDriveAtt, cascAttAtt,
+                                      cascRelAtt, cascOverAtt, cascWinAtt;
+
     // Right column — I/O.
     fxme::FxmeSlider outXKnob, outYKnob, inGainKnob, outGainKnob;
     std::unique_ptr<SliderAttachment> outXAtt, outYAtt, inGainAtt, outGainAtt;
@@ -83,7 +89,7 @@ private:
     // Mode display selector (0 = none / live plate).
     fxme::FxmeSlider modeViewKnob;
 
-    juce::Rectangle<int> geomPanel, modalPanel, ioPanel, legendArea;
+    juce::Rectangle<int> geomPanel, modalPanel, cascPanel, ioPanel, legendArea;
 
     int displayedModeCount = -1;         // status refresh bookkeeping
     juce::uint32 lastStrikeMs = 0;       // strike marker fade

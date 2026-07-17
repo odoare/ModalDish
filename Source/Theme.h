@@ -42,6 +42,7 @@ namespace fem::theme
     inline const juce::Colour geomAccent  { 0xff9ac93c };   // lime  — geometry section
     inline const juce::Colour modesAccent { 0xffe0784a };   // coral — modal parameters
     inline const juce::Colour ioAccent    { 0xffd96cd0 };   // orchid — in/out section
+    inline const juce::Colour cascAccent  { 0xffd9b13a };   // amber — cascade tuning
 
     // Plate display: canvas background and the diverging contour map ends.
     inline const juce::Colour plateBg   { 0xff141a24 };
