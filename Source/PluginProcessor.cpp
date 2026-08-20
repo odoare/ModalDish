@@ -167,7 +167,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout FemPlateAudioProcessor::crea
     // goes well past unity.
     p.push_back (std::make_unique<FloatParam> (
         juce::ParameterID (fem::id::force, 1), "Force",
-        juce::NormalisableRange<float> (0.0f, 4.0f, 0.0f, 0.5f), 1.0f));
+        juce::NormalisableRange<float> (0.0f, 10.0f, 0.0f, 0.4f), 1.0f));
 
     // Geometric nonlinearity (see PlateSynth.h): Berger dynamic tension and
     // cubic mode-cascade feedback, both 0 = linear model.
@@ -484,12 +484,116 @@ void FemPlateAudioProcessor::shapeFromTree (const juce::ValueTree& t)
         shapeData = std::move (s);
 }
 
+namespace
+{
+    template <typename T>
+    juce::var packVector (const T* data, size_t count)
+    {
+        return juce::var (juce::MemoryBlock (data, count * sizeof (T)));
+    }
+
+    template <typename T>
+    bool unpackVector (const juce::var& v, std::vector<T>& out, size_t expectedCount)
+    {
+        const auto* block = v.getBinaryData();
+        if (block == nullptr || block->getSize() != expectedCount * sizeof (T))
+            return false;
+        out.resize (expectedCount);
+        std::memcpy (out.data(), block->getData(), block->getSize());
+        return true;
+    }
+}
+
+/*  The computed modal data (eigenvalues, tension coefficients, FEM shapes,
+    statistical tail) is cached inside the plugin state, so loading a session
+    or preset publishes the model immediately instead of re-running the
+    eigensolver. The mesh itself is NOT serialised: generateMesh is a pure
+    deterministic function of the outline and density, so it is rebuilt on
+    load and only the vertex count is stored as a consistency check. */
+juce::ValueTree FemPlateAudioProcessor::modesToTree() const
+{
+    if (currentModel == nullptr || currentModel->mesh == nullptr
+         || ! currentModel->modes.valid())
+        return {};
+
+    const auto& m = *currentModel;
+    const int numTotal = m.numModes();
+    const int numFem = m.numFemModes();
+    const int nv = m.mesh->numVertices();
+
+    juce::ValueTree t ("MODES");
+    t.setProperty ("tensionRef", m.modes.tensionRef, nullptr);
+    t.setProperty ("numVertices", nv, nullptr);
+    t.setProperty ("numFem", numFem, nullptr);
+    t.setProperty ("numTotal", numTotal, nullptr);
+    t.setProperty ("lambda", packVector (m.modes.lambda.data(), (size_t) numTotal), nullptr);
+    t.setProperty ("tensionG", packVector (m.modes.tensionG.data(), (size_t) numTotal), nullptr);
+
+    std::vector<float> shapes ((size_t) numFem * (size_t) nv);
+    for (int k = 0; k < numFem; ++k)
+        std::memcpy (shapes.data() + (size_t) k * (size_t) nv,
+                     m.modes.shapes[(size_t) k].data(), (size_t) nv * sizeof (float));
+    t.setProperty ("shapes", packVector (shapes.data(), shapes.size()), nullptr);
+
+    std::vector<float> tail;
+    for (const auto& w : m.tailWaves)
+    {
+        tail.push_back (w.kx);
+        tail.push_back (w.ky);
+        tail.push_back (w.phase);
+        tail.push_back (w.amp);
+    }
+    t.setProperty ("tail", packVector (tail.data(), tail.size()), nullptr);
+    return t;
+}
+
+bool FemPlateAudioProcessor::modesFromTree (const juce::ValueTree& t)
+{
+    if (! t.hasType ("MODES") || displayMesh == nullptr)
+        return false;
+
+    const int nv = (int) t.getProperty ("numVertices", -1);
+    const int numFem = (int) t.getProperty ("numFem", 0);
+    const int numTotal = (int) t.getProperty ("numTotal", 0);
+    if (nv != displayMesh->numVertices() || numFem < 1 || numTotal < numFem)
+        return false;
+
+    auto model = std::make_unique<fem::ModalModel>();
+    model->mesh = displayMesh;
+    model->modes.tensionRef = (double) t.getProperty ("tensionRef", 0.0);
+
+    std::vector<float> shapes, tail;
+    if (! unpackVector (t["lambda"], model->modes.lambda, (size_t) numTotal)
+         || ! unpackVector (t["tensionG"], model->modes.tensionG, (size_t) numTotal)
+         || ! unpackVector (t["shapes"], shapes, (size_t) numFem * (size_t) nv)
+         || ! unpackVector (t["tail"], tail, (size_t) (numTotal - numFem) * 4))
+        return false;
+
+    model->modes.shapes.resize ((size_t) numFem);
+    for (int k = 0; k < numFem; ++k)
+    {
+        auto& s = model->modes.shapes[(size_t) k];
+        s.resize ((size_t) nv);
+        std::memcpy (s.data(), shapes.data() + (size_t) k * (size_t) nv,
+                     (size_t) nv * sizeof (float));
+    }
+    for (int j = 0; j < numTotal - numFem; ++j)
+        model->tailWaves.push_back ({ tail[(size_t) j * 4],     tail[(size_t) j * 4 + 1],
+                                      tail[(size_t) j * 4 + 2], tail[(size_t) j * 4 + 3] });
+
+    publishModel (std::move (model));
+    sendChangeMessage();
+    return true;
+}
+
 void FemPlateAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     juce::ValueTree root ("FemPlateState");
     root.setProperty ("version", stateVersion, nullptr);
     root.appendChild (apvts.copyState(), nullptr);
     root.appendChild (shapeToTree(), nullptr);
+    if (auto modes = modesToTree(); modes.isValid())
+        root.appendChild (modes, nullptr);
 
     if (auto xml = root.createXml())
         copyXmlToBinary (*xml, destData);
@@ -509,6 +613,7 @@ void FemPlateAudioProcessor::setStateInformation (const void* data, int sizeInBy
     if (params.isValid())
         apvts.replaceState (params);
     shapeFromTree (root.getChildWithName ("SHAPE"));
+    pendingModesTree = root.getChildWithName ("MODES").createCopy();
 
     // Rebuild mesh + modes on the message thread.
     triggerAsyncUpdate();
@@ -518,7 +623,13 @@ void FemPlateAudioProcessor::handleAsyncUpdate()
 {
     invalidateShape();
     if (buildMesh())
-        computeModes();
+    {
+        // Prefer the modal cache saved with the state; fall back to a fresh
+        // background computation when it is missing or inconsistent.
+        if (! modesFromTree (pendingModesTree))
+            computeModes();
+    }
+    pendingModesTree = {};
 }
 
 //==============================================================================

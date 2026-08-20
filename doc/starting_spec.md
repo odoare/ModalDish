@@ -29,3 +29,7 @@ In terms of internal design here are the specs:
 - The way the system is simulated can be that from the MechanOdd project in ~/src/MechanOdd, where rectangular plates are simulated, using resonant filter banks. MechanOdd is included in the workspace for reference. Once we have frequencies, normalized damping (or quality factor), and the value of each eigenmode at the hit point, the signal to feed in the filters is fully determined. 
 
 - The plugin interface should follow the new Fx-Mechanics design, with a top bar with tiltle and logo, you can look at the project Mango for instance: ~/src/Mango
+
+Nonlinear extension:
+1. amplitude-driven dynamic tension
+2. Simplified model of energy cascade

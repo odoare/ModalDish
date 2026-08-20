@@ -1,0 +1,865 @@
+% ----------------------------------------------------------------------------
+% FemPlate — technical documentation
+%
+% Build:  pdflatex technical.tex  (twice, for references)
+%
+% (c) 2026 Olivier Doaré — LGPL-3.0-or-later
+% ----------------------------------------------------------------------------
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb,bm}
+\usepackage[margin=2.6cm]{geometry}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\hypersetup{colorlinks=true, linkcolor=blue!50!black, citecolor=blue!50!black,
+            urlcolor=blue!50!black}
+
+\newcommand{\lap}{\Delta}
+\newcommand{\bilap}{\Delta^2}
+\newcommand{\dd}{\mathrm{d}}
+\newcommand{\code}[1]{\texttt{#1}}
+
+\title{FemPlate: finite-element modal synthesis of plates and membranes
+       of arbitrary shape\\[1ex]
+       \large Technical documentation}
+\author{Olivier Doaré\thanks{FX-Mechanics, \url{github.com/odoare}. Model,
+        implementation and documentation developed with Claude (Anthropic).}}
+\date{July 2026 --- FemPlate v0.1}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+FemPlate is an audio plugin that simulates the linear and weakly nonlinear
+vibration of a thin plate (or tensioned membrane) of arbitrary user-drawn
+shape, with mixed boundary conditions. The plate eigenmodes are computed by
+a non-conforming (Morley) finite-element discretisation and a dense subspace
+eigensolver, both implemented in the reusable, JUCE-free library
+\code{FxmeTools/acoustics}. Sound is produced by a bank of resonant
+band-pass filters, one per mode, following the modal-synthesis approach of
+the MechanOdd project. A first-order tension law allows audio-rate retuning
+of the whole bank without re-solving the eigenproblem, and this same
+mechanism supports an efficient approximation of geometric (von
+K\'arm\'an--Berger) nonlinearity: amplitude-dependent pitch glide and a
+cubic inter-mode energy-cascade surrogate, both realtime-safe and
+unconditionally stable. This document details the mathematical model, the
+discretisation, the eigensolution, the audio implementation and the
+nonlinear approximations, with references to the literature.
+\end{abstract}
+
+\tableofcontents
+
+% ============================================================================
+\section{Continuous model}
+\label{sec:model}
+
+\subsection{Scaled Kirchhoff plate with tension}
+
+The transverse deflection $w(\bm{x},t)$ of a thin plate occupying a domain
+$\Omega\subset\mathbb{R}^2$ is modelled by Kirchhoff--Love theory
+\cite{leissa,timoshenko} augmented by a uniform in-plane tension $N$ and two
+damping mechanisms:
+%
+\begin{equation}
+  \rho h\, \ddot w
+  \;+\; c_1 \dot w
+  \;+\; c_2\, \bilap \dot w
+  \;+\; D\, \bilap w
+  \;-\; N\, \lap w
+  \;=\; f(\bm{x},t),
+  \qquad
+  D = \frac{E h^3}{12(1-\nu^2)},
+  \label{eq:physical}
+\end{equation}
+%
+where $\rho h$ is the surface density, $D$ the flexural rigidity, $\nu$ the
+Poisson ratio ($\nu = 0.3$ in FemPlate), $c_1$ a viscous (air/support)
+damping coefficient and $c_2$ a stiffness-proportional (material,
+Kelvin--Voigt-type) damping coefficient. Dividing by $\rho h$ and rescaling
+space and time so that the coefficients of $\ddot w$ and $\bilap w$ are
+unity yields the \emph{scaled} equation actually used throughout the code:
+%
+\begin{equation}
+  \ddot w + c_v\,\dot w + c_m\, \bilap\dot w + \bilap w - T\,\lap w = f ,
+  \label{eq:scaled}
+\end{equation}
+%
+with a single dimensionless \emph{tension-to-flexural-stiffness} parameter
+$T \ge 0$. $T=0$ is a pure plate; $T \to \infty$ approaches the membrane
+limit. Frequencies obtained from \eqref{eq:scaled} are dimensionless; the
+plugin maps the first eigenfrequency onto the user parameter $f_1$ and all
+others follow proportionally (\S\ref{sec:filterbank}), so the absolute
+material constants never need to be specified.
+
+\subsection{Boundary conditions}
+\label{sec:bc}
+
+The boundary $\partial\Omega$ is split by the user into segments, each
+carrying one of four classical conditions:
+%
+\begin{center}
+\begin{tabular}{llll}
+\toprule
+Name & Essential constraints & Natural conditions & DOFs constrained \\
+\midrule
+Free            & ---                          & $M_n=0$, $V_n=0$ & --- \\
+Simple support  & $w=0$                        & $M_n=0$          & vertex $w$ \\
+Clamp           & $w=0$, $\partial_n w=0$      & ---              & vertex $w$, edge $\partial_n w$ \\
+Sliding support & $\partial_n w=0$             & $V_n=0$          & edge $\partial_n w$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+%
+where $M_n$ and $V_n$ are the bending moment and effective (Kirchhoff)
+shear. Only the \emph{essential} conditions are enforced; the natural ones
+are satisfied weakly by the variational formulation \cite{bathe}. The last
+column anticipates \S\ref{sec:morley}: the four conditions map one-to-one
+onto the degrees of freedom of the Morley element, which is the main reason
+this element was chosen.
+
+% ============================================================================
+\section{Finite-element discretisation}
+\label{sec:fem}
+
+\subsection{Mesh generation}
+\label{sec:mesh}
+
+The library meshes an arbitrary closed polygon (the user's outline, sampled
+from a closed Catmull--Rom spline \cite{catmull} for freehand shapes) with a
+target element size $h$:
+%
+\begin{enumerate}
+\item \emph{Boundary resampling.} The outline is walked at arc-length
+  spacing $\approx h$. Vertices where the outline turns by more than
+  $30^\circ$ are detected as corners and kept exactly, so rectangles remain
+  rectangles. Every boundary sample stores its arc-length parameter
+  $t\in[0,1)$, which is later used to attach the per-segment boundary
+  conditions.
+\item \emph{Interior lattice.} A hexagonal lattice of pitch $h$ fills the
+  bounding box; points closer than $0.62\,h$ to the boundary or outside the
+  polygon are discarded. A small deterministic jitter ($\pm 0.06\,h$)
+  breaks the cocircular degeneracies that regular lattices would otherwise
+  present to the triangulator.
+\item \emph{Triangulation.} Bowyer--Watson incremental Delaunay insertion
+  \cite{bowyer,watson}, with a super-triangle and cavity re-triangulation.
+  The implementation is the plain $O(n^2)$ variant, entirely adequate for
+  the $n \lesssim 2000$ points used here.
+\item \emph{Clipping.} Triangles whose centroid falls outside the polygon
+  are removed (this handles non-convex outlines), orientation is normalised
+  to counter-clockwise, and an edge table with adjacency is built. Edges
+  with a single adjacent triangle are boundary edges; they inherit the
+  wrap-aware midpoint of their endpoints' arc parameters.
+\end{enumerate}
+
+\subsection{The Morley element}
+\label{sec:morley}
+
+The biharmonic operator requires $C^1$ continuity for conforming elements,
+which leads to high-order elements (Argyris, Bell) that are expensive and
+delicate. FemPlate instead uses the \emph{Morley triangle}
+\cite{morley}, the simplest non-conforming plate bending element: on each
+triangle the deflection is a full quadratic polynomial (6 coefficients)
+determined by 6 degrees of freedom,
+%
+\begin{itemize}
+\item the deflections $w_i$ at the three vertices,
+\item the normal derivatives $(\partial_n w)_e$ at the three edge
+  midpoints.
+\end{itemize}
+%
+The element is non-conforming ($w$ is discontinuous along edges except at
+vertices), yet it converges for fourth-order problems, and its eigenvalue
+approximations converge at rate $O(h^2)$, \emph{from below}
+\cite{rannacher,babuska-osborn} --- both properties are verified numerically
+in \S\ref{sec:validation}. Crucially for FemPlate, its two DOF families are
+exactly the quantities constrained by the four boundary conditions of
+\S\ref{sec:bc}.
+
+Rather than hard-coding the classical closed-form shape functions, each
+element inverts a $6\times 6$ generalized Vandermonde system: writing the
+local polynomial in centroid-centred monomials
+$p(\bm{x}) = \sum_m c_m\, \mu_m(\bm{x})$,
+$\{\mu_m\} = \{1, X, Y, X^2, XY, Y^2\}$, the matrix
+$C_{im} = \ell_i(\mu_m)$ of the six DOF functionals $\ell_i$ is inverted by
+Gaussian elimination with partial pivoting; column $j$ of $C^{-1}$ holds the
+monomial coefficients of shape function $N_j$. Centroid-centred coordinates
+keep $C$ well-conditioned at the element scale. The mid-edge normal is the
+\emph{global} normal of the edge (stored with $v_0<v_1$, normal to the left
+of $v_0\!\to\!v_1$), so the shared DOF has the same meaning in both adjacent
+elements.
+
+\subsection{Element matrices}
+
+With constant curvatures per element (second derivatives of a quadratic),
+the bending stiffness is exact:
+%
+\begin{equation}
+  K^e_{ij} = A_e\, \bm\kappa_i^{\mathsf T} \mathbf{D}\, \bm\kappa_j,
+  \qquad
+  \bm\kappa_j = \begin{pmatrix} \partial_{xx} N_j \\ \partial_{yy} N_j \\
+                 2\,\partial_{xy} N_j \end{pmatrix},
+  \qquad
+  \mathbf{D} = \begin{pmatrix} 1 & \nu & 0\\ \nu & 1 & 0\\
+               0 & 0 & \tfrac{1-\nu}{2}\end{pmatrix},
+\end{equation}
+%
+($A_e$ = element area; flexural rigidity is 1 after scaling). The tension
+(geometric) matrix and the consistent mass matrix are integrated with
+quadrature rules exact for their integrands:
+%
+\begin{align}
+  G^e_{ij} &= \int_{e} \nabla N_i \cdot \nabla N_j \,\dd A
+  &&\text{3-point midpoint rule (degree 2, exact),}\\
+  M^e_{ij} &= \int_{e} N_i N_j \,\dd A
+  &&\text{6-point degree-4 rule \cite{dunavant} (quartic, exact).}
+\end{align}
+%
+$G$ is the discrete counterpart of $-\lap$ restricted to the plate space and
+doubles as the \emph{geometric stiffness} familiar from buckling analysis
+\cite{bathe}. Global assembly scatters $K^e, G^e, M^e$ into dense symmetric
+matrices over the \emph{free} DOFs only: essential boundary conditions
+(\S\ref{sec:bc}) are applied by elimination, using each boundary vertex's /
+edge's arc parameter to look up its segment's condition. At a junction
+between two segments the vertex takes the strongest condition
+(clamp $>$ simple support $>$ sliding $>$ free).
+
+\subsection{Validation}
+\label{sec:validation}
+
+The console test suite (\code{Tests/FemTests.cpp}) verifies the
+implementation against classical analytical results \cite{leissa}:
+%
+\begin{itemize}
+\item simply supported unit square: $\lambda_{mn} = \pi^4 (m^2+n^2)^2$,
+  with the measured $O(h^2)$ convergence from below (error ratio $3.9$ when
+  $h$ is halved) and the exact tension coefficient
+  $g_{11} = 2\pi^2$ (\S\ref{sec:tension});
+\item clamped circle: frequency ratios $2.081$, $3.414$, $3.893$ and the
+  absolute fundamental $\omega_{01} = (\beta_{01}/R)^2$,
+  $\beta_{01}^2 = 10.2158$ \cite{leissa}, within $2$--$5\%$ at moderate
+  mesh density;
+\item mixed clamped/free boundaries, mode-shape vanishing on the clamped
+  side, and the first-order tension law against an exact re-solve.
+\end{itemize}
+
+% ============================================================================
+\section{The eigenvalue problem}
+\label{sec:eig}
+
+\subsection{Formulation and solver}
+
+Discretisation of \eqref{eq:scaled} (undamped part) yields the symmetric
+generalized eigenproblem
+%
+\begin{equation}
+  \left( K + T_0\, G \right) \bm\varphi_k \;=\; \lambda_k\, M \bm\varphi_k ,
+  \qquad \lambda_k = \omega_k^2,
+  \qquad \bm\varphi_k^{\mathsf T} M \bm\varphi_l = \delta_{kl},
+  \label{eq:gep}
+\end{equation}
+%
+solved at a \emph{reference tension} $T_0$ (the value of the Tension knob
+when the user presses \emph{Compute}). With $n$ free DOFs
+($n \approx$ vertices $+$ edges $\approx 4\times$ vertices, typically
+$300$--$3000$) and only the lowest $m \le 128$ modes wanted (capped at $\sim n/6$ so the top modes stay resolved by the mesh), the solver is
+classical \emph{subspace iteration with Rayleigh--Ritz projection}
+\cite{bathe-wilson,bathe}:
+%
+\begin{enumerate}
+\item Form $A = K + T_0 G$ and the shifted operator $P = A + \sigma M$ with
+  $\sigma = 10^{-5}\,\mathrm{tr}(A)/\mathrm{tr}(M)$. The shift keeps $P$
+  positive definite when free (Neumann-type) boundaries leave rigid-body
+  modes in $A$'s null space. $P$ is Cholesky-factored once ($O(n^3/3)$).
+\item Iterate on a block of $p = m + \max(8, m/2)$ vectors:
+  $Z \leftarrow P^{-1} M X$ (one inverse-power step towards the low
+  spectrum), followed by Rayleigh--Ritz on $\mathrm{span}(Z)$: project
+  $A_p = Z^{\mathsf T} A Z$, $M_p = Z^{\mathsf T} M Z$, solve the $p\times p$
+  generalized problem by Cholesky reduction and cyclic Jacobi
+  \cite{golub}, and take the Ritz vectors as the next block $X$.
+\item Stop when the wanted eigenvalues are stationary: relative $10^{-6}$
+  on the lower half, $10^{-4}$ on the upper half --- the slowest to
+  converge, and the modes whose FEM discretisation error is orders of
+  magnitude larger anyway (both thresholds are far below one cent in
+  frequency); or after 60 iterations.
+\end{enumerate}
+%
+Implementation notes that matter for speed: the iteration block is stored
+\emph{transposed} (every iteration vector contiguous in memory, so all
+$O(n^2 p)$ loops stream cache lines), the independent per-vector solves
+and matrix-vector products are spread over a few worker threads, and the
+Jacobi solver of the projected $p \times p$ problem uses a
+\emph{relative} off-diagonal convergence test (the entries scale with
+$\lambda^2 \sim 10^{12}$; an absolute threshold silently burns the full
+sweep budget on every call). Together these give a $\sim\!4\times$
+speed-up over the straightforward implementation ($23.6\,\mathrm{s}
+\rightarrow 5.6\,\mathrm{s}$ for 128 modes on a 931-DOF mesh).
+
+Finally, the computed modal data (eigenvalues, tension coefficients,
+shapes, statistical tail) is cached inside the plugin state: loading a
+session or preset republishes the model immediately, with no
+recomputation. The mesh is not serialised --- \code{generateMesh} is a
+pure deterministic function of the outline and density, so it is rebuilt
+on load and checked against the stored vertex count.
+%
+Eigenvalues below an absolute threshold ($10^{-4}$; rigid-body and
+near-rigid modes of free plates) are dropped. Eigenvectors are
+mass-normalised, their vertex values are exported for display and for the
+pointwise evaluations $\varphi_k(\bm{x})$ used by the synthesis (linear
+interpolation on the located triangle; the mid-edge DOFs remain internal).
+The whole computation runs on a background thread with progress reporting;
+completed models are published to the audio thread by an atomic pointer
+swap with generation-based reclamation.
+
+\subsection{Audio-rate tension changes without re-solving}
+\label{sec:tension}
+
+The solver additionally returns, for every mode, the \emph{tension
+sensitivity}
+%
+\begin{equation}
+  g_k \;=\; \bm\varphi_k^{\mathsf T} G\, \bm\varphi_k
+  \;\;\left(=\int_\Omega |\nabla \varphi_k|^2 \dd A \right) ,
+\end{equation}
+%
+enabling the first-order frequency law used at audio rate:
+%
+\begin{equation}
+  \boxed{\;\omega_k^2(T) \;=\; \lambda_k + (T - T_0)\, g_k\;}
+  \label{eq:tensionlaw}
+\end{equation}
+%
+This is legitimate because $T$ enters the operator \emph{linearly} and the
+Rayleigh quotient is \emph{stationary} at eigenvectors: perturbing $T$
+changes $\bm\varphi_k$ at first order in $(T-T_0)$, but that eigenvector
+error affects the eigenvalue only at \emph{second} order. Equation
+\eqref{eq:tensionlaw} is the standard eigenvalue derivative
+$\partial\lambda_k/\partial T = \bm\varphi_k^{\mathsf T} G \bm\varphi_k$ of
+structural sensitivity analysis \cite{fox-kapoor}, a special case of
+classical perturbation theory \cite{courant,kato}; here it is exact at
+$T_0$ with $O\!\left((T-T_0)^2\right)$ error. For the simply supported
+square the law is exact for all $T$ (the eigenvectors do not depend on
+$T$); in general, pressing \emph{Compute} re-anchors $T_0$ when the knob
+has travelled far. The validation suite checks \eqref{eq:tensionlaw}
+against an exact re-solve at $T=50$ (error $<1\%$).
+
+Beyond the knob itself, \eqref{eq:tensionlaw} is the enabling mechanism for
+the nonlinear glide of \S\ref{sec:berger}: \emph{dynamic} tension is just a
+fast-moving $T$.
+
+% ============================================================================
+\section{Modal synthesis with resonant filter banks}
+\label{sec:filterbank}
+
+\subsection{Modal decomposition}
+
+Expanding $w(\bm{x},t) = \sum_k q_k(t)\, \varphi_k(\bm{x})$ in
+\eqref{eq:scaled} and using $M$-orthonormality decouples the dynamics into
+damped oscillators
+%
+\begin{equation}
+  \ddot q_k + 2\zeta_k \omega_k\, \dot q_k + \omega_k^2 q_k
+  = \varphi_k(\bm{x}_h)\, F(t),
+  \qquad
+  w(\bm{x}_o, t) = \sum_k \varphi_k(\bm{x}_o)\, q_k(t),
+  \label{eq:modal}
+\end{equation}
+%
+for a point force $F$ at $\bm{x}_h$ and a pickup at $\bm{x}_o$ --- the
+standard modal synthesis framework \cite{adrien,morrison,vandendoel,bilbao}.
+FemPlate realises each oscillator as a second-order IIR resonator, exactly
+as in the MechanOdd modal resonators: one constant-peak-gain band-pass
+biquad per mode (RBJ ``cookbook'' coefficients \cite{rbj}) with
+$Q_k = 1/(2\zeta_k)$, excited by $\varphi_k(\bm{x}_h) F$ and weighted on
+output by $\varphi_k(\bm{x}_o)$. Up to 128 modes are active; the bank is
+allocation-free and retunable on the audio thread.
+
+\subsection{Frequency and damping laws}
+
+The user selects the fundamental in hertz and the bank plays at
+%
+\begin{equation}
+  f_k \;=\; f_1\,
+  \frac{\omega_k(T_{\mathrm{eff}})}{\omega_1(T_{\mathrm{knob}})} ,
+  \qquad T_{\mathrm{eff}} = T_{\mathrm{knob}} + T_{\mathrm{dyn}} ,
+  \label{eq:freqmap}
+\end{equation}
+%
+with all $\omega_k$ given by \eqref{eq:tensionlaw}. The normalisation
+reference matters: it is the fundamental at the \emph{static} knob tension,
+not the instantaneous one. The static Tension knob therefore keeps mode 1
+pinned at $f_1$ and only reshapes the overtone ratios (the timbre morphs
+from plate towards membrane), whereas the \emph{dynamic} tension of
+\S\ref{sec:berger} shifts the whole spectrum, fundamental included --- the
+audible hardening glide. Normalising by the instantaneous fundamental
+instead would cancel the glide of mode 1 and leave only the overtone-ratio
+compression towards the membrane spectrum ($g_k/g_1$ ratios are lower than
+the plate ratios $\sqrt{\lambda_k/\lambda_1}$), which is perceived as a
+\emph{softening} --- the opposite of the physical behaviour. So the timbre
+(inharmonicity pattern) is set by geometry, boundary conditions and
+tension, while $f_1$ transposes it. Modes falling outside
+$[20\,\mathrm{Hz},\ 0.47 f_s]$ are muted.
+
+Projecting the two damping terms of \eqref{eq:scaled} onto mode $k$ gives
+modal damping ratios (using $\bilap \varphi_k \approx \omega_k^2 \varphi_k$
+for the material term)
+%
+\begin{equation}
+  \zeta_k \;=\; \underbrace{\frac{c_v}{2\omega_k}}_{\text{viscous}}
+          \;+\; \underbrace{\frac{c_m\, \omega_k}{2}}_{\text{material}}
+  \;\;=\;\; \frac{\zeta_v}{\nu_k} + \zeta_m\, \nu_k ,
+  \label{eq:damping}
+\end{equation}
+%
+where the knobs $\zeta_v, \zeta_m$ are simply the two contributions to the
+damping ratio \emph{of mode 1}. Viscous damping therefore lets high modes
+ring relatively longer (constant absolute bandwidth), material damping
+kills them faster --- the two classical, perceptually distinct decay
+profiles of struck plates \cite{chaigne,fletcher-rossing}.
+
+\subsection{Excitation, pickup, gain compensation}
+
+A mouse hit at $\bm{x}_h$ launches a half-sine force pulse (a standard
+hammer/impact model \cite{chaigne})
+%
+\begin{equation}
+  F(t) = F_0 \sin\!\left(\pi t/\tau\right), \qquad 0 \le t \le \tau,
+\end{equation}
+%
+with duration $\tau$ (\emph{Hammer} knob, 0.1--50\,ms: short = bright,
+long = mellow, since the pulse spectrum rolls off above $\approx 1/\tau$)
+and amplitude $F_0$ (\emph{Force} knob $\times$ click velocity). Up to 8
+hammers overlap polyphonically, each carrying its own weight vector
+$\varphi_k(\bm{x}_h)$. The external audio input is injected identically at
+the last hit point (\emph{effect mode}), and the output point
+$\bm{x}_o$ is a pair of automatable parameters.
+
+Because a constant-peak band-pass transmits energy proportionally to its
+bandwidth ($\propto \zeta_k$), lightly damped modes would ring much quieter
+than damped ones. Each mode is therefore compensated by
+$\sqrt{\zeta_{\mathrm{ref}}/\zeta_k}$ (clamped to $[0.5, 32]$,
+$\zeta_{\mathrm{ref}}=10^{-2}$), the loudness compensation inherited from
+the MechanOdd modal resonators. Retunes triggered by parameter changes
+rewrite only the biquad coefficients (the states are preserved), which is
+inaudible for the small throttled steps used here.
+
+% ============================================================================
+\section{Nonlinear approximation}
+\label{sec:nonlinear}
+
+Large-amplitude plate vibration is governed by the von K\'arm\'an
+equations \cite{vonkarman,chu-herrmann}: transverse deflection stretches
+the mid-plane, producing an amplitude-dependent membrane stress that (i)
+raises all frequencies (the gong/tom \emph{pitch glide}) and (ii) couples
+the modes, cascading energy towards high frequencies (the cymbal
+\emph{crash}, up to wave turbulence \cite{touze-turbulence}). Exact modal
+von K\'arm\'an synthesis requires the cubic coupling tensors
+$\Gamma_{klmn}$ --- $O(N^3)$--$O(N^4)$ storage and work
+\cite{ducceschi-touze,bilbao-vk} --- which is beyond a realtime budget at
+128 modes. FemPlate implements two lightweight surrogates, one for each
+phenomenon.
+
+\subsection{Dynamic tension: the Berger approximation}
+\label{sec:berger}
+
+Berger \cite{berger} observed that for many plate problems the von
+K\'arm\'an membrane coupling is well approximated by a \emph{spatially
+uniform} tension proportional to the integrated stretching:
+%
+\begin{equation}
+  \ddot w + \bilap w
+  - \Bigl( T_{\mathrm{knob}}
+     + \underbrace{\kappa \int_\Omega |\nabla w|^2 \dd A}_{T_{\mathrm{dyn}}}
+    \Bigr) \lap w = f .
+  \label{eq:berger}
+\end{equation}
+%
+In modal coordinates
+$\int |\nabla w|^2 = \sum_{kl} q_k q_l\, \bm\varphi_k^{\mathsf T} G
+\bm\varphi_l \approx \sum_k g_k q_k^2$: the stretching integral is measured
+by the very same $G$ and $g_k$ of \S\ref{sec:tension}, and the resulting
+uniform $T_{\mathrm{dyn}}$ feeds straight into the retune law
+\eqref{eq:tensionlaw}. The Berger model captures the hardening
+(glide-up-and-relax) behaviour of plates and membranes and is a standard
+efficient approximation in the nonlinear vibration literature
+\cite{berger,nayfeh}; its perceptual signature on percussion is documented
+by Legge \& Fletcher and Rossing \cite{legge-fletcher,fletcher-rossing}.
+
+\paragraph{Amplitude estimation and calibration.}
+The band-pass resonators are output-normalised (constant peak gain), so
+their internal states are \emph{not} calibrated modal displacements: a
+naive $\sum_k g_k \langle y_k^2\rangle$ over filter outputs $y_k$
+underestimates the stretching by orders of magnitude (impulse ring
+amplitudes scale with $\zeta_k$). FemPlate therefore drives the effect from
+the \emph{audible output} and expresses it as a dimensionless
+\emph{relative stiffening of mode 1}:
+%
+\begin{equation}
+  \gamma \;=\; \min\!\bigl(\gamma_{\max},\;
+        \alpha\, \cdot \mathrm{nonlin} \cdot \langle w^2(\bm{x}_o)\rangle \bigr),
+  \qquad
+  T_{\mathrm{dyn}} = \gamma\, \frac{\omega_1^2(T_{\mathrm{knob}})}{g_1},
+  \label{eq:gamma}
+\end{equation}
+%
+with $\alpha = 8$, $\gamma_{\max}=4$, and $\langle\cdot\rangle$ a 20-ms
+one-pole envelope. By construction $\omega_1^2 \mapsto
+\omega_1^2\,(1+\gamma)$ exactly, and every other mode follows its own
+physical sensitivity $g_k$: $\gamma$ is plate-independent ($\gamma = 0.4$
+always means ``mode 1 up $\approx 3$ semitones''), which makes the knob
+calibration robust across geometries. Losing the per-mode weighting is a
+second approximation on top of Berger's; the qualitative behaviour ---
+glide amplitude tracking the ring energy --- is preserved.
+
+\paragraph{Realtime scheduling.}
+$\gamma$ is updated every 32 samples, slewed by a factor $0.2$ per update
+($\approx$ ms-scale smoothing), and the biquads are rewritten only when
+mode 1 would move by more than $\approx 2$ cents
+($|\Delta\gamma| > 0.0024\,(1+\gamma)$, since
+$\Delta\omega/\omega = \tfrac12 \Delta\gamma/(1+\gamma)$). Coefficient
+rewrites preserve filter states; the throttling keeps them free of zipper
+artefacts, following the same strategy as MechanOdd's gate-morphed damping.
+
+\subsection{Mode cascade: a multi-band cubic ladder}
+\label{sec:cascade}
+
+A memoryless cubic of a signal band-limited to $[0, B_\omega]$ produces
+inter-modulation products only up to $3 B_\omega$, concentrated near the
+original band. A single ``distort the low modes, inject into the high
+ones'' pass therefore \emph{cannot} reach the top of the bank: with
+sources below $\sim\!12 f_1$ the products die out by $\sim\!3$\,kHz while
+the bank extends to $9$\,kHz, and all that remains audible of such a
+scheme is the side effect of its overlap floor --- high-frequency damping.
+The physical cascade climbs the spectrum \emph{iteratively}: products
+beget products, stage after stage \cite{touze-turbulence}.
+
+FemPlate reproduces this with a \emph{windowed} band ladder. The active
+modes are split into $N_b = 8$ contiguous index bands
+$\mathcal{B}_0 \ldots \mathcal{B}_7$ (equal index ranges are equal
+frequency ranges, plate modal density being constant); band $b$ is driven
+by the cubic of the $W$ bands directly below it only (default $W = 4$),
+%
+\begin{equation}
+  w^{(b)}(t) = \sum_{c = b-W}^{b-1}\; \sum_{k \in \mathcal{B}_c}
+              \varphi_k(\bm{x}_o)\, c_k\, y_k(t),
+  \qquad
+  F_b(t) \;=\; A\, g_b(t)\, \tanh^3\!\bigl(B\, w^{(b)}(t)\bigr),
+  \label{eq:cascade}
+\end{equation}
+%
+fed to mode $l \in \mathcal{B}_b$ with weight $\varphi_l(\bm{x}_h)/c_l$
+(dividing by the bandwidth compensation $c_l$, which is re-applied on
+output, makes the audible cascade level independent of the damping
+settings). The source \emph{window} matters: summing all lower bands
+would let the loud strike band drive the top bands quasi-directly and the
+whole spectrum lights up within milliseconds; with the window, each stage
+extends the spectral reach by at most a factor 3 and energy genuinely
+climbs rung by rung. The per-band gate $g_b(t) \in [0,1]$ adds
+\emph{transfer inertia}: it follows the source presence through an
+attack/release envelope whose attack time grows with the band's height on
+the ladder ($\tau_b = 30\,\mathrm{ms} \times b$ and a $2\,\mathrm{s}$
+release in the voiced defaults), so the brightening is a progressive glow
+and the pumping tails off smoothly instead of collapsing with the cube of
+the decaying ring. Voicing found a hard-saturating transfer most
+convincing: a large drive ($B = 16$) with a small injection gain
+($A = 1.1$, capped at $1.5$ --- beyond that the level becomes
+unpleasant). A
+cubic is the leading nonlinearity of von K\'arm\'an dynamics
+\cite{ducceschi-touze}; at low amplitude \eqref{eq:cascade} vanishes as
+$w^3$ (the linear model is recovered exactly), and at high amplitude the
+bands brighten in sequence, reproducing the amplitude-gated crash of
+cymbals and gongs \cite{fletcher-rossing}. All cascade internals ($A$,
+$B$, the source window, the gate times and the overlap floor below) are
+exposed as plugin parameters while the effect is being voiced; the values
+quoted here are the defaults. Note also that the material damping law
+$\zeta \propto \nu$ dominates the high-mode decay when hunting long
+shimmer: at $\zeta_m = 10^{-4}$ a mode at $\nu = 80$ decays in
+milliseconds whatever the cascade does.
+
+\paragraph{Modal-overlap floor.}
+The cubic's inter-modulation products are broadband, but at typical plate
+dampings the receiving resonances are needles: bandwidth $2\zeta_l f_l$ of
+a few hertz against a mean mode spacing $\Delta f \approx 0.64 f_1$ (the
+plate Weyl law gives a constant modal density $\dd N/\dd\nu = \pi/2$ for
+the unit square), i.e.\ a modal overlap of order $0.1$. Most of the
+injected energy then falls \emph{between} modes and is rejected --- heard
+as distortion of isolated partials rather than a cascade, whereas the
+crash regime of real cymbals has overlap $\gg 1$ \cite{fletcher-rossing}.
+The target bandwidths are therefore floored, proportionally to the cascade
+control, at an adjustable fraction (\emph{Overlap}, default $0.1$) of the
+\emph{local} mode spacing (measured on the actual $f_k$ array),
+%
+\begin{equation}
+  \zeta_l \;\ge\; \mathrm{cascade} \times \mathrm{Overlap} \times
+      \frac{\tfrac12 (f_{l+1} - f_{l-1})}{2 f_l},
+  \qquad l \notin \mathcal{B}_0,
+\end{equation}
+%
+turning the receiving comb into a quasi-continuum when the cascade is
+engaged (and, physically consistently, shortening the high modes' ring ---
+nonlinear energy spreading is itself a loss channel for individual modes).
+At $\mathrm{cascade}=0$ the linear model is untouched.
+
+\paragraph{Material-damping compensation.}
+The audible strength of the cascade depends steeply on the material
+damping: large $\zeta_m$ widens the target resonances (overlap floor) and
+raises their bandwidth compensation, so a knob value that is mild at
+feather damping saturates the output when hit and pickup are close.
+Listening tests produced qualitative ``maximum usable cascade'' limits
+%
+\begin{center}
+\begin{tabular}{cccccc}
+\toprule
+$\zeta_m$ & $2.4\cdot10^{-3}$ & $10^{-3}$ & $10^{-4}$ & $10^{-5}$ & $7\cdot10^{-6}$\\
+max cascade & 0.05 & 0.1 & 0.4 & 0.9 & 1\\
+\bottomrule
+\end{tabular}
+\end{center}
+%
+which are nearly linear in log-log; the fitted power law
+%
+\begin{equation}
+  s(\zeta_m) \;=\; \min\!\left(1,\;
+     \bigl(2.3\cdot10^{-5}/\zeta_m\bigr)^{0.64}\right)
+\end{equation}
+%
+reproduces the table within $\sim$10\%. The effective cascade amount is
+$\mathrm{cascade} \times s(\zeta_m)$ (applied to the injection, the
+overlap floor and the depletion alike), so the knob keeps its full travel
+and its maximum tracks the acceptability limit at every damping setting.
+
+\paragraph{Depletion (low-frequency loss).}
+The transfer \eqref{eq:cascade} is additive: it copies energy upward but
+takes none from the sources, so the struck low modes ring on untouched
+under the shimmer --- audibly two disconnected layers. In the real
+cascade the low modes \emph{lose} the energy they hand upward. FemPlate
+models this as an extra dissipation on the source bands: each sample, the
+filter states of the modes in band $b$ are scaled by
+%
+\begin{equation}
+  d_b \;=\; 1 - \mathrm{Deplete} \times \mathrm{cascade} \times
+            \varepsilon_0\, \bar g_{b}^{\,\uparrow},
+  \qquad \varepsilon_0 = 3\cdot 10^{-4}
+  \quad (\mathrm{Deplete} = 0.07 \text{ by default}),
+\end{equation}
+%
+where $\bar g_b^{\,\uparrow}$ is the mean gate level of the bands fed by
+band $b$: the lows decay exactly when, and as strongly as, they are
+pumping the highs, gluing the two ends of the spectrum. The mechanism is
+purely dissipative (it only removes energy), so it cannot affect
+stability.
+
+\paragraph{Stability by structure.}
+Two earlier designs closed a feedback loop through the full output. Around
+mode $k$'s resonance such a loop transmits with gain
+$|\varphi_k(\bm{x}_h)|\cdot|\varphi_k(\bm{x}_o)|\cdot c_k$ --- and the
+compensation $c_k \le 32$ must not be forgotten: an unnormalised loop is
+super-critical and latches into a full-scale limit cycle the moment the
+cubic's slope wakes up. Bounding the loop slope by the small-gain theorem
+\cite{zames,khalil} restores stability but is so conservative (the bound
+assumes worst-case coherent feedback at the single worst mode) that the
+effect becomes inaudible. The ladder \eqref{eq:cascade} dissolves the
+dilemma structurally: band $b$ receives only from bands $c<b$ and
+contributes only to bands $c>b$, so the transfer graph over bands is a
+strict DAG --- no loop exists at any stage, stability is unconditional,
+and the injection gain $A$ is free to be set for audibility
+($A = \mathrm{Amp} \times \mathrm{cascade}$, the $\tanh^3$ keeping every
+stage bounded).
+
+\subsection{The statistical mode tail}
+\label{sec:tail}
+
+Even a 128-mode FEM bank remains a sparse comb at the top of the
+spectrum, and solving for many hundreds of accurate FEM modes is
+prohibitive (\S\ref{sec:eig}) --- while a convincing crash needs a dense
+receiving continuum up to Nyquist. FemPlate therefore fills the bank
+(to 256 modes in all) with \emph{synthetic} modes above the FEM set,
+built from asymptotics instead of the discrete operator:
+%
+\begin{itemize}
+\item \emph{Frequencies}: the plate Weyl law gives a constant modal
+  density in $\omega$; the tail continues at the spacing
+  $\Delta\omega$ measured on the top half of the FEM spectrum, with
+  gaps jittered by $\pm 40\%$ (deterministically seeded) to avoid
+  periodicity artefacts.
+\item \emph{Tension sensitivities}: for an asymptotic mode of wavenumber
+  $\kappa$, $\lambda = \kappa^4$ and $g = \kappa^2$, hence
+  $g = \sqrt{\lambda}$ exactly (verified by the simply supported square,
+  where $g_{mn} = \pi^2(m^2{+}n^2) = \sqrt{\lambda_{mn}}$) --- so the
+  tail obeys the tension law \eqref{eq:tensionlaw} and the Berger glide
+  like any FEM mode.
+\item \emph{Shapes}: high-frequency eigenfunctions of irregular domains
+  behave like superpositions of random plane waves (Berry's random-wave
+  model \cite{berry}); each tail mode carries one,
+  $\varphi(\bm{x}) = \sqrt{2/A}\, \cos(\bm{\kappa}\cdot\bm{x} + \psi)$
+  with $|\bm{\kappa}| = \lambda^{1/4}$, random direction and phase, and
+  the $\sqrt{2/A}$ prefactor reproducing the mass normalisation
+  ($\overline{\varphi^2} = 1/A$). Hit and pickup positions therefore
+  still modulate the tail response.
+\end{itemize}
+%
+The tail modes enter the synthesis exactly like FEM modes (hammer
+excitation, damping law, cascade bands, dynamic tension); only the
+contour display is FEM-only, since tail modes have no mesh shape. The
+identity-defining low modes stay exact, and the top of the bank becomes
+the quasi-continuum the cascade ladder needs --- the reasoning is that of
+statistical energy analysis \cite{lyon}: above a few dozen mode indices,
+individual eigenfrequencies are perceptually interchangeable and only
+their density and statistics matter.
+
+% ============================================================================
+\section{Implementation summary}
+
+\begin{center}
+\begin{tabular}{llp{7.2cm}}
+\toprule
+Stage & Thread & Notes \\
+\midrule
+Shape / boundary editing & message & \code{ShapeCanvas}; outline + arc-parameterised segments \\
+Mesh generation & message & milliseconds; preview in \code{FemViewComponent} \\
+Eigensolution \eqref{eq:gep} & background & \code{BackgroundTaskRunner}; progress; seconds \\
+Model publication & message $\to$ audio & atomic pointer, generation-acknowledged reclamation \\
+Filter bank \eqref{eq:modal} & audio & allocation-free; retunes throttled \\
+Nonlinearities \eqref{eq:gamma}, \eqref{eq:cascade} & audio & decimated $\gamma$ update; bounded feedback \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The numerical core (\code{FemMesh}, \code{PlateModes}) is pure C++17 with
+no JUCE dependency and is validated by a console test suite; it lives in
+the \code{FxmeTools} submodule (\code{FxmeTools/acoustics}) for reuse in
+other projects.
+
+% ============================================================================
+\begin{thebibliography}{99}
+
+\bibitem{leissa} A.~W. Leissa, \emph{Vibration of Plates}, NASA SP-160,
+  Washington DC, 1969.
+
+\bibitem{timoshenko} S.~Timoshenko, S.~Woinowsky-Krieger, \emph{Theory of
+  Plates and Shells}, 2nd ed., McGraw-Hill, 1959.
+
+\bibitem{bathe} K.-J. Bathe, \emph{Finite Element Procedures}, 2nd ed.,
+  Prentice Hall / K.-J. Bathe, 2014.
+
+\bibitem{catmull} E.~Catmull, R.~Rom, ``A class of local interpolating
+  splines'', in \emph{Computer Aided Geometric Design}, Academic Press,
+  1974, pp.~317--326.
+
+\bibitem{bowyer} A.~Bowyer, ``Computing Dirichlet tessellations'',
+  \emph{The Computer Journal} 24(2), 1981, 162--166.
+
+\bibitem{watson} D.~F. Watson, ``Computing the $n$-dimensional Delaunay
+  tessellation with application to Vorono\"i polytopes'', \emph{The
+  Computer Journal} 24(2), 1981, 167--172.
+
+\bibitem{morley} L.~S.~D. Morley, ``The triangular equilibrium element in
+  the solution of plate bending problems'', \emph{Aeronautical Quarterly}
+  19, 1968, 149--169.
+
+\bibitem{rannacher} R.~Rannacher, ``Nonconforming finite element methods
+  for eigenvalue problems in linear plate theory'', \emph{Numerische
+  Mathematik} 33, 1979, 23--42.
+
+\bibitem{babuska-osborn} I.~Babu\v{s}ka, J.~Osborn, ``Eigenvalue
+  problems'', in \emph{Handbook of Numerical Analysis}, Vol.~II,
+  North-Holland, 1991, 641--787.
+
+\bibitem{dunavant} D.~A. Dunavant, ``High degree efficient symmetrical
+  Gaussian quadrature rules for the triangle'', \emph{International
+  Journal for Numerical Methods in Engineering} 21, 1985, 1129--1148.
+
+\bibitem{bathe-wilson} K.-J. Bathe, E.~L. Wilson, ``Solution methods for
+  eigenvalue problems in structural mechanics'', \emph{International
+  Journal for Numerical Methods in Engineering} 6, 1973, 213--226.
+
+\bibitem{golub} G.~H. Golub, C.~F. Van Loan, \emph{Matrix Computations},
+  4th ed., Johns Hopkins University Press, 2013.
+
+\bibitem{courant} R.~Courant, D.~Hilbert, \emph{Methods of Mathematical
+  Physics}, Vol.~I, Interscience, 1953.
+
+\bibitem{kato} T.~Kato, \emph{Perturbation Theory for Linear Operators},
+  2nd ed., Springer, 1976.
+
+\bibitem{fox-kapoor} R.~L. Fox, M.~P. Kapoor, ``Rates of change of
+  eigenvalues and eigenvectors'', \emph{AIAA Journal} 6(12), 1968,
+  2426--2429.
+
+\bibitem{adrien} J.-M. Adrien, ``The missing link: modal synthesis'', in
+  G.~De Poli, A.~Piccialli, C.~Roads (eds.), \emph{Representations of
+  Musical Signals}, MIT Press, 1991, 269--298.
+
+\bibitem{morrison} J.~D. Morrison, J.-M. Adrien, ``MOSAIC: a framework for
+  modal synthesis'', \emph{Computer Music Journal} 17(1), 1993, 45--56.
+
+\bibitem{vandendoel} K.~van den Doel, D.~K. Pai, ``Modal synthesis for
+  vibrating objects'', in K.~Greenebaum (ed.), \emph{Audio Anecdotes III},
+  A.~K. Peters, 2003.
+
+\bibitem{bilbao} S.~Bilbao, \emph{Numerical Sound Synthesis: Finite
+  Difference Schemes and Simulation in Musical Acoustics}, Wiley, 2009.
+
+\bibitem{rbj} R.~Bristow-Johnson, ``Cookbook formulae for audio EQ biquad
+  filter coefficients'' (the ``Audio EQ Cookbook''),
+  \url{https://www.w3.org/TR/audio-eq-cookbook/}.
+
+\bibitem{chaigne} A.~Chaigne, C.~Lambourg, ``Time-domain simulation of
+  damped impacted plates. I. Theory and experiments'', \emph{Journal of
+  the Acoustical Society of America} 109(4), 2001, 1422--1432.
+
+\bibitem{fletcher-rossing} N.~H. Fletcher, T.~D. Rossing, \emph{The
+  Physics of Musical Instruments}, 2nd ed., Springer, 1998.
+
+\bibitem{vonkarman} T.~von K\'arm\'an, ``Festigkeitsprobleme im
+  Maschinenbau'', \emph{Encyklop\"adie der mathematischen Wissenschaften}
+  IV/4, 1910, 311--385.
+
+\bibitem{chu-herrmann} H.-N. Chu, G.~Herrmann, ``Influence of large
+  amplitudes on free flexural vibrations of rectangular elastic plates'',
+  \emph{Journal of Applied Mechanics} 23, 1956, 532--540.
+
+\bibitem{berger} H.~M. Berger, ``A new approach to the analysis of large
+  deflections of plates'', \emph{Journal of Applied Mechanics} 22, 1955,
+  465--472.
+
+\bibitem{nayfeh} A.~H. Nayfeh, D.~T. Mook, \emph{Nonlinear Oscillations},
+  Wiley, 1979.
+
+\bibitem{legge-fletcher} K.~A. Legge, N.~H. Fletcher, ``Nonlinearity,
+  chaos, and the sound of shallow gongs'', \emph{Journal of the Acoustical
+  Society of America} 86(6), 1989, 2439--2443.
+
+\bibitem{ducceschi-touze} M.~Ducceschi, C.~Touz\'e, ``Modal approach for
+  nonlinear vibrations of damped impacted plates: application to sound
+  synthesis of gongs and cymbals'', \emph{Journal of Sound and Vibration}
+  344, 2015, 313--331.
+
+\bibitem{bilbao-vk} S.~Bilbao, ``A family of conservative finite
+  difference schemes for the dynamical von K\'arm\'an plate equations'',
+  \emph{Numerical Methods for Partial Differential Equations} 24(1),
+  2008, 193--216.
+
+\bibitem{touze-turbulence} C.~Touz\'e, S.~Bilbao, O.~Cadot, ``Transition
+  scenario to turbulence in thin vibrating plates'', \emph{Journal of
+  Sound and Vibration} 331(2), 2012, 412--433.
+
+\bibitem{berry} M.~V. Berry, ``Regular and irregular semiclassical
+  wavefunctions'', \emph{Journal of Physics A: Mathematical and General}
+  10(12), 1977, 2083--2091.
+
+\bibitem{lyon} R.~H. Lyon, R.~G. DeJong, \emph{Theory and Application of
+  Statistical Energy Analysis}, 2nd ed., Butterworth-Heinemann, 1995.
+
+\bibitem{zames} G.~Zames, ``On the input-output stability of time-varying
+  nonlinear feedback systems --- Part I'', \emph{IEEE Transactions on
+  Automatic Control} 11(2), 1966, 228--238.
+
+\bibitem{khalil} H.~K. Khalil, \emph{Nonlinear Systems}, 3rd ed.,
+  Prentice Hall, 2002.
+
+\end{thebibliography}
+
+\end{document}

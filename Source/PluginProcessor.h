@@ -113,6 +113,8 @@ private:
     void reclaimModels (bool audioStopped);
     juce::ValueTree shapeToTree() const;
     void shapeFromTree (const juce::ValueTree& tree);
+    juce::ValueTree modesToTree() const;             // serialise currentModel
+    bool modesFromTree (const juce::ValueTree&);     // rebuild + publish model
     static ShapeData makeDefaultShape();
 
     // --- message-thread state -----------------------------------------------
@@ -125,6 +127,7 @@ private:
     fxme::BackgroundTaskRunner runner { 1 };
     std::atomic<float> computeProgress { -1.0f };
     std::unique_ptr<fem::ModalModel> pendingModel;   // written by the job, read in onFinished
+    juce::ValueTree pendingModesTree;                // modal cache from setStateInformation
 
     // --- audio-thread bridge --------------------------------------------------
     std::atomic<const fem::ModalModel*> publishedModel { nullptr };

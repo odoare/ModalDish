@@ -65,6 +65,13 @@
       comb to catch the broadband products, low enough that the pumped
       modes keep a natural ring once the pumping stops.
 
+      The effective cascade amount is the knob value scaled by a
+      material-damping compensation, min(1, (2.3e-5 / zetaM)^0.64) — a
+      power law fitted on listening limits: with heavy structural damping
+      the widened, gain-compensated target continuum saturates at knob
+      values that are mild at feather damping (see cascadeDampingScale in
+      the .cpp). The knob keeps full 0..1 travel at any damping.
+
       Depletion ("Deplete" parameter): the transfer is otherwise purely
       additive, so the low modes would ring on untouched while the shimmer
       floats on top — an audible disconnect. While band b's gates draw
@@ -199,6 +206,7 @@ private:
     double appliedGamma = 0.0;           // value the bank is currently tuned at
     int nlCountdown = nlUpdatePeriod;
     int cascadeSplit = 0;                // first mode of band 1 (targets start here)
+    float cascEff = 0.0f;                // cascade knob x material-damping scale
     int bandStart[numCascadeBands + 1] {};        // mode-index range of each band
     float cascadeW[fem::maxModes] {};    // injection weights (bands >= 1 only)
     float prevBandOut[numCascadeBands] {};        // per-band output, last sample

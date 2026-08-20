@@ -46,15 +46,46 @@ Two efficient, audio-thread-only approximations of the von Kármán plate
 nonlinearity (both 0 = exactly the linear model):
 
 * **Nonlinear** — Berger dynamic tension: deflection stretches the
-  mid-plane, modelled as a uniform tension `T_dyn ∝ Σₖ gₖ⟨qₖ²⟩` estimated
-  from per-mode energy followers and fed into the *same* first-order
-  tension law used by the Tension knob (throttled/slewed retunes, ≥ ~2
-  cents per coefficient rewrite). Hard hits glide the whole spectrum up
-  and relax as the plate rings out — the gong / tom pitch bend.
-* **Cascade** — inter-mode energy transfer surrogate: a tanh-bounded cubic
-  of the output is re-injected at the last hit point like the external
-  input. Loud hits generate intermodulation that excites high modes
-  (cymbal-like crash brightness) and vanishes at low amplitude.
+  mid-plane, modelled as a uniform amplitude-dependent tension. It is
+  parameterised as a *relative* stiffening of mode 1,
+  `γ = 8·nonlin·⟨out²⟩` (so the knob is calibrated in audible glide,
+  independently of the plate), fed into the *same* first-order tension
+  law used by the Tension knob (slewed, retuning only above ~2 cents,
+  capped at γ = 4). The whole spectrum — fundamental included — glides
+  up by `√(1+γ)` on a hard hit and relaxes as the plate rings out: the
+  hardening gong / tom pitch bend. (The static Tension knob, by
+  contrast, keeps mode 1 pinned at f1 and reshapes the ratios only.)
+* **Cascade** — inter-mode energy transfer as a windowed 8-band ladder
+  with transfer inertia: each band is pumped by a tanh-bounded cubic of
+  the bands directly below it (Window, default 4), injected at the last
+  hit point through a per-band attack/release gate whose attack grows
+  with the band's height. Loud hits brighten the spectrum progressively
+  and the pumping tails off smoothly; at low amplitude the effect
+  vanishes as w³. The band graph is a strict DAG — no feedback loop — so
+  the scheme is unconditionally stable with no gain restriction.
+  **Deplete** adds the matching low-frequency loss: while a band pumps
+  the ones above it, its own filter states receive an extra dissipation
+  proportional to the transfer activity, so the lows audibly hand their
+  energy to the shimmer instead of ringing on beneath it. All cascade
+  internals live in the CASCADE panel, revealed by the **Advanced**
+  button in the top bar (the window widens). The effective cascade
+  amount is automatically rescaled by a material-damping compensation,
+  `min(1, (2.3·10⁻⁵/ζₘ)^0.64)` — a power law fitted on listening
+  limits — so the knob's maximum stays just below the saturation point
+  at any damping. The voiced defaults are
+  Amp 1.1 (capped 1.5 — louder gets unpleasant), Drive 16, Window 4,
+  Attack 30 ms/band, Release 2 s, Overlap 0.1, Deplete 0.07, with
+  Viscous ≈ 10⁻⁴ and Material ≈ 7·10⁻⁶ (Material's ζ ∝ ν law otherwise
+  kills the top octave in milliseconds).
+* **Statistical mode tail** — above the FEM-computed modes (≤ 128) the
+  bank is filled to 256 with synthetic modes: Weyl-law spacing with
+  jittered gaps, tension sensitivity g = √λ (the exact high-frequency
+  asymptote), and Berry random-plane-wave shapes `√(2/A)·cos(κ·x+ψ)`
+  with κ = λ^¼ — so hit position still matters and the tail obeys the
+  tension/damping/cascade laws like any FEM mode. This gives the cascade
+  a dense receiving continuum up to Nyquist without solving for hundreds
+  of FEM modes; raise the **Modes** knob past the FEM count to engage
+  it (the status line marks tail modes when displayed).
 
 ## GUI workflow
 

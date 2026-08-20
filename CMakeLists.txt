@@ -17,8 +17,19 @@ endif()
 # JUCE is expected as a sibling of this repo; FxmeTools lives in-tree as a git
 # submodule under lib/ (registered directly: FemPlate does not need the WDL
 # sources, so fxmetools_attach is not used).
+#
+# FxmeTools is split in two, and the FEM code FemPlate is built on — FemMesh and
+# PlateModes — is entirely in the JUCE-free half under lib/FxmeTools/core. That
+# directory is a second include root for the same <FxmeTools/...> spelling, so
+# no include changes, but the target has to be added or nothing resolves.
 add_subdirectory(../JUCE JUCE)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/lib/FxmeTools/core FxmeCore)
 juce_add_module(${CMAKE_CURRENT_SOURCE_DIR}/lib/FxmeTools/FxmeTools)
+
+# The module's own sources include core headers, and juce_add_module creates an
+# INTERFACE target whose sources compile into the consumer, so core travels
+# with it.
+target_link_libraries(FxmeTools INTERFACE FxmeCore)
 
 juce_add_plugin(FemPlate
     COMPANY_NAME                "FX-Mechanics"
@@ -82,6 +93,7 @@ target_compile_definitions(FemPlate
 target_link_libraries(FemPlate
     PRIVATE
         FxmeTools
+        FxmeCore
         juce::juce_audio_basics
         juce::juce_audio_devices
         juce::juce_audio_formats
@@ -107,11 +119,15 @@ target_link_libraries(FemPlate
 option(FEMPLATE_BUILD_TESTS "Build FemPlate unit tests" OFF)
 if(FEMPLATE_BUILD_TESTS)
     enable_testing()
-    add_executable(FemTests
-        Tests/FemTests.cpp
-        lib/FxmeTools/FxmeTools/acoustics/FemMesh.cpp
-        lib/FxmeTools/FxmeTools/acoustics/PlateModes.cpp)
-    target_include_directories(FemTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/lib/FxmeTools)
+    # FemMesh.cpp and PlateModes.cpp used to be listed here by path. They now
+    # live in core and FxmeCore compiles them, so this links that instead of
+    # naming the files — which also means the list cannot go stale again the
+    # next time something moves. FemCore carries its own include root, and this
+    # target needs no other: FemTests.cpp includes only core headers, so it now
+    # touches the JUCE module not at all, which is what "JUCE-free FEM core"
+    # above always meant.
+    add_executable(FemTests Tests/FemTests.cpp)
+    target_link_libraries(FemTests PRIVATE FxmeCore)
     target_compile_features(FemTests PRIVATE cxx_std_17)
     add_test(NAME FemTests COMMAND FemTests)
 endif()

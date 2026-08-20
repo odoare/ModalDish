@@ -56,6 +56,23 @@ namespace
     // audibly damp the high end, low values keep the pumped modes ringing
     // naturally after the pumping stops.
     //
+    // Material-damping compensation of the cascade amount. With large
+    // structural damping the overlap floor and gain compensation make the
+    // pumped continuum extremely dense and loud (saturating shimmer when
+    // hit and pickup are close); with feather damping the same knob value
+    // is mild. Fitted on qualitatively estimated "maximum usable cascade"
+    // listening limits (material damping -> cascade):
+    //     2.4e-3 -> 0.05, 1e-3 -> 0.1, 1e-4 -> 0.4, 1e-5 -> 0.9, 7e-6 -> 1
+    // which is close to a straight line in log-log: a power law
+    //     scale = min(1, (2.3e-5 / zetaM)^0.64)
+    // reproduces the table within ~10%. The effective cascade amount is
+    // cascade * scale, so the knob keeps full travel at any damping.
+    float cascadeDampingScale (float zetaM) noexcept
+    {
+        const float z = juce::jmax (zetaM, 1.0e-7f);
+        return juce::jmin (1.0f, std::pow (2.3e-5f / z, 0.64f));
+    }
+
     // Depletion couples the two ends of the ladder: a source band's filter
     // states decay by an extra factor (1 - deplete * cascade * depleteRate
     // * activity) per sample, activity being the mean gate level of the
@@ -134,6 +151,7 @@ void PlateSynth::update (const ModalModel* newModel, const Params& params)
         || ! juce::approximatelyEqual (params.cascReleaseMs, current.cascReleaseMs);
 
     current = params;
+    cascEff = current.cascade * cascadeDampingScale (current.matDamp);
     if (envChanged)
         updateCascadeEnvelopes();
     if (dirty || tuningChanged)
@@ -220,15 +238,16 @@ void PlateSynth::retuneBank()
                                           + (double) current.matDamp * nu[k]));
 
         // Cascade targets: floor the bandwidth (2 zeta f) at cascOverlap
-        // times the local mode spacing, scaled by the cascade knob, so the
-        // receiving comb overlaps into a quasi-continuum when driven.
-        if (k >= cascadeSplit && current.cascade > 0.0f)
+        // times the local mode spacing, scaled by the damping-compensated
+        // cascade amount, so the receiving comb overlaps into a
+        // quasi-continuum when driven.
+        if (k >= cascadeSplit && cascEff > 0.0f)
         {
             const double spAbove = k + 1 < activeModes ? freq[k + 1] - freq[k]
                                  : k > 0               ? freq[k] - freq[k - 1] : 0.0;
             const double spBelow = k > 0 ? freq[k] - freq[k - 1] : spAbove;
             const double spacing = juce::jmax (0.0, 0.5 * (spAbove + spBelow));
-            const double zetaFloor = (double) current.cascade
+            const double zetaFloor = (double) cascEff
                                      * (double) current.cascOverlap
                                      * spacing / (2.0 * freq[k]);
             zeta = juce::jmax (zeta, (float) juce::jlimit (0.0, 0.5, zetaFloor));
@@ -333,7 +352,7 @@ float PlateSynth::processSample (float input) noexcept
     // attack/release gate. Band 0 receives nothing.
     float cascadeFb[numCascadeBands];
     cascadeFb[0] = 0.0f;
-    if (current.cascade > 0.0f)
+    if (cascEff > 0.0f)
     {
         const int window = juce::jlimit (1, numCascadeBands, current.cascWindow);
         for (int b = 1; b < numCascadeBands; ++b)
@@ -350,7 +369,7 @@ float PlateSynth::processSample (float input) noexcept
             gateEnv[b] += (target > gateEnv[b] ? attackCoef[b] : releaseCoef)
                           * (target - gateEnv[b]);
 
-            cascadeFb[b] = current.cascade * current.cascAmp * gateEnv[b] * carrier;
+            cascadeFb[b] = cascEff * current.cascAmp * gateEnv[b] * carrier;
         }
     }
     else
@@ -385,7 +404,7 @@ float PlateSynth::processSample (float input) noexcept
     float bandDecay[numCascadeBands];
     for (int b = 0; b < numCascadeBands; ++b)
         bandDecay[b] = 1.0f;
-    if (current.cascade > 0.0f && current.cascDeplete > 0.0f)
+    if (cascEff > 0.0f && current.cascDeplete > 0.0f)
     {
         const int window = juce::jlimit (1, numCascadeBands, current.cascWindow);
         for (int b = 0; b < numCascadeBands; ++b)
@@ -398,7 +417,7 @@ float PlateSynth::processSample (float input) noexcept
                 ++n;
             }
             if (n > 0)
-                bandDecay[b] = 1.0f - current.cascDeplete * current.cascade
+                bandDecay[b] = 1.0f - current.cascDeplete * cascEff
                                       * depleteRate * (act / (float) n);
         }
     }
