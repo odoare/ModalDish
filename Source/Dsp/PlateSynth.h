@@ -30,17 +30,45 @@
     --------------------------------------------------------
     * Dynamic tension ("nonlin" knob). Berger's approximation replaces the
       von Karman membrane coupling by a spatially uniform tension that grows
-      with the vibration amplitude, parameterised as a *relative* stiffening
-      gamma of mode 1:
+      with the *global* stretching of the plate, parameterised as a
+      *relative* stiffening gamma of mode 1:
 
           T_dyn = gamma * omega_1^2(T_knob) / g_1 ,
-          gamma = nlGain * nonlin * <out^2>
+          gamma = nlGain * nonlin * < int |grad w|^2 dA >
 
       so mode 1 glides up by sqrt(1 + gamma) on a hard hit and relaxes as
       the ring decays (hardening), and every other mode follows its own
       tension sensitivity g_k. gamma is dimensionless and plate-independent.
       T_dyn drives the ordinary first-order retune law at a decimated rate,
       slewed and throttled (only rewrite coefficients above ~2 cents).
+
+      The stretching integral needs no field reconstruction: the modes are
+      mass-orthonormal, so it collapses onto the modal coordinates,
+
+          int |grad w|^2 dA = sum_kl q_k q_l phi_k^T G phi_l ~ sum_k g_k q_k^2
+
+      (the cross terms oscillate at omega_k +- omega_l and average out in
+      the envelope) — one multiply-add per mode and per sample. What the
+      band-pass bank holds is not q_k though: a 0 dB-peak band-pass fed the
+      true modal force is exactly y_k = 2 zeta_k omega_k qdot_k, i.e. a
+      *velocity*, normalised. Hence q_k = y_k / (2 zeta_k omega_k^2) and
+
+          nlWeight_k = (g_k / g_1) (zetaRef / zeta_k)^2 / nu_k^4 ,
+          driver     = < sum_k nlWeight_k y_k^2 >
+
+      with the leftover constant folded into nlGain. The missing
+      1/(4 zeta^2 omega^4) is what made a naive sum of the filter outputs
+      underestimate the stretching by orders of magnitude. Driving the
+      effect from this quantity rather than from the amplitude at the
+      output point makes the glide independent of where the pickup sits
+      (on a node it used to vanish, and moving the pickup moved the
+      pitch), removes the purely cosmetic bandwidth compensation from the
+      physics, and weights the modes as the stretching really does
+      (contributions scale as 1/nu_k, so the lows dominate and the cascade
+      shimmer no longer drags the glide up). Peak gamma is also damping-
+      independent by construction: after an impulse y_k ~ 2 zeta_k omega_k,
+      so zeta_k cancels in nlWeight_k y_k^2 and only the *decay* of the
+      glide follows the damping knobs.
 
     * Mode cascade ("cascade" knob): a windowed multi-band ladder with
       transfer inertia. The bank is split into numCascadeBands frequency
@@ -193,6 +221,7 @@ private:
     float outAmp[fem::maxModes] {};      // phi_k(out) * bandwidth compensation
     float inWeights[fem::maxModes] {};   // phi_k(last hit) for the external input
     float compensation[fem::maxModes] {};// bandwidth gain compensation per mode
+    float nlWeight[fem::maxModes] {};    // g_k q_k^2 per unit y_k^2 (Berger driver)
     float lastHitX = 0.5f, lastHitY = 0.5f;
     Hammer hammers[maxStrikes];
     int nextHammer = 0;
@@ -200,8 +229,8 @@ private:
     // Nonlinear state (Berger dynamic tension + windowed cubic cascade).
     static constexpr int nlUpdatePeriod = 32;   // samples between gamma steps
     static constexpr int numCascadeBands = 8;
-    float envCoef = 0.001f;              // output-energy follower coefficient
-    float envOut = 0.0f;                 // smoothed out^2
+    float envCoef = 0.001f;              // stretching follower coefficient
+    float envStretch = 0.0f;             // smoothed sum_k nlWeight_k y_k^2
     double gamma = 0.0;                  // slewed relative stiffening of mode 1
     double appliedGamma = 0.0;           // value the bank is currently tuned at
     int nlCountdown = nlUpdatePeriod;

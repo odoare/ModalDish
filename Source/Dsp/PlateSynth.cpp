@@ -20,22 +20,37 @@ namespace
     // than wide ones. Scale each mode by sqrt(zetaRef / zeta) to keep the
     // perceived level roughly constant across the damping range (the
     // MechanOdd modal-resonator compensation).
+    constexpr float zetaRef = 0.01f;
+
     float gainCompensation (float zeta) noexcept
     {
-        constexpr float zetaRef = 0.01f;
         const float g = std::sqrt (zetaRef / juce::jmax (zeta, 1.0e-7f));
         return juce::jlimit (0.5f, 32.0f, g);
     }
 
-    // Hammer forces are impulsive and benefit from a little headroom; this
-    // keeps a velocity-1, force-1 hit around unity peak output.
+    // Hammer forces are impulsive and benefit from a little headroom. Note
+    // that a velocity-1, force-1 hit peaks well below unity (~0.012 on the
+    // default plate): a short pulse only deposits a little energy in each
+    // narrow resonance, and the Out Gain stage downstream makes up for it.
     constexpr float hammerGain = 0.4f;
 
-    // Berger calibration, in audible terms: gamma = nlGain * nonlin * <out^2>.
-    // A hit ringing around out ~ 0.5 with nonlin = 1 gives gamma ~ 2 (mode 1
-    // up ~9 semitones, relaxing as the ring decays). gammaCap bounds the
-    // total glide whatever the level.
-    constexpr double nlGain = 8.0;
+    // Berger calibration: gamma = nlGain * nonlin * <sum_k nlWeight_k y_k^2>,
+    // the (scaled) stretching integral int |grad w|^2 dA reconstructed from
+    // the modal coordinates — see the header. Measured on the default plate
+    // (elliptic, simply supported, grid 16, f1 = 110), the driver peaks at
+    // 2.9e-4 for a velocity-1 hit at Force 1 and grows as force^2, so with
+    // nlGain = 500 and nonlin = 1:
+    //     Force 1 -> gamma 0.15 (~1.2 semitones), Force 4 -> 2.3,
+    //     Force >~5 -> the gammaCap; in effect mode, a unity-peak input
+    //     sits around gamma 2.
+    // The driver is damping-independent by construction (within 12% over
+    // zetaV, zetaM in [1e-5, 1e-3]), so this calibration holds across the
+    // damping range — the former <out^2> driver varied by a factor 100 over
+    // the same span, and by 1300 between the struck and the effect path.
+    // (nlGain = 0.68 would reproduce the old struck-mode glide exactly, i.e.
+    // an inaudible gamma ~ 2e-4 at Force 1: the previous scaling only ever
+    // came alive on a hot external input.)
+    constexpr double nlGain = 500.0;
     constexpr double gammaCap = 4.0;
 
     // Windowed cascade ladder: band b is driven by
@@ -116,7 +131,7 @@ void PlateSynth::reset()
         f.reset();
     for (auto& h : hammers)
         h.active = false;
-    envOut = 0.0f;
+    envStretch = 0.0f;
     gamma = appliedGamma = 0.0;
     nlCountdown = nlUpdatePeriod;
     for (float& b : prevBandOut)
@@ -228,6 +243,7 @@ void PlateSynth::retuneBank()
             // muted (b0 = 0) so it cannot feed the feedback paths.
             outAmp[k] = 0.0f;
             compensation[k] = 1.0f;
+            nlWeight[k] = 0.0f;
             filters[k].c = fxme::BiquadCoeffs();
             filters[k].c.b0 = 0.0f;
             continue;
@@ -257,6 +273,17 @@ void PlateSynth::retuneBank()
         filters[k].c = fxme::BiquadCoeffs::bandpass (fs, (float) freq[k], q);
         compensation[k] = gainCompensation (zeta);
         outAmp[k] = phiOut[k] * compensation[k];
+
+        // Berger driver: this mode's contribution g_k q_k^2 to the
+        // stretching integral, per unit y_k^2 (header: q_k is the filter
+        // output divided by 2 zeta_k omega_k^2). Frequencies relative to
+        // mode 1 and damping relative to zetaRef; the remaining constant
+        // factor is folded into nlGain.
+        const double gRatio = g[(size_t) k] / juce::jmax (g[0], 1.0e-12);
+        const double zRatio = (double) zetaRef / (double) zeta;
+        const double nuSq = nu[k] * nu[k];
+        nlWeight[k] = (float) juce::jlimit (0.0, 1.0e12,
+                          gRatio * zRatio * zRatio / juce::jmax (1.0e-12, nuSq * nuSq));
     }
 
     appliedGamma = gamma;
@@ -324,7 +351,7 @@ void PlateSynth::updateDynamicTension() noexcept
         return;
 
     const double target = juce::jlimit (0.0, gammaCap,
-                                        nlGain * (double) current.nonlin * (double) envOut);
+                                        nlGain * (double) current.nonlin * (double) envStretch);
 
     // Slew over a few updates (~ a couple of ms) so the glide is smooth.
     gamma += 0.2 * (target - gamma);
@@ -423,6 +450,7 @@ float PlateSynth::processSample (float input) noexcept
     }
 
     float out = 0.0f;
+    float stretch = 0.0f;
     float bandOut[numCascadeBands] = {};
     int band = 0;
     for (int k = 0; k < activeModes; ++k)
@@ -432,7 +460,9 @@ float PlateSynth::processSample (float input) noexcept
         float x = inWeights[k] * input + cascadeW[k] * cascadeFb[band];
         for (int p = 0; p < numPulses; ++p)
             x += pulse[p] * hammers[pulseSlot[p]].weights[k];
-        const float contrib = outAmp[k] * filters[k].process (x);
+        const float y = filters[k].process (x);
+        const float contrib = outAmp[k] * y;
+        stretch += nlWeight[k] * y * y;   // Berger driver, g_k q_k^2 term
         filters[k].z1 *= bandDecay[band];
         filters[k].z2 *= bandDecay[band];
         out += contrib;
@@ -440,7 +470,10 @@ float PlateSynth::processSample (float input) noexcept
     }
     for (int b = 0; b < numCascadeBands; ++b)
         prevBandOut[b] = bandOut[b];
-    envOut += envCoef * (out * out - envOut);
+
+    // Global stretching, smoothed: unlike the former <out^2> this does not
+    // depend on where the pickup sits (see the header).
+    envStretch += envCoef * (stretch - envStretch);
     return out;
 }
 
