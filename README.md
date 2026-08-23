@@ -100,6 +100,33 @@ nonlinearity (both 0 = exactly the linear model):
    single eigenmode as filled contours (its frequency shows in the status
    line).
 
+## Playing it from MIDI
+
+A note-on tunes the plate so that **mode 1 lands on the note** (the rest of
+the spectrum follows the ratios the geometry and boundary conditions give it)
+and strikes it at the last point you clicked, with a hammer amplitude of
+`velocity / 127 × Force`. Note-offs are ignored: a struck plate rings out on
+its own, so the decay is the damping, not the key.
+
+The **Glide** knob (next to *Freq*) is the portamento time between played
+notes, 0 to 2 s. It is a time rather than a rate, so a glide takes the same
+Glide setting whatever the interval. Two deliberate exceptions never glide:
+the *Freq* knob, which sets the pitch outright, and the first note after
+loading, which lands in tune instead of swooping up from wherever *Freq*
+happened to sit.
+
+Hosts differ on whether an audio effect can receive MIDI at all:
+
+| Host | How |
+| --- | --- |
+| REAPER | Any track; MIDI on it reaches the plugin directly. |
+| Ableton Live | **Cannot** route MIDI to an audio effect on an audio track. Put FemPlate on a MIDI track *after* an instrument. |
+| Bitwig / Studio One / Cubase | Route a MIDI track's output to the plugin (note-input assignment). |
+| Logic | Use the AU: it appears under *MIDI-controlled Effects*, not Audio FX. |
+
+If nothing seems to arrive, watch the plate view: a note that lands flashes
+the same ring marker a mouse click does, at the last point you clicked.
+
 ## Building
 
 JUCE ≥ 7 is expected as a sibling directory (`../JUCE`); FxmeTools is a git

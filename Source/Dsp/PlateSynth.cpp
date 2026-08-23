@@ -132,6 +132,8 @@ void PlateSynth::reset()
     for (auto& h : hammers)
         h.active = false;
     envStretch = 0.0f;
+    gliding = false;
+    notePlayed = false;
     gamma = appliedGamma = 0.0;
     nlCountdown = nlUpdatePeriod;
     for (float& b : prevBandOut)
@@ -150,9 +152,12 @@ void PlateSynth::update (const ModalModel* newModel, const Params& params)
         dirty = true;
     }
 
+    // f1 is not in the list: it reaches the bank through the glide state
+    // below, so that a played note can own the pitch without the knob
+    // stealing it back on the next block.
+    const bool f1Changed = ! juce::approximatelyEqual (params.f1, current.f1);
     const bool tuningChanged =
-           ! juce::approximatelyEqual (params.f1,       current.f1)
-        || ! juce::approximatelyEqual (params.tension,  current.tension)
+           ! juce::approximatelyEqual (params.tension,  current.tension)
         || ! juce::approximatelyEqual (params.viscDamp, current.viscDamp)
         || ! juce::approximatelyEqual (params.matDamp,  current.matDamp)
         || ! juce::approximatelyEqual (params.cascade,  current.cascade)      // overlap floor
@@ -169,7 +174,15 @@ void PlateSynth::update (const ModalModel* newModel, const Params& params)
     cascEff = current.cascade * cascadeDampingScale (current.matDamp);
     if (envChanged)
         updateCascadeEnvelopes();
-    if (dirty || tuningChanged)
+
+    // The knob sets the pitch outright (glide belongs to played notes), and
+    // so does a model swap.
+    if (f1Changed || dirty)
+    {
+        f1Log = f1LogTarget = std::log2 ((double) juce::jmax (1.0f, current.f1));
+        gliding = false;
+    }
+    if (dirty || tuningChanged || f1Changed)
     {
         retune();
         dirty = false;
@@ -222,6 +235,8 @@ void PlateSynth::retuneBank()
 
     // Instantaneous fundamental, used for the damping law's ratios.
     const double omega1SqEff = juce::jmax (1.0e-12, lambda[0] + dT * g[0]);
+    const double f1Hz = std::exp2 (f1Log);
+    f1LogTuned = f1Log;
     const double maxFreq = 0.47 * fs;
 
     // First pass: frequencies (needed for the local mode spacing below).
@@ -230,7 +245,7 @@ void PlateSynth::retuneBank()
     for (int k = 0; k < activeModes; ++k)
     {
         const double omegaSq = juce::jmax (0.0, lambda[(size_t) k] + dT * g[(size_t) k]);
-        freq[k] = (double) current.f1 * std::sqrt (omegaSq / base1);
+        freq[k] = f1Hz * std::sqrt (omegaSq / base1);
         nu[k] = std::sqrt (omegaSq / omega1SqEff);
     }
 
@@ -345,6 +360,58 @@ void PlateSynth::strike (float x, float y, float velocity)
     computeInputWeights (x, y);
 }
 
+void PlateSynth::noteOn (float frequencyHz, float velocity) noexcept
+{
+    if (model == nullptr || activeModes < 1)
+        return;
+
+    // Keep the fundamental itself in the audible band; the bank mutes any
+    // partial that falls outside it anyway (retuneBank).
+    const double target = std::log2 (juce::jlimit (20.0, 0.45 * fs,
+                                                   (double) frequencyHz));
+    const double glideSec = 1.0e-3 * (double) juce::jmax (0.0f, current.glideMs);
+
+    if (glideSec <= 0.0 || ! notePlayed)
+    {
+        // No glide time, or nothing to glide *from* yet: land in tune now, so
+        // the strike below is already at the right pitch.
+        f1Log = f1LogTarget = target;
+        gliding = false;
+        retuneBank();
+    }
+    else
+    {
+        f1LogTarget = target;
+        const double steps = juce::jmax (1.0, glideSec * fs / (double) nlUpdatePeriod);
+        glideStep = (f1LogTarget - f1Log) / steps;
+        gliding = std::abs (f1LogTarget - f1Log) > 1.0e-9;   // repeated note: nothing to do
+    }
+
+    notePlayed = true;
+    strike (lastHitX, lastHitY, velocity);
+}
+
+void PlateSynth::updateGlide() noexcept
+{
+    bool arrived = false;
+    if (gliding)
+    {
+        f1Log += glideStep;
+        if ((glideStep > 0.0) == (f1Log >= f1LogTarget))
+        {
+            f1Log = f1LogTarget;
+            gliding = false;
+            arrived = true;
+        }
+    }
+
+    // Same throttle as the Berger glide: rewrite the bank once the pitch has
+    // drifted ~2 cents (2/1200 of an octave) from what it sounds at, and once
+    // more on arrival so the note settles exactly in tune.
+    if (arrived || std::abs (f1Log - f1LogTuned) > 0.00167)
+        retuneBank();
+}
+
 void PlateSynth::updateDynamicTension() noexcept
 {
     if (model == nullptr || activeModes < 1)
@@ -370,6 +437,7 @@ float PlateSynth::processSample (float input) noexcept
     if (--nlCountdown <= 0)
     {
         nlCountdown = nlUpdatePeriod;
+        updateGlide();
         if (current.nonlin > 0.0f || gamma > 1.0e-4)
             updateDynamicTension();
     }

@@ -72,10 +72,11 @@ private:
     fxme::FxmeSlider aspectKnob, pointsKnob, densityKnob;
 
     // Right column — modal parameters.
-    fxme::FxmeSlider f1Knob, tensionKnob, hammerKnob, forceKnob, nonlinKnob,
-                     cascadeKnob, viscKnob, matKnob, modesKnob;
-    std::unique_ptr<SliderAttachment> f1Att, tensionAtt, hammerAtt, forceAtt,
-                                      nonlinAtt, cascadeAtt, viscAtt, matAtt, modesAtt;
+    fxme::FxmeSlider f1Knob, glideKnob, tensionKnob, hammerKnob, forceKnob,
+                     nonlinKnob, cascadeKnob, viscKnob, matKnob, modesKnob;
+    std::unique_ptr<SliderAttachment> f1Att, glideAtt, tensionAtt, hammerAtt,
+                                      forceAtt, nonlinAtt, cascadeAtt, viscAtt,
+                                      matAtt, modesAtt;
 
     // Right column — cascade tuning.
     fxme::FxmeSlider cascAmpKnob, cascDriveKnob, cascAttKnob, cascRelKnob,
@@ -100,6 +101,7 @@ private:
     int displayedModeCount = -1;         // status refresh bookkeeping
     juce::uint32 lastStrikeMs = 0;       // strike marker fade
     juce::Point<float> lastStrikePos;
+    int lastMidiStrikeSeen = 0;          // MIDI notes already marked
 
     // Declared last: fixes keyboard focus for all TextEditors under the editor
     // (including FxmeSlider's right-click value entry).

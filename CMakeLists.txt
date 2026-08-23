@@ -41,12 +41,17 @@ juce_add_plugin(FemPlate
     PRODUCT_NAME                "FemPlate"
     DESCRIPTION                 "FX-Mechanics finite-element plate physical model"
     IS_SYNTH                    FALSE
-    NEEDS_MIDI_INPUT            FALSE
+    NEEDS_MIDI_INPUT            TRUE
     NEEDS_MIDI_OUTPUT           FALSE
     IS_MIDI_EFFECT              FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     VST3_CATEGORIES             Fx Instrument
-    AU_MAIN_TYPE                kAudioUnitType_Effect
+    # An audio effect that listens to notes: kAudioUnitType_Effect ('aufx')
+    # has no MIDI input at all in the AU spec, so the AU would silently never
+    # receive a note whatever NEEDS_MIDI_INPUT says. 'aumf' is the type for
+    # this, and Logic lists it under MIDI-controlled Effects rather than
+    # Audio FX.
+    AU_MAIN_TYPE                kAudioUnitType_MusicEffect
     BUNDLE_ID                   "com.FXMechanics.FemPlate"
 )
 

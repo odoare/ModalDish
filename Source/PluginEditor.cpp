@@ -149,6 +149,7 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
         att = std::make_unique<SliderAttachment> (apvts, id, s);
     };
     addModal (f1Knob, "Freq", fem::id::f1, f1Att);
+    addModal (glideKnob, "Glide", fem::id::glide, glideAtt);
     addModal (tensionKnob, "Tension", fem::id::tension, tensionAtt);
     addModal (hammerKnob, "Hammer", fem::id::hammerMs, hammerAtt);
     addModal (forceKnob, "Force", fem::id::force, forceAtt);
@@ -382,6 +383,17 @@ void FemPlateAudioProcessorEditor::timerCallback()
         progressValue = (double) juce::jmax (0.0f, processor.getComputeProgress());
         refreshStatus();
     }
+    // A MIDI note strikes at the last clicked point (or the plate centre if
+    // it has never been clicked): mark it exactly like a click.
+    const int midiStrikes = processor.getMidiStrikeCount();
+    if (midiStrikes != lastMidiStrikeSeen)
+    {
+        if (lastStrikeMs == 0)
+            lastStrikePos = plateView.plateToScreen (0.5, 0.5);
+        lastMidiStrikeSeen = midiStrikes;
+        lastStrikeMs = juce::Time::getMillisecondCounter();
+    }
+
     if (lastStrikeMs != 0
          && juce::Time::getMillisecondCounter() - lastStrikeMs < 750
          && plateView.isVisible())
@@ -479,9 +491,13 @@ void FemPlateAudioProcessorEditor::resized()
         const int rowH = r.getHeight() / 3;
         const int w = r.getWidth() / 3;
 
+        // Four across on the excitation row (the I/O panel's width), three on
+        // the others: Glide belongs next to the frequency it glides.
         auto row1 = r.removeFromTop (rowH);          // excitation
-        f1Knob.setBounds (row1.removeFromLeft (w).reduced (2));
-        hammerKnob.setBounds (row1.removeFromLeft (w).reduced (2));
+        const int w4 = r.getWidth() / 4;
+        f1Knob.setBounds (row1.removeFromLeft (w4).reduced (2));
+        glideKnob.setBounds (row1.removeFromLeft (w4).reduced (2));
+        hammerKnob.setBounds (row1.removeFromLeft (w4).reduced (2));
         forceKnob.setBounds (row1.reduced (2));
 
         auto row2 = r.removeFromTop (rowH);          // tension / nonlinearity

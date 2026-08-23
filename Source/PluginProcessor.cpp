@@ -102,6 +102,7 @@ FemPlateAudioProcessor::FemPlateAudioProcessor()
     pMatDamp  = apvts.getRawParameterValue (fem::id::matDamp);
     pHammer   = apvts.getRawParameterValue (fem::id::hammerMs);
     pForce    = apvts.getRawParameterValue (fem::id::force);
+    pGlide    = apvts.getRawParameterValue (fem::id::glide);
     pNonlin   = apvts.getRawParameterValue (fem::id::nonlin);
     pCascade  = apvts.getRawParameterValue (fem::id::cascade);
     pCascAmp     = apvts.getRawParameterValue (fem::id::cascAmp);
@@ -168,6 +169,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout FemPlateAudioProcessor::crea
     p.push_back (std::make_unique<FloatParam> (
         juce::ParameterID (fem::id::force, 1), "Force",
         juce::NormalisableRange<float> (0.0f, 10.0f, 0.0f, 0.4f), 1.0f));
+
+    // Portamento between played notes. 0 (the default) tunes the plate the
+    // instant the note arrives; the Freq knob is never glided.
+    p.push_back (std::make_unique<FloatParam> (
+        juce::ParameterID (fem::id::glide, 1), "Glide",
+        juce::NormalisableRange<float> (0.0f, 2000.0f, 0.0f, 0.35f), 0.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("ms")));
 
     // Geometric nonlinearity (see PlateSynth.h): Berger dynamic tension and
     // cubic mode-cascade feedback, both 0 = linear model.
@@ -264,7 +272,8 @@ bool FemPlateAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts)
         || in == juce::AudioChannelSet::disabled();
 }
 
-void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
+                                           juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
 
@@ -279,6 +288,7 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     params.matDamp  = pMatDamp->load();
     params.hammerMs = pHammer->load();
     params.force    = pForce->load();
+    params.glideMs  = pGlide->load();
     params.nonlin   = pNonlin->load();
     params.cascade  = pCascade->load();
     params.cascAmp       = pCascAmp->load();
@@ -313,8 +323,25 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     const float* in0 = numIns > 0 ? buffer.getReadPointer (0) : nullptr;
     const float* in1 = numIns > 1 ? buffer.getReadPointer (1) : nullptr;
 
+    // Notes are consumed in step with the render loop, so a note lands on its
+    // own sample rather than at the block boundary (audible on short blocks
+    // with a fast glide). Note-offs are ignored: a struck plate rings out.
+    auto midiEvent = midiMessages.cbegin();
+    const auto midiEnd = midiMessages.cend();
+
     for (int i = 0; i < numSamples; ++i)
     {
+        for (; midiEvent != midiEnd && (*midiEvent).samplePosition <= i; ++midiEvent)
+        {
+            const auto msg = (*midiEvent).getMessage();
+            if (msg.isNoteOn())
+            {
+                synth.noteOn ((float) juce::MidiMessage::getMidiNoteInHertz (msg.getNoteNumber()),
+                              msg.getFloatVelocity());
+                midiStrikeCounter.fetch_add (1, std::memory_order_release);
+            }
+        }
+
         float input = 0.0f;
         if (in0 != nullptr)
             input = in1 != nullptr ? 0.5f * (in0[i] + in1[i]) : in0[i];

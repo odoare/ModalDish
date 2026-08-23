@@ -109,6 +109,16 @@
       shimmer blooms, gluing the two. Purely dissipative, so it cannot
       affect stability.
 
+    Played notes
+    ------------
+    noteOn() aims the base frequency f1 at the note (mode 1 lands on it, the
+    rest of the spectrum follows the ratios of the plate) and strikes at the
+    last hit point with velocity/127 scaled by Force. The pitch travels in
+    log2, so a glide takes the Glide time whatever the interval, and it is
+    stepped on the same 32-sample grid as the Berger tension, sharing its
+    ~2-cent retune throttle. The Freq knob is not glided: it sets the pitch
+    directly, and so does the first note of the session.
+
     Everything here runs on the audio thread and is allocation-free; the
     model pointer is published by the processor (see PluginProcessor).
 
@@ -142,6 +152,7 @@ public:
         float force     = 1.0f;     // hammer force amplitude
         float nonlin    = 0.0f;     // 0..1 dynamic-tension (Berger) amount
         float cascade   = 0.0f;     // 0..1 upward-cascade amount
+        float glideMs   = 0.0f;     // portamento time between played notes
 
         // Cascade tuning set (see the class comment; defaults = voiced values).
         float cascAmp       = 1.1f;    // injection gain A
@@ -170,6 +181,17 @@ public:
         the external-input injection point there. */
     void strike (float x, float y, float velocity);
 
+    /** Audio thread: a MIDI note. Retunes the plate so that mode 1 lands on
+        `frequencyHz` (gliding there over the Glide time, except on the first
+        note of the session, which snaps so the attack is never a swoop from
+        wherever the Freq knob happened to sit) and strikes it at the
+        last hit point with `velocity` (0..1, i.e. MIDI velocity / 127, which
+        the Force parameter then scales). */
+    void noteOn (float frequencyHz, float velocity) noexcept;
+
+    /** Base frequency the bank is currently sounding at (Hz), for display. */
+    float getBaseFrequency() const noexcept { return (float) std::exp2 (f1Log); }
+
     /** Audio thread: one sample of external input in, one plate sample out. */
     float processSample (float input) noexcept;
 
@@ -184,6 +206,7 @@ private:
     void updateCascadeWeights() noexcept;    // injection weights of the target modes
     void updateCascadeEnvelopes();           // attack/release coefficients from params
     void updateDynamicTension() noexcept;    // decimated Berger feedback step
+    void updateGlide() noexcept;             // decimated portamento step
 
     // Allocation-free RBJ band-pass (constant 0 dB peak), one per mode.
     struct Resonator
@@ -225,6 +248,17 @@ private:
     float lastHitX = 0.5f, lastHitY = 0.5f;
     Hammer hammers[maxStrikes];
     int nextHammer = 0;
+
+    // Base-frequency glide. The bank is tuned at exp2(f1Log); played notes
+    // move f1Log towards f1LogTarget by glideStep per decimated update
+    // (log2 domain, so a glide takes the same time whatever the interval),
+    // and the bank is rewritten when it has drifted ~2 cents from the pitch
+    // it currently sounds at — the same throttle the Berger glide uses.
+    double f1Log = 0.0, f1LogTarget = 0.0;
+    double f1LogTuned = -1.0e9;
+    double glideStep = 0.0;
+    bool gliding = false;
+    bool notePlayed = false;
 
     // Nonlinear state (Berger dynamic tension + windowed cubic cascade).
     static constexpr int nlUpdatePeriod = 32;   // samples between gamma steps

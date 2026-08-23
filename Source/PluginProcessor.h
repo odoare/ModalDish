@@ -20,6 +20,8 @@
       `audioSeenGeneration`; superseded models are deleted (message thread)
       only once acknowledged, so the audio thread never touches freed memory.
     * Strikes: tiny atomic mailbox (position, velocity, counter).
+    * MIDI: read straight off the block's MidiBuffer on the audio thread; a
+      note-on retunes the plate to the note and strikes it (PlateSynth).
 
     Author: Olivier Doaré, github.com/odoare
     (c) 2026 Olivier Doaré
@@ -54,7 +56,7 @@ public:
     bool hasEditor() const override                        { return true; }
 
     const juce::String getName() const override            { return JucePlugin_Name; }
-    bool acceptsMidi() const override                      { return false; }
+    bool acceptsMidi() const override                      { return true; }
     bool producesMidi() const override                     { return false; }
     bool isMidiEffect() const override                     { return false; }
     double getTailLengthSeconds() const override           { return 30.0; }
@@ -106,6 +108,11 @@ public:
     /** Any thread: hit the plate (plate coordinates, velocity 0..1). */
     void requestStrike (float x, float y, float velocity);
 
+    /** Message thread: how many MIDI notes have struck the plate. The editor
+        watches it so a played note flashes the same marker a click does. */
+    int getMidiStrikeCount() const noexcept
+        { return midiStrikeCounter.load (std::memory_order_acquire); }
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     void handleAsyncUpdate() override;   // post-setState rebuild
@@ -134,6 +141,7 @@ private:
     std::atomic<std::uint64_t> audioSeenGeneration { 0 };
 
     std::atomic<int> strikeCounter { 0 };
+    std::atomic<int> midiStrikeCounter { 0 };   // audio -> editor, marker only
     std::atomic<float> strikeX { 0.5f }, strikeY { 0.5f }, strikeVel { 1.0f };
     int lastStrikeSeen = 0;
 
@@ -146,6 +154,7 @@ private:
     std::atomic<float>* pMatDamp = nullptr;
     std::atomic<float>* pHammer = nullptr;
     std::atomic<float>* pForce = nullptr;
+    std::atomic<float>* pGlide = nullptr;
     std::atomic<float>* pNonlin = nullptr;
     std::atomic<float>* pCascade = nullptr;
     std::atomic<float>* pCascAmp = nullptr;

@@ -20,6 +20,7 @@ namespace fem::id
     inline constexpr const char* matDamp   = "matdamp";   // material damping (zeta of mode 1)
     inline constexpr const char* hammerMs  = "hammer";    // half-sine shock duration (ms)
     inline constexpr const char* force     = "force";     // hammer force amplitude
+    inline constexpr const char* glide     = "glide";     // portamento time between notes (ms)
     inline constexpr const char* nonlin    = "nonlin";    // Berger tension feedback amount
     inline constexpr const char* cascade   = "cascade";   // cubic feedback (mode cascade) amount
 
