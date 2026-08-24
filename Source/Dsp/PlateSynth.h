@@ -93,12 +93,34 @@
       comb to catch the broadband products, low enough that the pumped
       modes keep a natural ring once the pumping stops.
 
-      The effective cascade amount is the knob value scaled by a
-      material-damping compensation, min(1, (2.3e-5 / zetaM)^0.64) — a
-      power law fitted on listening limits: with heavy structural damping
-      the widened, gain-compensated target continuum saturates at knob
-      values that are mild at feather damping (see cascadeDampingScale in
-      the .cpp). The knob keeps full 0..1 travel at any damping.
+      The knob acts directly: there is no damping compensation on it any
+      more. The power law that used to scale it, min(1, (2.3e-5/zetaM)^0.64),
+      was fitted on listening limits to cancel one half (the material half)
+      of the drive artefact described below; with the source fixed at its
+      root, the measured drive is flat to about 1 dB across three decades of
+      either damping knob and the correction has nothing left to correct.
+
+      The source signal is the plate's *motion*, not its audible output.
+      Feeding the cascade the compensated audio (phi_out * c_k * y_k, what
+      reaches the ear) made the effect depend steeply on the damping knobs
+      for a reason that has nothing to do with physics: a band-pass ring has
+      peak 2 zeta omega, and the loudness compensation c_k = sqrt(zetaRef /
+      zeta_k) removes only sqrt(zeta) of that, so a mode's audible peak grows
+      as sqrt(zeta_k). More damping made every mode *hit harder*, the cubic
+      cubed the difference, and the shimmer rose by up to 39 dB across the
+      Viscous knob's range — while a real plate can only ever lose energy to
+      damping. Weighting by velScale_k instead cancels the zeta entirely
+      (y_k is proportional to zeta_k, velScale_k to its inverse), leaving the
+      modal velocity, which is what the plate actually does.
+
+      That leaves the *frequency* balance, which the compensation used to
+      supply by accident: physical modal amplitudes fall steeply with
+      frequency, so a raw velocity sum starves the upper rungs (band 0
+      outweighs band 1 by ~900x). Each band's source is therefore normalised
+      by sum(1/nu_k) over its own modes — a constant fixed by the mode
+      indices alone, with no damping in it — which makes the rungs
+      comparable, as the voiced ladder assumes, without reintroducing the
+      artefact. Every rung is then driven by a band-mean modal velocity.
 
       Depletion ("Deplete" parameter): the transfer is otherwise purely
       additive, so the low modes would ring on untouched while the shimmer
@@ -274,6 +296,7 @@ private:
     float nlWeight[fem::maxModes] {};    // g_k q_k^2 per unit y_k^2 (Berger driver)
     float dispScale[fem::maxModes] {};   // q_k per unit y_k (display field)
     float velScale[fem::maxModes] {};    // qdot_k per unit y_k (display field)
+    float cascSrcW[fem::maxModes] {};    // cascade source weight (band-normalised)
     float lastHitX = 0.5f, lastHitY = 0.5f;
     Hammer hammers[maxStrikes];
     int nextHammer = 0;

@@ -135,4 +135,19 @@ if(FEMPLATE_BUILD_TESTS)
     target_link_libraries(FemTests PRIVATE FxmeCore)
     target_compile_features(FemTests PRIVATE cxx_std_17)
     add_test(NAME FemTests COMMAND FemTests)
+
+    # Renders the real modal synthesis offline to measure the cascade drive
+    # (see Tests/CascadeMeasure.cpp). PlateSynth.cpp is compiled straight into
+    # it: its whole JUCE surface is a few numeric helpers, supplied by the stub
+    # header, so this needs neither JUCE nor a host. Should the stub ever stop
+    # sufficing, the DSP has acquired a real JUCE dependency worth knowing
+    # about.
+    add_executable(CascadeMeasure Tests/CascadeMeasure.cpp Source/Dsp/PlateSynth.cpp)
+    target_include_directories(CascadeMeasure PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/juce_stub
+        ${CMAKE_CURRENT_SOURCE_DIR}/Source
+        ${CMAKE_CURRENT_SOURCE_DIR}/Source/Dsp)
+    target_link_libraries(CascadeMeasure PRIVATE FxmeCore)
+    target_compile_features(CascadeMeasure PRIVATE cxx_std_17)
+    add_test(NAME CascadeMeasure COMMAND CascadeMeasure)
 endif()

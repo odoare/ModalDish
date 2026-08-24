@@ -71,22 +71,12 @@ namespace
     // audibly damp the high end, low values keep the pumped modes ringing
     // naturally after the pumping stops.
     //
-    // Material-damping compensation of the cascade amount. With large
-    // structural damping the overlap floor and gain compensation make the
-    // pumped continuum extremely dense and loud (saturating shimmer when
-    // hit and pickup are close); with feather damping the same knob value
-    // is mild. Fitted on qualitatively estimated "maximum usable cascade"
-    // listening limits (material damping -> cascade):
-    //     2.4e-3 -> 0.05, 1e-3 -> 0.1, 1e-4 -> 0.4, 1e-5 -> 0.9, 7e-6 -> 1
-    // which is close to a straight line in log-log: a power law
-    //     scale = min(1, (2.3e-5 / zetaM)^0.64)
-    // reproduces the table within ~10%. The effective cascade amount is
-    // cascade * scale, so the knob keeps full travel at any damping.
-    float cascadeDampingScale (float zetaM) noexcept
-    {
-        const float z = juce::jmax (zetaM, 1.0e-7f);
-        return juce::jmin (1.0f, std::pow (2.3e-5f / z, 0.64f));
-    }
+    // The cascade source gain, applied to the band-mean modal velocity that
+    // drives the ladder (see the header). Calibrated so the audible cascade
+    // on the default plate matches the level the previous, audio-driven
+    // source produced at the reference damping — the voiced Amp/Drive
+    // settings therefore keep their meaning.
+    constexpr float cascadeSourceGain = 3.0f;
 
     // Depletion couples the two ends of the ladder: a source band's filter
     // states decay by an extra factor (1 - deplete * cascade * depleteRate
@@ -176,7 +166,7 @@ void PlateSynth::update (const ModalModel* newModel, const Params& params)
         || ! juce::approximatelyEqual (params.cascReleaseMs, current.cascReleaseMs);
 
     current = params;
-    cascEff = current.cascade * cascadeDampingScale (current.matDamp);
+    cascEff = current.cascade;
     if (envChanged)
         updateCascadeEnvelopes();
 
@@ -317,6 +307,22 @@ void PlateSynth::retuneBank()
                            zRatio / juce::jmax (1.0e-12, nu[k]));
         dispScale[k] = (float) juce::jlimit (0.0, 1.0e12,
                            zRatio / juce::jmax (1.0e-12, nuSq));
+    }
+
+    // Cascade source weights: the modal velocity of each mode, normalised
+    // per band by a constant that depends on the mode indices only (no
+    // damping), so every rung of the ladder is driven by a comparable
+    // band-mean velocity. See the header for why this replaces the audible,
+    // compensation-weighted signal the ladder used to read.
+    for (int b = 0; b < numCascadeBands; ++b)
+    {
+        double norm = 0.0;
+        for (int k = bandStart[b]; k < bandStart[b + 1] && k < activeModes; ++k)
+            norm += 1.0 / juce::jmax (1.0e-6, nu[k]);
+
+        const float scale = (float) (norm > 0.0 ? cascadeSourceGain / norm : 0.0);
+        for (int k = bandStart[b]; k < bandStart[b + 1] && k < activeModes; ++k)
+            cascSrcW[k] = velScale[k] * scale;
     }
 
     appliedGamma = gamma;
@@ -547,7 +553,7 @@ float PlateSynth::processSample (float input) noexcept
 
     float out = 0.0f;
     float stretch = 0.0f;
-    float bandOut[numCascadeBands] = {};
+    float bandOut[numCascadeBands] = {};   // cascade source: band-mean velocity
     int band = 0;
     for (int k = 0; k < activeModes; ++k)
     {
@@ -567,7 +573,7 @@ float PlateSynth::processSample (float input) noexcept
         filters[k].z1 *= bandDecay[band];
         filters[k].z2 *= bandDecay[band];
         out += contrib;
-        bandOut[band] += contrib;
+        bandOut[band] += phiOut[k] * cascSrcW[k] * y;
     }
     for (int b = 0; b < numCascadeBands; ++b)
         prevBandOut[b] = bandOut[b];

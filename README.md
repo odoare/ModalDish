@@ -68,11 +68,16 @@ nonlinearity (both 0 = exactly the linear model):
   proportional to the transfer activity, so the lows audibly hand their
   energy to the shimmer instead of ringing on beneath it. All cascade
   internals live in the CASCADE panel, revealed by the **Advanced**
-  button in the top bar (the window widens). The effective cascade
-  amount is automatically rescaled by a material-damping compensation,
-  `min(1, (2.3·10⁻⁵/ζₘ)^0.64)` — a power law fitted on listening
-  limits — so the knob's maximum stays just below the saturation point
-  at any damping. The voiced defaults are
+  button in the top bar (the window widens). The ladder is driven by the
+  plate's *motion* (a band-mean modal velocity), not by its audible
+  output: driving it from the output made the shimmer follow the damping
+  knobs upward — 38.7 dB across the Viscous knob's range — because the
+  loudness compensation `√(ζ_ref/ζ_k)` makes a more damped mode peak
+  higher, and the ladder's cubic cubed the difference. A real plate can
+  only lose energy to damping. With the motion as the source the drive
+  is flat to a few dB across both knobs, so the material-damping
+  compensation that used to rescale the knob is gone and it now acts
+  directly (`Tests/CascadeMeasure.cpp` measures this). The voiced defaults are
   Amp 1.1 (capped 1.5 — louder gets unpleasant), Drive 16, Window 4,
   Attack 30 ms/band, Release 2 s, Overlap 0.1, Deplete 0.07, with
   Viscous ≈ 10⁻⁴ and Material ≈ 7·10⁻⁶ (Material's ζ ∝ ν law otherwise

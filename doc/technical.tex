@@ -439,9 +439,18 @@ $\bm{x}_o$ is a pair of automatable parameters.
 Because a constant-peak band-pass transmits energy proportionally to its
 bandwidth ($\propto \zeta_k$), lightly damped modes would ring much quieter
 than damped ones. Each mode is therefore compensated by
-$\sqrt{\zeta_{\mathrm{ref}}/\zeta_k}$ (clamped to $[0.5, 32]$,
+$c_k = \sqrt{\zeta_{\mathrm{ref}}/\zeta_k}$ (clamped to $[0.5, 32]$,
 $\zeta_{\mathrm{ref}}=10^{-2}$), the loudness compensation inherited from
-the MechanOdd modal resonators. Retunes triggered by parameter changes
+the MechanOdd modal resonators:
+%
+\begin{equation}
+  c_k \;=\; \sqrt{\zeta_{\mathrm{ref}}/\zeta_k} .
+  \label{eq:compensation}
+\end{equation}
+%
+It equalises each mode's ring energy rather than its peak, which has a
+consequence for anything driven from the output signal --- see
+\S\ref{par:drive}. Retunes triggered by parameter changes
 rewrite only the biquad coefficients (the states are preserved), which is
 inaudible for the small throttled steps used here.
 
@@ -488,30 +497,49 @@ efficient approximation in the nonlinear vibration literature
 by Legge \& Fletcher and Rossing \cite{legge-fletcher,fletcher-rossing}.
 
 \paragraph{Amplitude estimation and calibration.}
-The band-pass resonators are output-normalised (constant peak gain), so
-their internal states are \emph{not} calibrated modal displacements: a
-naive $\sum_k g_k \langle y_k^2\rangle$ over filter outputs $y_k$
-underestimates the stretching by orders of magnitude (impulse ring
-amplitudes scale with $\zeta_k$). FemPlate therefore drives the effect from
-the \emph{audible output} and expresses it as a dimensionless
-\emph{relative stiffening of mode 1}:
+\label{par:driver}
+The stretching integral needs no field reconstruction: the modes are
+mass-orthonormal, so $\int_\Omega w^2\,\dd A = \sum_k q_k^2$ exactly and
+$\int_\Omega |\nabla w|^2 \dd A \approx \sum_k g_k q_k^2$, one multiply-add
+per mode and per sample. What the filter bank holds is not $q_k$, however.
+A $0$\,dB-peak band-pass fed the true modal force is exactly
+$y_k = 2\zeta_k\omega_k\,\dot q_k$ --- a \emph{velocity}, normalised --- so
 %
 \begin{equation}
-  \gamma \;=\; \min\!\bigl(\gamma_{\max},\;
-        \alpha\, \cdot \mathrm{nonlin} \cdot \langle w^2(\bm{x}_o)\rangle \bigr),
+  q_k \;=\; \frac{y_k}{2\zeta_k\omega_k^2},
   \qquad
-  T_{\mathrm{dyn}} = \gamma\, \frac{\omega_1^2(T_{\mathrm{knob}})}{g_1},
+  \gamma \;=\; \min\!\Bigl(\gamma_{\max},\;
+        \alpha\, \cdot \mathrm{nonlin} \cdot
+        \Bigl\langle \sum_k W_k\, y_k^2 \Bigr\rangle \Bigr),
+  \qquad
+  W_k = \frac{g_k}{g_1}
+        \left(\frac{\zeta_{\mathrm{ref}}}{\zeta_k}\right)^{\!2}
+        \frac{1}{\nu_k^4},
   \label{eq:gamma}
 \end{equation}
 %
-with $\alpha = 8$, $\gamma_{\max}=4$, and $\langle\cdot\rangle$ a 20-ms
-one-pole envelope. By construction $\omega_1^2 \mapsto
-\omega_1^2\,(1+\gamma)$ exactly, and every other mode follows its own
-physical sensitivity $g_k$: $\gamma$ is plate-independent ($\gamma = 0.4$
-always means ``mode 1 up $\approx 3$ semitones''), which makes the knob
-calibration robust across geometries. Losing the per-mode weighting is a
-second approximation on top of Berger's; the qualitative behaviour ---
-glide amplitude tracking the ring energy --- is preserved.
+with $T_{\mathrm{dyn}} = \gamma\, \omega_1^2(T_{\mathrm{knob}})/g_1$,
+$\alpha = 500$, $\gamma_{\max}=4$, and $\langle\cdot\rangle$ a 20-ms
+one-pole envelope. The missing $1/(4\zeta^2\omega^4)$ --- ten decades
+across the bank --- is why a naive $\sum_k g_k\langle y_k^2\rangle$
+underestimates the stretching by orders of magnitude. Being derived from
+the velocity, each mode is a quarter period ahead of its true
+displacement; the cross terms $k \ne l$ and that phase both average out in
+the envelope.
+
+By construction $\omega_1^2 \mapsto \omega_1^2\,(1+\gamma)$ exactly, and
+every other mode follows its own physical sensitivity $g_k$: $\gamma$ is
+plate-independent ($\gamma = 0.4$ always means ``mode 1 up $\approx 3$
+semitones''). It is also \emph{damping}-independent by construction: after
+an impulse $y_k \sim 2\zeta_k\omega_k$, so $\zeta_k$ cancels in
+$W_k y_k^2$. Measured on the default plate, the peak driver varies by less
+than $12\%$ over $\zeta_v, \zeta_m \in [10^{-5}, 10^{-3}]$, where the
+earlier pickup-amplitude driver $\langle w^2(\bm{x}_o)\rangle$ varied by a
+factor $100$ --- and by a factor $1300$ between a struck plate and the
+same plate driven through its audio input. Driving the effect from a
+global, calibrated quantity rather than from the amplitude at the output
+point also makes the glide independent of where the pickup sits: on a node
+it used to vanish, and moving the pickup moved the pitch.
 
 \paragraph{Realtime scheduling.}
 $\gamma$ is updated every 32 samples, slewed by a factor $0.2$ per update
@@ -542,8 +570,9 @@ frequency ranges, plate modal density being constant); band $b$ is driven
 by the cubic of the $W$ bands directly below it only (default $W = 4$),
 %
 \begin{equation}
-  w^{(b)}(t) = \sum_{c = b-W}^{b-1}\; \sum_{k \in \mathcal{B}_c}
-              \varphi_k(\bm{x}_o)\, c_k\, y_k(t),
+  w^{(b)}(t) = S \sum_{c = b-W}^{b-1} \frac{1}{n_c}
+              \sum_{k \in \mathcal{B}_c}
+              \varphi_k(\bm{x}_o)\, v_k\, y_k(t),
   \qquad
   F_b(t) \;=\; A\, g_b(t)\, \tanh^3\!\bigl(B\, w^{(b)}(t)\bigr),
   \label{eq:cascade}
@@ -552,7 +581,10 @@ by the cubic of the $W$ bands directly below it only (default $W = 4$),
 fed to mode $l \in \mathcal{B}_b$ with weight $\varphi_l(\bm{x}_h)/c_l$
 (dividing by the bandwidth compensation $c_l$, which is re-applied on
 output, makes the audible cascade level independent of the damping
-settings). The source \emph{window} matters: summing all lower bands
+settings). The source is the plate's \emph{motion}: $v_k = y_k$'s modal
+velocity scale $\zeta_{\mathrm{ref}}/(\zeta_k \nu_k)$, normalised per band
+by $n_c = \sum_{k \in \mathcal{B}_c} 1/\nu_k$ and by one global gain
+$S = 3$ (\S\ref{par:drive}). The source \emph{window} matters: summing all lower bands
 would let the loud strike band drive the top bands quasi-directly and the
 whole spectrum lights up within milliseconds; with the window, each stage
 extends the spectral reach by at most a factor 3 and energy genuinely
@@ -602,33 +634,63 @@ engaged (and, physically consistently, shortening the high modes' ring ---
 nonlinear energy spreading is itself a loss channel for individual modes).
 At $\mathrm{cascade}=0$ the linear model is untouched.
 
-\paragraph{Material-damping compensation.}
-The audible strength of the cascade depends steeply on the material
-damping: large $\zeta_m$ widens the target resonances (overlap floor) and
-raises their bandwidth compensation, so a knob value that is mild at
-feather damping saturates the output when hit and pickup are close.
-Listening tests produced qualitative ``maximum usable cascade'' limits
+\paragraph{Why the source is the motion and not the sound.}
+\label{par:drive}
+The obvious source signal for \eqref{eq:cascade} is the one already being
+summed for the output, $\varphi_k(\bm{x}_o)\,c_k\,y_k$. That is what
+FemPlate used until it was measured, and it made the effect depend steeply
+on \emph{damping}, in the wrong direction: turning a damping knob up made
+the shimmer louder. The mechanism is \eqref{eq:compensation}'s
+$c_k = \sqrt{\zeta_{\mathrm{ref}}/\zeta_k}$. A band-pass ring has peak
+$2\zeta_k\omega_k$, so the audible peak of a struck mode is
+%
+\begin{equation}
+  c_k \cdot 2\zeta_k \omega_k \;=\; 2\omega_k
+      \sqrt{\zeta_{\mathrm{ref}}\,\zeta_k} \;\propto\; \sqrt{\zeta_k} :
+\end{equation}
+%
+the compensation equalises each mode's ring \emph{energy} by trading
+duration for level, so a more damped mode peaks \emph{higher}. That is
+sound design, not physics --- a struck plate's modal amplitude is set by
+the impulse, and damping can only remove energy --- and the ladder then
+cubes the difference. Measured on the default plate (one strike, 4\,kHz and
+up, at 300\,ms), the shimmer rose by $38.7$\,dB across the Viscous knob's
+range while the plate was merely decaying faster; the low band's peak
+followed $\sqrt{\zeta_k}$ to within $0.2$\,dB of prediction
+($+18.7$\,dB measured, $+18.9$ predicted, for $\zeta$ increased $143\times$).
+
+Weighting the source by $v_k \propto 1/(\zeta_k\nu_k)$ instead removes the
+damping entirely, since $y_k \propto \zeta_k$: what is left is the modal
+velocity, which is what the plate actually does. The per-band divisor
+$n_c$ then restores the \emph{frequency} balance that the compensation had
+been supplying by accident --- physical modal amplitudes fall steeply with
+frequency, and a raw velocity sum outweighs band 1 with band 0 by a factor
+$\sim\!900$, starving the upper rungs --- but with a constant fixed by the
+mode indices alone, so no damping re-enters. Each rung is then driven by a
+band-mean modal velocity.
+
+With that source the drive is flat to a few dB across both damping knobs,
+and the fitted power law $\min(1, (2.3\cdot10^{-5}/\zeta_m)^{0.64})$ that
+used to scale the cascade amount --- an empirical correction for the
+material half of the same artefact --- has been removed: the knob now acts
+directly. \code{Tests/CascadeMeasure.cpp} renders these sweeps through the
+real synthesis and asserts the invariance, so the artefact cannot return
+unnoticed:
 %
 \begin{center}
-\begin{tabular}{cccccc}
+\begin{tabular}{lcc}
 \toprule
-$\zeta_m$ & $2.4\cdot10^{-3}$ & $10^{-3}$ & $10^{-4}$ & $10^{-5}$ & $7\cdot10^{-6}$\\
-max cascade & 0.05 & 0.1 & 0.4 & 0.9 & 1\\
+Shimmer at 300\,ms (dB) & spread, audio-driven & spread, motion-driven \\
+\midrule
+Viscous $\zeta_v \in [10^{-5}, 10^{-3}]$  & $29.6$ & $3.6$ \\
+Material $\zeta_m \in [7\cdot10^{-6}, 3\cdot10^{-4}]$ & $39.3$ & $2.0$ \\
 \bottomrule
 \end{tabular}
 \end{center}
 %
-which are nearly linear in log-log; the fitted power law
-%
-\begin{equation}
-  s(\zeta_m) \;=\; \min\!\left(1,\;
-     \bigl(2.3\cdot10^{-5}/\zeta_m\bigr)^{0.64}\right)
-\end{equation}
-%
-reproduces the table within $\sim$10\%. The effective cascade amount is
-$\mathrm{cascade} \times s(\zeta_m)$ (applied to the injection, the
-overlap floor and the depletion alike), so the knob keeps its full travel
-and its maximum tracks the acceptability limit at every damping setting.
+while the Cascade knob still spans $18$\,dB over its travel and a
+force-$10$ hit still shimmers $45$\,dB more than a force-$1$ one: the
+effect stays amplitude-gated, which is the part that \emph{is} physical.
 
 \paragraph{Depletion (low-frequency loss).}
 The transfer \eqref{eq:cascade} is additive: it copies energy upward but
