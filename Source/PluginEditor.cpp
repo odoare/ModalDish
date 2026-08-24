@@ -15,6 +15,7 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     : AudioProcessorEditor (&p), processor (p)
 {
     setLookAndFeel (&lnf);
+    lnf.setAccentColour (fem::theme::accent);   // tints the combo drop-downs
     addAndMakeVisible (topBar);
     topBar.setBackgroundColour (fem::theme::topBarBg);
     topBar.setAccentColour (fem::theme::accent);
@@ -90,6 +91,22 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     statusLabel.setColour (juce::Label::textColourId, fem::theme::dimText);
     statusLabel.setFont (juce::Font (juce::FontOptions (12.0f)));
     addAndMakeVisible (statusLabel);
+
+    fem::theme::styleCombo (viewBox, fem::theme::accent);
+    viewBox.addItem ("Modes", 1);
+    viewBox.addItem ("Displacement", 2);
+    viewBox.addItem ("Velocity", 3);
+    viewBox.setSelectedId (1, juce::dontSendNotification);
+    viewBox.onChange = [this]
+    {
+        // The Mode knob picks a shape to display; it means nothing while the
+        // view is showing the plate's live motion.
+        modeViewKnob.setEnabled (! showingLiveField());
+        fieldRef = 0.0f;
+        refreshField();
+        refreshStatus();
+    };
+    addAndMakeVisible (viewBox);
 
     fem::theme::styleKnob (modeViewKnob, "Mode", fem::theme::accent);
     modeViewKnob.setRange (0, fem::maxModes, 1);
@@ -212,7 +229,7 @@ void FemPlateAudioProcessorEditor::setAdvancedVisible (bool shouldShow)
     for (auto* k : { &cascAmpKnob, &cascDriveKnob, &cascWinKnob,
                      &cascAttKnob, &cascRelKnob, &cascOverKnob, &cascDeplKnob })
         k->setVisible (shouldShow);
-    setSize (shouldShow ? 1290 : 1020, 730);   // triggers resized()
+    setSize (shouldShow ? 1412 : 1142, 730);   // triggers resized()
     repaint();
 }
 
@@ -250,8 +267,29 @@ void FemPlateAudioProcessorEditor::refreshMeshAndField()
     refreshField();
 }
 
+bool FemPlateAudioProcessorEditor::showingLiveField() const
+{
+    return viewBox.getSelectedId() >= 2;
+}
+
+fem::PlateSynth::Field FemPlateAudioProcessorEditor::selectedQuantity() const
+{
+    return viewBox.getSelectedId() == 3 ? fem::PlateSynth::Field::velocity
+                                        : fem::PlateSynth::Field::displacement;
+}
+
 void FemPlateAudioProcessorEditor::refreshField()
 {
+    if (showingLiveField())
+    {
+        refreshLiveField();
+        return;
+    }
+
+    // A mode shape is a still picture with no natural scale: let the view
+    // normalise it on its own maximum.
+    plateView.setFieldScale (0.0f);
+
     const auto* model = processor.getCurrentModel();
     const int k = (int) modeViewKnob.getValue();
     // Only FEM modes have a mesh shape; tail modes show the bare grid.
@@ -259,6 +297,67 @@ void FemPlateAudioProcessorEditor::refreshField()
         plateView.setField (model->modes.shapes[(size_t) (k - 1)]);
     else
         plateView.setField ({});
+}
+
+void FemPlateAudioProcessorEditor::refreshLiveField()
+{
+    // w(x) = sum_k q_k phi_k(x) (or its time derivative), evaluated at the
+    // mesh vertices. No field reconstruction is needed on the audio thread:
+    // it publishes the modal coordinates and the sum happens here, once per
+    // frame. FEM modes only — the statistical tail has no mesh shape.
+    const auto* model = processor.getCurrentModel();
+    const int numFem = model != nullptr ? model->numFemModes() : 0;
+    if (numFem < 1)
+    {
+        plateView.setField ({});
+        return;
+    }
+
+    const int numVerts = (int) model->modes.shapes[0].size();
+    modalBuf.resize ((size_t) fem::maxModes);
+    const int n = juce::jmin (numFem,
+                              processor.copyModalField (selectedQuantity(),
+                                                        modalBuf.data(),
+                                                        fem::maxModes));
+
+    fieldBuf.assign ((size_t) numVerts, 0.0f);
+    for (int k = 0; k < n; ++k)
+    {
+        const float q = modalBuf[(size_t) k];
+        if (std::abs (q) < 1.0e-20f)
+            continue;
+        const auto& shape = model->modes.shapes[(size_t) k];
+        for (int v = 0; v < numVerts; ++v)
+            fieldBuf[(size_t) v] += q * shape[(size_t) v];
+    }
+
+    float peak = 0.0f;
+    for (float v : fieldBuf)
+        peak = juce::jmax (peak, std::abs (v));
+
+    // Below this the plate is at rest (a velocity-1 hit at Force 1 peaks
+    // around 0.065 in these units, and 0.084 for the velocity field — close
+    // enough for the two to share a scale): show the bare grid rather than a
+    // magnified numerical floor.
+    if (peak < 1.0e-6f)
+    {
+        fieldRef = 0.0f;
+        plateView.setField ({});
+        return;
+    }
+
+    // Amplitude reference, held across frames: it follows a rising field at
+    // once and falls at about 1.5 dB/s, so a hard hit never clips for long
+    // and the ring's decay is visible as the colours cool. The floor is what
+    // makes the fade actually reach the background: plate rings are long
+    // (seconds to a minute at light damping), far slower than any release
+    // that still tracks a fresh hit, so without it the reference would stay
+    // glued to the signal and the plate would look eternally full-scale.
+    // 0.02 is about a third of that reference hit, so a normal strike starts
+    // above it and everything quieter than it fades out proportionally.
+    fieldRef = juce::jmax (juce::jmax (peak, 0.02f), fieldRef * 0.995f);
+    plateView.setFieldScale (fieldRef);
+    plateView.setField (fieldBuf);
 }
 
 void FemPlateAudioProcessorEditor::refreshStatus()
@@ -277,8 +376,12 @@ void FemPlateAudioProcessorEditor::refreshStatus()
         if (model != nullptr)
         {
             text << " - " << model->numModes() << " modes";
-            const int k = (int) modeViewKnob.getValue();
-            if (k >= 1 && k <= model->numModes())
+            const int k = showingLiveField() ? 0 : (int) modeViewKnob.getValue();
+            if (showingLiveField())
+                text << (selectedQuantity() == fem::PlateSynth::Field::velocity
+                            ? " - showing plate velocity"
+                            : " - showing plate displacement");
+            else if (k >= 1 && k <= model->numModes())
             {
                 // f_k = f1 * sqrt(omega_k^2 / omega_1^2) at the current tension.
                 const double dT = (double) processor.apvts.getRawParameterValue (fem::id::tension)->load()
@@ -383,6 +486,9 @@ void FemPlateAudioProcessorEditor::timerCallback()
         progressValue = (double) juce::jmax (0.0f, processor.getComputeProgress());
         refreshStatus();
     }
+    if (showingLiveField() && plateView.isVisible())
+        refreshLiveField();
+
     // A MIDI note strikes at the last clicked point (or the plate centre if
     // it has never been clicked): mark it exactly like a click.
     const int midiStrikes = processor.getMidiStrikeCount();
@@ -560,6 +666,8 @@ void FemPlateAudioProcessorEditor::resized()
     strip.removeFromLeft (4);
     computeButton.setBounds (strip.removeFromLeft (76).reduced (0, 14));
     strip.removeFromLeft (10);
+    viewBox.setBounds (strip.removeFromLeft (116).reduced (0, 18));
+    strip.removeFromLeft (6);
     modeViewKnob.setBounds (strip.removeFromLeft (64));
     strip.removeFromLeft (10);
     progressBar.setBounds (strip.removeFromLeft (110).reduced (0, 20));

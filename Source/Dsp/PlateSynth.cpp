@@ -132,6 +132,11 @@ void PlateSynth::reset()
     for (auto& h : hammers)
         h.active = false;
     envStretch = 0.0f;
+    for (auto& q : fieldQ)
+        q.store (0.0f, std::memory_order_relaxed);
+    for (auto& v : fieldV)
+        v.store (0.0f, std::memory_order_relaxed);
+    fieldCount.store (0, std::memory_order_release);
     gliding = false;
     notePlayed = false;
     gamma = appliedGamma = 0.0;
@@ -259,6 +264,8 @@ void PlateSynth::retuneBank()
             outAmp[k] = 0.0f;
             compensation[k] = 1.0f;
             nlWeight[k] = 0.0f;
+            dispScale[k] = 0.0f;
+            velScale[k] = 0.0f;
             filters[k].c = fxme::BiquadCoeffs();
             filters[k].c.b0 = 0.0f;
             continue;
@@ -299,6 +306,17 @@ void PlateSynth::retuneBank()
         const double nuSq = nu[k] * nu[k];
         nlWeight[k] = (float) juce::jlimit (0.0, 1.0e12,
                           gRatio * zRatio * zRatio / juce::jmax (1.0e-12, nuSq * nuSq));
+
+        // Modal displacement and velocity per unit filter output, for the
+        // GUI field (copyModalField). Same normalisation choices as above,
+        // so the field keeps a consistent scale across parameter changes.
+        // Velocity is the displacement times nu_k: the same picture with the
+        // high modes lifted one power of frequency, which is what makes it
+        // look like the bright end of the spectrum rather than the low modes.
+        velScale[k]  = (float) juce::jlimit (0.0, 1.0e12,
+                           zRatio / juce::jmax (1.0e-12, nu[k]));
+        dispScale[k] = (float) juce::jlimit (0.0, 1.0e12,
+                           zRatio / juce::jmax (1.0e-12, nuSq));
     }
 
     appliedGamma = gamma;
@@ -358,6 +376,15 @@ void PlateSynth::strike (float x, float y, float velocity)
     lastHitX = x;
     lastHitY = y;
     computeInputWeights (x, y);
+}
+
+int PlateSynth::copyModalField (Field which, float* dest, int maxCount) const noexcept
+{
+    const int n = juce::jlimit (0, maxCount, fieldCount.load (std::memory_order_acquire));
+    const auto* src = which == Field::velocity ? fieldV : fieldQ;
+    for (int k = 0; k < n; ++k)
+        dest[k] = src[(size_t) k].load (std::memory_order_relaxed);
+    return n;
 }
 
 void PlateSynth::noteOn (float frequencyHz, float velocity) noexcept
@@ -434,7 +461,8 @@ float PlateSynth::processSample (float input) noexcept
     if (activeModes < 1)
         return 0.0f;
 
-    if (--nlCountdown <= 0)
+    const bool snapField = (--nlCountdown <= 0);
+    if (snapField)
     {
         nlCountdown = nlUpdatePeriod;
         updateGlide();
@@ -531,6 +559,11 @@ float PlateSynth::processSample (float input) noexcept
         const float y = filters[k].process (x);
         const float contrib = outAmp[k] * y;
         stretch += nlWeight[k] * y * y;   // Berger driver, g_k q_k^2 term
+        if (snapField)
+        {
+            fieldQ[k].store (dispScale[k] * y, std::memory_order_relaxed);
+            fieldV[k].store (velScale[k] * y, std::memory_order_relaxed);
+        }
         filters[k].z1 *= bandDecay[band];
         filters[k].z2 *= bandDecay[band];
         out += contrib;
@@ -538,6 +571,8 @@ float PlateSynth::processSample (float input) noexcept
     }
     for (int b = 0; b < numCascadeBands; ++b)
         prevBandOut[b] = bandOut[b];
+    if (snapField)
+        fieldCount.store (activeModes, std::memory_order_release);
 
     // Global stretching, smoothed: unlike the former <out^2> this does not
     // depend on where the pickup sits (see the header).

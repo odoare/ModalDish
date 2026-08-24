@@ -16,7 +16,7 @@ FemPlate is a Juce plugin that simulates the vibration of plates or mambrane of 
 
 - Next, once the modes, frequencies and dampings have been calculated, the user cal click anywhere on the plate to excite the plate along its modes
 
-- The tuning parameters are : tension to flexural stiffness parameter (a dimensionless parameter in front of the tension, order 2 derivatives once the equations have been scales so that the flexural stiffness is 1), viscous damping (term in factor of dy/dt, once equations are scaled), material damping (in factor of d^5 y/dt^5), base frequency f1, duration of the hammer shock (typical half sine shock), the position on the plate where the signal is outputed.
+- The tuning parameters are : tension to flexural stiffness parameter (a dimensionless parameter in front of the tension, order 2 derivatives once the equations have been scales so that the flexural stiffness is 1), viscous damping (term in factor of dy/dt, once equations are scaled), material damping (in factor of d^5 y/dy^4 dt), base frequency f1, duration of the hammer shock (typical half sine shock), the position on the plate where the signal is outputed.
 
 - It will be possible also to let the user to send any signal to the plate input, thus allowing this to work as an effect
 

@@ -96,9 +96,21 @@ nonlinearity (both 0 = exactly the linear model):
    condition (colour-coded, see legend).
 2. **Grid** builds the mesh (*Grid* knob = element density), **Compute**
    runs the modal analysis in the background (progress bar).
-3. **Plate view** — click to hit the plate; the *Mode* knob displays any
-   single eigenmode as filled contours (its frequency shows in the status
-   line).
+3. **Plate view** — click to hit the plate. The view selector next to it
+   chooses what the contours show: *Modes*, where the *Mode* knob picks a
+   single eigenmode to display (its frequency shows in the status line), or
+   *Displacement*, the live deflection of the sounding plate,
+   `w = Σ q_k φ_k`, refreshed at 30 Hz, or *Velocity*, the same sum one
+   power of frequency higher (`q̇_k = ω_k q_k`), which weights the high
+   modes up. The colour scale is held across frames, so a ring visibly cools
+   as it decays rather than being renormalised each frame; hard hits stay
+   bright longer, and heavy damping fades out in a second.
+
+   Velocity only looks different from displacement when high modes are
+   actually ringing: with the default 3 ms hammer the two are
+   indistinguishable, while at 0.3 ms the velocity field carries about twice
+   the spatial detail. Neither shows the cascade, whose shimmer lives in the
+   statistical tail, and tail modes have no mesh shape to draw.
 
 ## Playing it from MIDI
 

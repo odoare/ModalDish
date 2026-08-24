@@ -198,6 +198,33 @@ public:
     /** Current relative stiffening of mode 1 (0 = linear), for display. */
     float getNonlinearGamma() const noexcept { return (float) gamma; }
 
+    /** What a published modal snapshot holds — one power of the frequency
+        ratio apart, which is exactly how much weight the picture gives the
+        high modes. */
+    enum class Field
+    {
+        displacement,   ///< q_k     ~ y_k / (zeta_k nu_k^2)
+        velocity        ///< qdot_k  ~ y_k / (zeta_k nu_k)
+    };
+
+    /** Any thread: copies the latest modal snapshot into dest[0..n-1] and
+        returns n (<= maxCount). Summed against the mode shapes this is the
+        plate's field, w = sum_k q_k phi_k (or its time derivative).
+
+        The 0 dB-peak band-pass output is y_k = 2 zeta_k omega_k qdot_k, so
+        the bank holds *velocities*: Field::velocity is that, exactly, scaled
+        per mode (velScale below) and phase-true. Field::displacement divides
+        by omega_k once more (dispScale), which also turns each mode a
+        quarter period ahead of its true displacement — not observable at
+        frame rates, where the low modes are aliased many times over anyway.
+        Both drop the constant common to every mode, which a display
+        normalises away.
+
+        Sampled every nlUpdatePeriod samples and published per mode with
+        relaxed atomics: readers can straddle two sampling instants, which
+        is invisible in a picture and keeps the audio thread lock-free. */
+    int copyModalField (Field which, float* dest, int maxCount) const noexcept;
+
 private:
     void retune();                    // full: mode count, weights, then bank
     void retuneBank();                // coefficients/amps at tension + T_dyn(gamma)
@@ -245,6 +272,8 @@ private:
     float inWeights[fem::maxModes] {};   // phi_k(last hit) for the external input
     float compensation[fem::maxModes] {};// bandwidth gain compensation per mode
     float nlWeight[fem::maxModes] {};    // g_k q_k^2 per unit y_k^2 (Berger driver)
+    float dispScale[fem::maxModes] {};   // q_k per unit y_k (display field)
+    float velScale[fem::maxModes] {};    // qdot_k per unit y_k (display field)
     float lastHitX = 0.5f, lastHitY = 0.5f;
     Hammer hammers[maxStrikes];
     int nextHammer = 0;
@@ -259,6 +288,11 @@ private:
     double glideStep = 0.0;
     bool gliding = false;
     bool notePlayed = false;
+
+    // Field snapshots for the GUI (see copyModalField).
+    std::atomic<float> fieldQ[fem::maxModes];
+    std::atomic<float> fieldV[fem::maxModes];
+    std::atomic<int> fieldCount { 0 };
 
     // Nonlinear state (Berger dynamic tension + windowed cubic cascade).
     static constexpr int nlUpdatePeriod = 32;   // samples between gamma steps

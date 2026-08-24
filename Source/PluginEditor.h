@@ -45,6 +45,9 @@ private:
     void syncShapeToProcessor (bool geometryChanged);
     void refreshMeshAndField();
     void refreshField();
+    void refreshLiveField();             // live plate field, from the timer
+    bool showingLiveField() const;
+    fem::PlateSynth::Field selectedQuantity() const;
     void refreshStatus();
     void setOutputPosition (double x, double y);
     void drawPlateOverlay (juce::Graphics& g, fxme::acoustics::FemViewComponent& v);
@@ -88,8 +91,12 @@ private:
     fxme::FxmeSlider outXKnob, outYKnob, inGainKnob, outGainKnob;
     std::unique_ptr<SliderAttachment> outXAtt, outYAtt, inGainAtt, outGainAtt;
 
-    // Mode display selector (0 = none / live plate).
+    // Plate view contents: mode shapes (picked by the knob, 0 = bare grid)
+    // or the live field, displacement or velocity.
+    juce::ComboBox viewBox;
     fxme::FxmeSlider modeViewKnob;
+    std::vector<float> modalBuf, fieldBuf;   // scratch for the live field
+    float fieldRef = 0.0f;                   // held amplitude reference
 
     juce::Rectangle<int> geomPanel, modalPanel, cascPanel, ioPanel, legendArea;
 

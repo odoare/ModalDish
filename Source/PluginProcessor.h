@@ -108,6 +108,12 @@ public:
     /** Any thread: hit the plate (plate coordinates, velocity 0..1). */
     void requestStrike (float x, float y, float velocity);
 
+    /** Message thread: latest modal snapshot of the sounding plate (see
+        PlateSynth::copyModalField). Summed against the mode shapes this is
+        the plate's displacement or velocity field. */
+    int copyModalField (fem::PlateSynth::Field which, float* dest, int maxCount) const noexcept
+        { return synth.copyModalField (which, dest, maxCount); }
+
     /** Message thread: how many MIDI notes have struck the plate. The editor
         watches it so a played note flashes the same marker a click does. */
     int getMidiStrikeCount() const noexcept
