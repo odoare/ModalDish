@@ -261,12 +261,24 @@ static void testTensionAndMesh()
 // 5. Sparse vs dense storage
 // ---------------------------------------------------------------------------
 // The two paths run the same assembly and the same eigensolver over the same
-// element matrices; only the storage between them differs. Compressed rows
-// keep their column indices sorted, so a row walk visits the non-zeros in the
-// same ascending order a dense walk would, and the sums agree far beyond what
-// "mathematically equivalent" alone would promise. The tolerance below is
-// therefore tight on purpose: loosening it would hide exactly the kind of
-// indexing slip this test exists to catch.
+// element matrices. What differs is the storage, the renumbering the sparse
+// path applies before assembling, and hence the order the factorisation
+// eliminates in — so the two are not expected to agree bit for bit, only to
+// converge to the same answer.
+//
+// How closely is worth being precise about, because "close enough" is where a
+// real defect would hide. The eigensolver stops on a relative change in the
+// eigenvalues: 1e-6 on the lower half of the requested range, 1e-4 on the
+// upper half, the latter deliberately loose because that is where the finite
+// element discretisation error is orders of magnitude larger anyway. So the
+// converged modes must agree to near machine precision, while the top of the
+// range is only entitled to its own stated tolerance. Measured, the split is
+// exactly that: modes 0-9 of this problem agree to 1e-14 and the last few to
+// 1e-5, tracking the stopping rule rather than the storage.
+//
+// Testing the two halves separately is what keeps this sharp. One loose
+// tolerance over all the modes would still pass if the well-converged ones had
+// quietly gone wrong.
 static void testStorageEquivalence()
 {
     std::printf ("\n== Sparse vs dense storage ==\n");
@@ -299,45 +311,66 @@ static void testStorageEquivalence()
     if (rs.numModes() != rd.numModes())
         return;
 
-    double worstLambda = 0.0, worstG = 0.0, worstShape = 0.0;
+    // Index 0 = the tightly converged lower half, index 1 = the whole range.
+    double worstLambda[2] = { 0.0, 0.0 };
+    double worstG[2] = { 0.0, 0.0 };
+    double worstShape[2] = { 0.0, 0.0 };
+    const int converged = rs.numModes() / 2;
+
     for (int k = 0; k < rs.numModes(); ++k)
     {
         const double l0 = rd.lambda[(size_t) k], l1 = rs.lambda[(size_t) k];
-        worstLambda = std::max (worstLambda, std::abs (l1 - l0) / std::max (std::abs (l0), 1e-30));
+        const double dl = std::abs (l1 - l0) / std::max (std::abs (l0), 1e-30);
 
         const double g0 = rd.tensionG[(size_t) k], g1 = rs.tensionG[(size_t) k];
-        worstG = std::max (worstG, std::abs (g1 - g0) / std::max (std::abs (g0), 1e-30));
+        const double dg = std::abs (g1 - g0) / std::max (std::abs (g0), 1e-30);
 
         // Mode shapes are defined up to a sign; align on the largest component
         // before comparing, then measure relative to that component.
         const auto& a = rd.shapes[(size_t) k];
         const auto& b = rs.shapes[(size_t) k];
-        if (a.size() != b.size())
+        double ds = 1.0;
+        if (a.size() == b.size())
         {
-            worstShape = 1.0;
-            continue;
+            size_t big = 0;
+            for (size_t v = 0; v < a.size(); ++v)
+                if (std::abs (a[v]) > std::abs (a[big]))
+                    big = v;
+            const double peak = std::max ((double) std::abs (a[big]), 1e-30);
+            const double sign = (a[big] * b[big] < 0.0f) ? -1.0 : 1.0;
+            ds = 0.0;
+            for (size_t v = 0; v < a.size(); ++v)
+                ds = std::max (ds, std::abs (sign * b[v] - a[v]) / peak);
         }
-        size_t big = 0;
-        for (size_t v = 0; v < a.size(); ++v)
-            if (std::abs (a[v]) > std::abs (a[big]))
-                big = v;
-        const double peak = std::max ((double) std::abs (a[big]), 1e-30);
-        const double sign = (a[big] * b[big] < 0.0f) ? -1.0 : 1.0;
-        for (size_t v = 0; v < a.size(); ++v)
-            worstShape = std::max (worstShape, std::abs (sign * b[v] - a[v]) / peak);
+
+        for (int half = (k < converged ? 0 : 1); half < 2; ++half)
+        {
+            worstLambda[half] = std::max (worstLambda[half], dl);
+            worstG[half] = std::max (worstG[half], dg);
+            worstShape[half] = std::max (worstShape[half], ds);
+        }
     }
 
-    std::printf ("  worst relative difference: lambda %.2e, tensionG %.2e, shape %.2e\n",
-                 worstLambda, worstG, worstShape);
-    check (worstLambda < 1e-10, "eigenvalues agree between storage paths");
-    check (worstG < 1e-9, "tension coefficients agree between storage paths");
-    check (worstShape < 1e-6, "mode shapes agree between storage paths");
+    std::printf ("  converged half (modes 0-%d): lambda %.2e, tensionG %.2e, shape %.2e\n",
+                 converged - 1, worstLambda[0], worstG[0], worstShape[0]);
+    std::printf ("  all %d modes:                lambda %.2e, tensionG %.2e, shape %.2e\n",
+                 rs.numModes(), worstLambda[1], worstG[1], worstShape[1]);
+
+    check (worstLambda[0] < 1e-10, "converged eigenvalues agree to machine precision");
+    check (worstShape[0] < 1e-5, "converged mode shapes agree");
+    // tensionG is x'Gx for an operator that is not the one being diagonalised,
+    // so unlike the eigenvalue it is not stationary in x: its error is first
+    // order in the eigenvector error, and it belongs with the shapes rather
+    // than with the eigenvalues.
+    check (worstG[0] < 1e-6, "converged tension coefficients agree");
+    check (worstLambda[1] < 1e-4, "all eigenvalues agree within the solver tolerance");
+    check (worstShape[1] < 1e-1, "all mode shapes agree within the solver tolerance");
 
     const double sparseMb = (double) rs.solverBytes / 1048576.0;
     const double denseMb  = (double) rd.solverBytes / 1048576.0;
     std::printf ("  footprint: sparse %.1f MB, dense %.1f MB (%.2fx)\n",
                  sparseMb, denseMb, denseMb / std::max (sparseMb, 1e-9));
-    check (rs.solverBytes < rd.solverBytes, "sparse storage uses less memory");
+    check (rs.solverBytes * 10 < rd.solverBytes, "sparse storage uses far less memory");
     check (rs.storageUsed == MatrixStorage::sparse
            && rd.storageUsed == MatrixStorage::dense, "result reports the storage used");
 }

@@ -314,63 +314,92 @@ the expensive one and scatters element values into it. Both passes read
 the DOF indices through the same helper, so the pattern cannot fail to
 cover what the assembly scatters.
 
-The shifted operator $P = A + \sigma M$ is still factorised \emph{densely},
-which leaves one $n^2$ allocation and the $O(n^3/3)$ factorisation in
-place. The working set is thus
+\paragraph{Renumbering, and the factorisation.}
+Sparse operators alone are not enough, because Cholesky fills in: $L$ is
+non-zero wherever the original matrix has a non-zero anywhere to its left
+in the same row, which for a mesh numbered as the generator happened to
+produce it means very nearly everywhere. The factor of a sparse matrix in
+a careless order is a dense matrix.
+
+What fixes this is not a cleverer factorisation but a better numbering.
+Renumbering the unknowns so that coupled ones sit close together traps the
+fill inside a narrow envelope around the diagonal, and everything strictly
+outside that envelope is then exactly zero --- in floating point as much as
+in exact arithmetic --- so a factorisation that stores only the envelope is
+the complete factor with the provably-zero part left out. The renumbering
+used is reverse Cuthill--McKee \cite{cuthill-mckee}: a breadth-first walk
+of the coupling graph that visits each frontier in order of increasing
+degree, started from a pseudo-peripheral node (George--Liu
+\cite{george-liu}), then reversed --- which leaves the bandwidth unchanged
+but strictly shrinks the profile, the quantity that is actually paid for.
+On these meshes it takes the mean row bandwidth from roughly $n/1.5$ to
+$1.11\sqrt{n}$, a fit good to a few percent from $n = 554$ to
+$n = 19700$; at $n = 4913$, from $3681$ to $197$.
+
+The permutation is applied in the \emph{degree-of-freedom map}, before
+anything is assembled, and that is the whole of it. No matrix is permuted,
+no eigenvector is permuted back, and the vertex values exported at the end
+are read through the same renumbered map they were assembled through.
+Applying it anywhere closer to the solver would mean threading it through
+each of those steps separately, which is precisely the change that yields
+plausible-looking wrong mode shapes.
+
+\paragraph{What it costs now.}
+Nothing in the solve is quadratic in $n$ any more:
 %
 \begin{equation}
-  \underbrace{8 n^2}_{\text{Cholesky factor}}
-  \;+\; \underbrace{32\,p\,n}_{\text{iteration block}}
+  \underbrace{32\,p\,n}_{\text{iteration block}}
+  \;+\; \underbrace{8.9\,n^{3/2}}_{\text{profile factor}}
   \;+\; \underbrace{\mathcal{O}(n)}_{\text{sparse operators}}
   \quad\text{bytes},
   \qquad\text{against } 32 n^2 \text{ dense},
   \label{eq:footprint}
 \end{equation}
 %
-a factor of three to four in practice, with the matrix--vector products of
-the iteration --- three per vector per sweep --- dropping from $O(n^2)$ to
-$O(11n)$. Measured on the same machine, same meshes, both paths run
-back to back:
+and the leading term is the iteration block, $4$ vectors of $p \times n$
+for a block of $p = m + \max(8, m/2)$. That is worth stating plainly: what
+a solve costs is now set by \emph{how many modes are asked for}, and only
+linearly by how fine the mesh is. Measured on the same machine, same
+meshes, all three paths run back to back:
 %
 \begin{center}
 \begin{tabular}{rrrrrrr}
 \toprule
-& & \multicolumn{2}{c}{dense} & \multicolumn{2}{c}{sparse} & \\
+& & \multicolumn{2}{c}{dense} & \multicolumn{2}{c}{sparse $+$ profile} & \\
 \cmidrule(lr){3-4}\cmidrule(lr){5-6}
 $n$ & modes & time & memory & time & memory & gain \\
 \midrule
-$2149$ & $64$  & $13.1$\,s  & $125$\,MB   & $7.3$\,s   & $36$\,MB  & $1.8\times$ / $3.4\times$ \\
-$3841$ & $128$ & $114.8$\,s & $419$\,MB   & $59.9$\,s  & $122$\,MB & $1.9\times$ / $3.4\times$ \\
-$6029$ & $128$ & $335.5$\,s & $1040$\,MB  & $171.0$\,s & $287$\,MB & $2.0\times$ / $3.6\times$ \\
+$2149$ & $64$  & $13.1$\,s  & $125$\,MB  & $0.45$\,s & $7$\,MB  & $29\times$ / $17\times$ \\
+$3841$ & $128$ & $114.8$\,s & $419$\,MB  & $3.6$\,s  & $25$\,MB & $32\times$ / $17\times$ \\
+$6029$ & $128$ & $335.5$\,s & $1040$\,MB & $5.5$\,s  & $39$\,MB & $61\times$ / $26\times$ \\
+$8577$ & $256$ & ---        & $2.4$\,GB  & $35.3$\,s & $107$\,MB & --- \\
+$15381$ & $256$ & ---       & $7.6$\,GB  & $48.4$\,s & $196$\,MB & --- \\
+$23865$ & $256$ & ---       & $18.2$\,GB & $83.8$\,s & $309$\,MB & --- \\
 \bottomrule
 \end{tabular}
 \end{center}
 %
-The two agree bit for bit, not merely to round-off:
-compressed rows keep their column indices sorted, so a sparse row walk
-sums the non-zeros in exactly the order a dense row walk does. The console
-test suite asserts that equality, which makes it sharp enough to catch an
-indexing slip.
+The last two rows have no dense column because the dense solver cannot run
+them at all; the figure given is what it would have had to allocate. The
+gain is larger than the $O(n^3/3)$ factorisation alone accounts for,
+because the factorisation was never the expensive part: the $p$ triangular
+solves \emph{per iteration} were, and they fall from $O(n^2)$ to
+$O(n^{3/2})$ along with it.
 
-\paragraph{What still sets the ceiling.}
-The remaining $n^2$ is the dense factorisation, and it is what caps the
-Grid knob. Over the Grid range the projected footprint is now $5$\,MB at
-Grid 16 ($n=554$), $24$\,MB at 24 ($n=1243$), $63$\,MB at 32 ($n=2195$),
-$132$\,MB at 40 ($n=3440$) and $243$\,MB at the top, Grid 48 ($n=4913$) ---
-one third of what the same range cost dense. The editor shows the figure
-next to the mesh size once it passes $150$\,MB. Removing the ceiling
-altogether means factorising sparsely too: a bandwidth-reducing
-(reverse Cuthill--McKee \cite{cuthill-mckee}) renumbering brings the
-profile of these matrices down by more than an order of magnitude, and a
-profile Cholesky over that envelope needs no symbolic analysis phase.
-Measured on the actual DOF graph, that would take the Grid-48
-factorisation from $39.5$ to $0.03$ Gflop and its storage from
-$737$ to $5$\,MB. It is not, however, where the time goes: solving for 8
-modes instead of 128 on the same mesh only drops the total from $85$ to
-$18$\,s, so the factorisation is a fifth of the cost and the subspace
-iteration is the rest. Sparsity would make the mesh nearly free and leave
-the $O(n p^2)$ Rayleigh--Ritz projections --- which scale with the number
-of modes asked for, not with the mesh --- as the thing to beat.
+Accuracy is unaffected where it is defined to be. Changing the elimination
+order changes the rounding, so the sparse and dense paths no longer agree
+bit for bit; they agree to the extent the iteration was asked to converge,
+and the split is sharp. On a $24$-mode solve the first twelve --- held to
+$10^{-6}$ --- agree to $10^{-14}$ in $\lambda$ and $4 \times 10^{-6}$ in
+shape, while the last few, entitled only to $10^{-4}$, differ by
+$10^{-5}$. The test suite checks the two halves separately, since a single
+loose tolerance would pass even if the converged modes had quietly gone
+wrong.
+
+The remaining ceiling is time, not memory, and it is a ceiling on the
+\emph{mode count}: the $O(n p^2)$ Rayleigh--Ritz projections and the
+$4pn$ block are what a larger solve now pays for. The editor shows the
+projected footprint next to the mesh size once it passes $48$\,MB.
 
 \paragraph{Code layout.}
 None of the above is about plates, and it is not written as though it
@@ -1024,6 +1053,9 @@ either half is reusable on its own.
 \bibitem{cuthill-mckee} E.~Cuthill, J.~McKee, ``Reducing the bandwidth of
   sparse symmetric matrices'', in \emph{Proc. 24th National Conference of
   the ACM}, 1969, pp.~157--172.
+
+\bibitem{george-liu} A.~George, J.~W.~H. Liu, \emph{Computer Solution of
+  Large Sparse Positive Definite Systems}, Prentice-Hall, 1981.
 
 \bibitem{dunavant} D.~A. Dunavant, ``High degree efficient symmetrical
   Gaussian quadrature rules for the triangle'', \emph{International

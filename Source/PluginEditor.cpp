@@ -374,14 +374,14 @@ void FemPlateAudioProcessorEditor::refreshStatus()
     {
         text << mesh->numVertices() << " nodes, " << mesh->numTriangles() << " elements";
 
-        // The assembled matrices are sparse, but the shifted operator is still
-        // factorised densely, so the footprint is still quadratic in the free
-        // DOFs (nodes + edges) — a few hundred megabytes at the top of the
-        // Grid range. Better seen before pressing Compute than wondered about
-        // afterwards.
+        // Nothing in the solver is quadratic in the free DOFs (nodes + edges)
+        // any more, so this no longer warns of anything alarming — it is a
+        // size readout for the upper Grid settings, where a solve starts
+        // taking long enough to be worth knowing about in advance. Time, not
+        // memory, is what the top of the range costs now.
         const int n = mesh->numVertices() + mesh->numEdges();
         const double solverMb = fem::solverBytesEstimate (n) / 1048576.0;
-        if (solverMb >= 150.0)
+        if (solverMb >= 48.0)
             text << " - solver " << (solverMb >= 1024.0
                                         ? juce::String (solverMb / 1024.0, 1) + " GB"
                                         : juce::String (juce::roundToInt (solverMb)) + " MB");

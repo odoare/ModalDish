@@ -99,15 +99,17 @@ nonlinearity (both 0 = exactly the linear model):
   f₁ = 110 Hz is 388 live and 7% of a core, at f₁ = 440 Hz it is 80 live
   and under 2%.
 
-  The **Grid** knob reaches 48, and what stops it there is the eigensolver.
-  The assembled matrices are sparse (a Morley element couples each degree
-  of freedom to about eleven others whatever the mesh density), but the
-  shifted operator is still Cholesky-factored densely, so the footprint is
-  still n² doubles for n = nodes + edges: 63 MB at Grid 32, 132 MB at Grid
-  40, 243 MB at Grid 48 — one third of what the same range cost before the
-  matrices went sparse, and about half the time. The status line shows the
-  projected footprint once it passes 150 MB. Grid 16–32 is the interactive
-  range; above that, expect to wait.
+  The **Grid** knob reaches 48, a limit inherited from the dense
+  eigensolver that no longer applies. The matrices are sparse (a Morley
+  element couples each degree of freedom to about eleven others whatever
+  the mesh density) and the shifted operator is factorised inside the
+  narrow envelope left by a reverse Cuthill–McKee renumbering, so nothing
+  in the solve is quadratic in the mesh size any more: n = 6029 went from
+  336 s and 1.0 GB to 5.5 s and 39 MB, and n = 15381 — which the dense
+  solver could not run at all, needing 7.6 GB — solves 256 modes in 48 s
+  and 196 MB. What a solve costs is now set by the **mode count**, not by
+  the Grid setting. The status line shows the projected footprint once it
+  passes 48 MB.
 
 ## GUI workflow
 

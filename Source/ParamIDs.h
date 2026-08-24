@@ -13,6 +13,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 
 namespace fem::id
 {
@@ -46,29 +47,20 @@ namespace fem
     // Synthesis bank capacity: FEM-computed modes plus the statistical
     // (Berry random-wave) tail appended above them — see ModalModel.h.
     inline constexpr int maxModes = 512;
-    // Modes actually solved by the finite-element eigensolver. What limits
-    // this in practice is the Grid knob rather than the number here: the time
-    // grows with n^3 and with the requested count, for n = vertices + edges.
-    // Measured on the default plate, single core, i7-10810U, back when the
-    // solver held all four matrices densely (4 n^2 doubles):
-    //     grid 16 (n =  554,   9 MB):  92 modes in  0.5 s
-    //     grid 24 (n = 1243,  47 MB): 207 modes in  6.4 s
-    //     grid 32 (n = 2195, 147 MB): 256 modes in 51 s
-    //     grid 40 (n = 3440, 361 MB): 128 modes in 75 s
-    //     grid 48 (n = 4913, 737 MB): the top of the Grid range
-    // The three assembled matrices are sparse now (about eleven non-zeros per
-    // row whatever the mesh density) and only the shifted operator is still
-    // factorised densely, so those footprints are down to a third — see
-    // solverBytesEstimate below — and the times to about half. Measured back
-    // to back, same mesh both ways, identical eigenvalues to every digit:
-    //     n = 2149,  64 modes:  13.1 s / 125 MB  ->   7.3 s /  36 MB
-    //     n = 3841, 128 modes: 114.8 s / 419 MB  ->  59.9 s / 122 MB
-    //     n = 6029, 128 modes: 335.5 s / 1.0 GB  -> 171.0 s / 287 MB
-    // Grid still stops at 48: one step further (64) is n = 8742, and while
-    // 688 MB is no longer out of reach, the dense factorisation and the
-    // O(n p^2) projections still put it at tens of minutes, which is not a
-    // setting anyone would wait for. Lifting it wants a sparse factorisation
-    // (bandwidth-reducing ordering plus a profile Cholesky), not a bigger cap.
+    // Modes actually solved by the finite-element eigensolver. This is now the
+    // binding limit rather than the Grid knob: the solver's working set and
+    // its Rayleigh-Ritz projections both grow with the mode count, and only
+    // linearly with the mesh. Measured on a square plate, i7-10810U, dense
+    // storage against the current sparse-plus-profile solver:
+    //     n =  2149,  64 modes:  13.1 s / 125 MB  ->  0.45 s /   7 MB
+    //     n =  3841, 128 modes: 114.8 s / 419 MB  ->   3.6 s /  25 MB
+    //     n =  6029, 128 modes: 335.5 s / 1.0 GB  ->   5.5 s /  39 MB
+    //     n =  8577, 256 modes:  (2.8 GB, would not run)  35.3 s / 107 MB
+    //     n = 15381, 256 modes:  (7.6 GB, would not run)  48.4 s / 196 MB
+    // The Grid knob still stops at 48 (n = 4913 on the default plate), which
+    // the old dense solver set because it needed 737 MB there. That reason is
+    // gone — n = 15381 now solves 256 modes in under a minute — so the cap is
+    // worth revisiting as a product decision rather than a numerical one.
     inline constexpr int maxFemModes = 256;
 
     /** Modes the eigensolver is asked for on a mesh with n = vertices + edges
@@ -82,21 +74,32 @@ namespace fem
     }
 
     /** Peak working set of one solve at that mesh size, in bytes. Estimated
-        the way the editor needs it — before pressing Compute — from the same
-        three terms the solver actually allocates:
+        the way the editor needs it — before pressing Compute — from the three
+        terms the solver actually allocates:
 
-            n^2 doubles   the dense Cholesky factor of A + sigma M
-            4 p n doubles the subspace iteration block, p = modes + max(8, modes/2)
-            ~320 n bytes  the three sparse operators and their shared pattern
+            32 p n bytes    the subspace iteration block, 4 vectors of p x n,
+                            for a block of p = modes + max(8, modes/2)
+            ~8.9 n^1.5      the profile Cholesky factor of A + sigma M. The
+                            mean row bandwidth of these meshes after the
+                            reverse Cuthill-McKee renumbering measures
+                            1.11 sqrt(n), within a few percent from n = 554 to
+                            n = 19700, which is where the exponent comes from
+            ~400 n bytes    the three sparse operators, their shared pattern
+                            and the shifted copy
 
-        ModalResult::solverBytes reports the measured figure afterwards; these
-        two agree to a few percent. Before the matrices went sparse the first
-        term was 4 n^2 rather than n^2, which is the whole of the difference. */
+        Note which term leads: the iteration block, which grows with the number
+        of modes asked for and only linearly with the mesh. Nothing here is
+        quadratic in n any more, which is why a mesh that used to be measured
+        in gigabytes is now measured in tens of megabytes.
+
+        ModalResult::solverBytes reports the measured figure afterwards. These
+        two agree to about 10%, this one being the higher — the right direction
+        for a warning shown before the fact. */
     inline double solverBytesEstimate (int n) noexcept
     {
         const double dn = (double) n;
         const int modes = femModeCount (n);
         const double p = (double) (modes + std::max (8, modes / 2));
-        return dn * dn * 8.0 + 4.0 * p * dn * 8.0 + 320.0 * dn;
+        return 32.0 * p * dn + 8.9 * dn * std::sqrt (dn) + 400.0 * dn;
     }
 }
