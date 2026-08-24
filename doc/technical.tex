@@ -570,9 +570,8 @@ frequency ranges, plate modal density being constant); band $b$ is driven
 by the cubic of the $W$ bands directly below it only (default $W = 4$),
 %
 \begin{equation}
-  w^{(b)}(t) = S \sum_{c = b-W}^{b-1} \frac{1}{n_c}
-              \sum_{k \in \mathcal{B}_c}
-              \varphi_k(\bm{x}_o)\, v_k\, y_k(t),
+  w^{(b)}(t) = \frac{S}{\sqrt{|\Omega|}} \sum_{c = b-W}^{b-1}
+              \frac{1}{n_c} \sum_{k \in \mathcal{B}_c} v_k\, y_k(t),
   \qquad
   F_b(t) \;=\; A\, g_b(t)\, \tanh^3\!\bigl(B\, w^{(b)}(t)\bigr),
   \label{eq:cascade}
@@ -581,10 +580,11 @@ by the cubic of the $W$ bands directly below it only (default $W = 4$),
 fed to mode $l \in \mathcal{B}_b$ with weight $\varphi_l(\bm{x}_h)/c_l$
 (dividing by the bandwidth compensation $c_l$, which is re-applied on
 output, makes the audible cascade level independent of the damping
-settings). The source is the plate's \emph{motion}: $v_k = y_k$'s modal
-velocity scale $\zeta_{\mathrm{ref}}/(\zeta_k \nu_k)$, normalised per band
-by $n_c = \sum_{k \in \mathcal{B}_c} 1/\nu_k$ and by one global gain
-$S = 3$ (\S\ref{par:drive}). The source \emph{window} matters: summing all lower bands
+settings). The source is the plate's \emph{motion}, over the whole plate:
+$v_k = \zeta_{\mathrm{ref}}/(\zeta_k \nu_k)$ is the modal velocity scale,
+$n_c = \sum_{k \in \mathcal{B}_c} 1/\nu_k$ normalises each band,
+$1/\sqrt{|\Omega|}$ is what a mass-normalised $\varphi_k$ is typically
+worth, and $S = 3$ is the one global gain (\S\ref{par:drive}). The source \emph{window} matters: summing all lower bands
 would let the loud strike band drive the top bands quasi-directly and the
 whole spectrum lights up within milliseconds; with the window, each stage
 extends the spectral reach by at most a factor 3 and energy genuinely
@@ -669,13 +669,30 @@ $\sim\!900$, starving the upper rungs --- but with a constant fixed by the
 mode indices alone, so no damping re-enters. Each rung is then driven by a
 band-mean modal velocity.
 
+\paragraph{Nor at the pickup.}
+The same sum used to carry $\varphi_k(\bm{x}_o)$, so the entire cascade
+followed the output-point parameters: a mode nodal at the pickup drove
+nothing, however hard the plate was moving there, and dragging the output
+point across the plate moved the drive by $18.2$\,dB. A real plate's cubic
+coupling does not know where the microphone is. The weight is now the
+constant $1/\sqrt{|\Omega|}$, the typical size of a mass-normalised mode
+shape ($\int_\Omega \varphi_k^2 \dd A = 1$), which keeps the drive's level
+the same on any geometry while making it depend on no listening position
+at all --- measured across five pickup positions, the high-mode motion the
+cascade creates is now identical to the last digit. What the pickup still
+changes is what one \emph{hears} of that motion, which is what a pickup is
+for. The \emph{injection} keeps its $\varphi_l(\bm{x}_h)$: the hit point is
+where the plate deflects most, the one position the nonlinearity has a
+physical claim to, and it is what ties the cascade's character to how the
+plate is played.
+
 With that source the drive is flat to a few dB across both damping knobs,
 and the fitted power law $\min(1, (2.3\cdot10^{-5}/\zeta_m)^{0.64})$ that
 used to scale the cascade amount --- an empirical correction for the
 material half of the same artefact --- has been removed: the knob now acts
 directly. \code{Tests/CascadeMeasure.cpp} renders these sweeps through the
-real synthesis and asserts the invariance, so the artefact cannot return
-unnoticed:
+real synthesis and asserts both invariances, so the artefacts cannot
+return unnoticed:
 %
 \begin{center}
 \begin{tabular}{lcc}

@@ -201,6 +201,22 @@ void PlateSynth::retune()
                                    juce::jmax (b, activeModes * b / numCascadeBands));
     cascadeSplit = juce::jmax (1, bandStart[1]);
 
+    // Mass-normalised shapes satisfy int phi^2 dA = 1, so a typical value of
+    // phi_k is 1/sqrt(A): that is the constant the cascade source uses in
+    // place of a point evaluation, which keeps its level the same on any
+    // plate (see updateCascadeWeights and the header).
+    double area = 0.0;
+    if (model->mesh != nullptr)
+        for (const auto& t : model->mesh->triangles)
+        {
+            const auto& a = model->mesh->vertices[(size_t) t[0]];
+            const auto& b = model->mesh->vertices[(size_t) t[1]];
+            const auto& c = model->mesh->vertices[(size_t) t[2]];
+            area += 0.5 * std::abs ((b.x - a.x) * (c.y - a.y)
+                                  - (c.x - a.x) * (b.y - a.y));
+        }
+    srcAmp = (float) (1.0 / std::sqrt (juce::jmax (1.0e-6, area)));
+
     computeOutputWeights();
     computeInputWeights (lastHitX, lastHitY);
     retuneBank();
@@ -311,16 +327,18 @@ void PlateSynth::retuneBank()
 
     // Cascade source weights: the modal velocity of each mode, normalised
     // per band by a constant that depends on the mode indices only (no
-    // damping), so every rung of the ladder is driven by a comparable
-    // band-mean velocity. See the header for why this replaces the audible,
-    // compensation-weighted signal the ladder used to read.
+    // damping), and by the plate's own scale 1/sqrt(A) rather than by a
+    // mode shape sampled at the pickup. Every rung of the ladder is then
+    // driven by a comparable band-mean velocity of the whole plate. See the
+    // header for why this replaces the audible, compensation-weighted signal
+    // read at the output point that the ladder used to use.
     for (int b = 0; b < numCascadeBands; ++b)
     {
         double norm = 0.0;
         for (int k = bandStart[b]; k < bandStart[b + 1] && k < activeModes; ++k)
             norm += 1.0 / juce::jmax (1.0e-6, nu[k]);
 
-        const float scale = (float) (norm > 0.0 ? cascadeSourceGain / norm : 0.0);
+        const float scale = (float) (norm > 0.0 ? cascadeSourceGain * srcAmp / norm : 0.0);
         for (int k = bandStart[b]; k < bandStart[b + 1] && k < activeModes; ++k)
             cascSrcW[k] = velScale[k] * scale;
     }
@@ -573,7 +591,7 @@ float PlateSynth::processSample (float input) noexcept
         filters[k].z1 *= bandDecay[band];
         filters[k].z2 *= bandDecay[band];
         out += contrib;
-        bandOut[band] += phiOut[k] * cascSrcW[k] * y;
+        bandOut[band] += cascSrcW[k] * y;
     }
     for (int b = 0; b < numCascadeBands; ++b)
         prevBandOut[b] = bandOut[b];

@@ -21,8 +21,11 @@
     normalised per band by a constant fixed by the mode indices alone), which
     has no damping in it at all. This test renders one strike over both damping
     knobs and checks that the shimmer no longer tracks them, so the artefact
-    cannot come back unnoticed. It also checks that the Cascade knob still does
-    something and that the effect stays amplitude-gated.
+    cannot come back unnoticed. Nor is the source read at the pickup any more:
+    weighted by phi_k(x_o), the drive moved by 18.2 dB as the output point was
+    moved around the plate, which the cubic coupling of a real plate has no way
+    of knowing about. It also checks that the Cascade knob still does something
+    and that the effect stays amplitude-gated.
 
     Run: CascadeMeasure   (exit code 0 when every check passes)
 
@@ -57,8 +60,6 @@ namespace
     //==========================================================================
     // The plugin's default plate: slightly elliptic, four simply supported
     // segments, grid 16 (PluginProcessor::makeDefaultShape).
-    std::uint64_t tailSeed = 0;
-
     double tailRand (std::uint64_t& s)
     {
         s += 0x9e3779b97f4a7c15ull;
@@ -146,9 +147,16 @@ namespace
         float matDamp  = 7.0e-6f;
         float cascade  = 1.0f;
         float force    = 6.0f;
+        float outX     = 0.5f;
+        float outY     = 0.47f;
     };
 
-    std::vector<float> render (const fem::ModalModel& model, const Patch& patch)
+    /** Renders one strike. When `modalProbe` is given it receives the modal
+        velocity snapshot taken at `probeSeconds` — a picture of what the
+        plate is doing, with no pickup in it. */
+    std::vector<float> render (const fem::ModalModel& model, const Patch& patch,
+                               std::vector<float>* modalProbe = nullptr,
+                               double probeSeconds = 0.3)
     {
         fem::PlateSynth synth;
         synth.prepare (sampleRate);
@@ -160,14 +168,41 @@ namespace
         p.cascade = patch.cascade;
         p.force = patch.force;
         p.numModes = 192;
+        p.outX = patch.outX;
+        p.outY = patch.outY;
         synth.update (&model, p);
         synth.strike (0.38f, 0.45f, 1.0f);
 
         const int n = (int) (renderSeconds * sampleRate);
+        const int probeAt = (int) (probeSeconds * sampleRate);
         std::vector<float> out ((size_t) n);
         for (int i = 0; i < n; ++i)
+        {
             out[(size_t) i] = synth.processSample (0.0f);
+            if (modalProbe != nullptr && i == probeAt)
+            {
+                modalProbe->assign ((size_t) fem::maxModes, 0.0f);
+                const int got = synth.copyModalField (fem::PlateSynth::Field::velocity,
+                                                      modalProbe->data(), fem::maxModes);
+                modalProbe->resize ((size_t) got);
+            }
+        }
         return out;
+    }
+
+    /** RMS of the upper half of the bank: how much high-mode motion there is
+        in the plate, whatever the pickup happens to see of it. */
+    double highModeMotionDb (const std::vector<float>& modal)
+    {
+        const int n = (int) modal.size();
+        double sum = 0.0;
+        int count = 0;
+        for (int k = n / 2; k < n; ++k)
+        {
+            sum += (double) modal[(size_t) k] * modal[(size_t) k];
+            ++count;
+        }
+        return 20.0 * std::log10 (std::sqrt (sum / juce::jmax (1, count)) + 1.0e-30);
     }
 
     /** Level in dB of the signal above (or below) `cutoff`, in a 10 ms window
@@ -259,11 +294,37 @@ int main()
 
     std::printf ("\n  viscous spread %.1f dB, material spread %.1f dB\n",
                  spread (viscAt300), spread (matAt300));
-    // Before the fix the viscous spread over this range was 38.7 dB.
-    check (spread (viscAt300) < 8.0, "shimmer is independent of the Viscous knob (< 8 dB)");
-    check (spread (matAt300) < 8.0, "shimmer is independent of the Material knob (< 8 dB)");
+    // Audio-driven, these spreads were 29.6 dB and 39.3 dB. What is left is
+    // not drive: the ladder's own targets ring for longer or shorter with the
+    // damping, and the middle rungs are sources for the upper ones, so a few
+    // dB of variation is the physics doing its job. The bar is set to catch a
+    // return of the artefact (which was four to five times larger), not to
+    // pin the sound down.
+    check (spread (viscAt300) < 10.0, "shimmer barely tracks the Viscous knob (< 10 dB)");
+    check (spread (matAt300) < 10.0, "shimmer barely tracks the Material knob (< 10 dB)");
 
-    // ---- 2. ...but must still follow the Cascade knob ----------------------
+    // ---- 2. The drive must not depend on where the plate is listened to ----
+    // Measured on the plate's own motion, not on the output: moving the
+    // pickup legitimately changes what is *heard* (a microphone does that),
+    // but it must not change what the cascade does to the plate. When the
+    // source was summed with phi_k(x_o) this spread was 18.2 dB.
+    std::printf ("\n== Pickup independence of the drive (high-mode motion, dB) ==\n");
+    const float pickX[] = { 0.50f, 0.35f, 0.62f, 0.50f, 0.44f };
+    const float pickY[] = { 0.47f, 0.40f, 0.55f, 0.30f, 0.62f };
+    std::vector<double> byPickup;
+    for (int i = 0; i < 5; ++i)
+    {
+        Patch p; p.outX = pickX[i]; p.outY = pickY[i];
+        std::vector<float> modal;
+        render (model, p, &modal);
+        byPickup.push_back (highModeMotionDb (modal));
+        std::printf ("  pickup (%.2f, %.2f)  %8.1f\n",
+                     (double) pickX[i], (double) pickY[i], byPickup.back());
+    }
+    std::printf ("  spread %.2f dB\n", spread (byPickup));
+    check (spread (byPickup) < 0.5, "the cascade drive ignores the output point");
+
+    // ---- 3. ...but must still follow the Cascade knob ----------------------
     std::printf ("\n== Cascade knob (4 kHz and up, dB at 300 ms) ==\n");
     std::vector<double> byKnob;
     for (float c : { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f })
@@ -279,7 +340,7 @@ int main()
     check (byKnob[2] > byKnob[0] && byKnob.back() >= byKnob[2],
            "the Cascade knob is monotonic across its range");
 
-    // ---- 3. ...and stay amplitude-gated -----------------------------------
+    // ---- 4. ...and stay amplitude-gated -----------------------------------
     std::printf ("\n== Amplitude gating (4 kHz and up, dB at 300 ms) ==\n");
     std::vector<double> byForce;
     for (float f : { 1.0f, 4.0f, 10.0f })

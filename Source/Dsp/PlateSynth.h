@@ -100,7 +100,8 @@
       root, the measured drive is flat to about 1 dB across three decades of
       either damping knob and the correction has nothing left to correct.
 
-      The source signal is the plate's *motion*, not its audible output.
+      The source signal is the plate's *motion* over the whole plate, not
+      its audible output at a point.
       Feeding the cascade the compensated audio (phi_out * c_k * y_k, what
       reaches the ear) made the effect depend steeply on the damping knobs
       for a reason that has nothing to do with physics: a band-pass ring has
@@ -121,6 +122,19 @@
       indices alone, with no damping in it — which makes the rungs
       comparable, as the voiced ladder assumes, without reintroducing the
       artefact. Every rung is then driven by a band-mean modal velocity.
+
+      Nor is the source read at the pickup any more. It used to be summed
+      with phi_k(x_o), which made the whole cascade follow the output-point
+      knobs: a mode nodal at the pickup drove nothing, however hard the
+      plate was moving there. The cubic coupling of a real plate does not
+      know where you put the microphone. The weight is now the constant
+      1/sqrt(A), which is what a typical phi_k is worth on a mass-normalised
+      plate (int phi^2 dA = 1), so the drive keeps its level on any geometry
+      while depending on none of the listening positions. The *injection*
+      still carries phi_l(x_h): the hit point is where the plate deflects
+      most, so it is the one position the nonlinearity has a physical claim
+      to, and it is what keeps the cascade's character tied to how the plate
+      is played.
 
       Depletion ("Deplete" parameter): the transfer is otherwise purely
       additive, so the low modes would ring on untouched while the shimmer
@@ -297,6 +311,7 @@ private:
     float dispScale[fem::maxModes] {};   // q_k per unit y_k (display field)
     float velScale[fem::maxModes] {};    // qdot_k per unit y_k (display field)
     float cascSrcW[fem::maxModes] {};    // cascade source weight (band-normalised)
+    float srcAmp = 1.0f;                 // 1/sqrt(plate area): typical |phi_k|
     float lastHitX = 0.5f, lastHitY = 0.5f;
     Hammer hammers[maxStrikes];
     int nextHammer = 0;
