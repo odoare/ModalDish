@@ -11,6 +11,8 @@
       3. Mixed boundary sanity: clamped/free edges, mode shapes vanish on the
          clamped side and not on the free side.
       4. Mesh/point-location round trip.
+      5. Sparse and dense matrix storage agree, and by how much they differ in
+         footprint.
 
     Exit code 0 when everything passes.
 
@@ -255,6 +257,91 @@ static void testTensionAndMesh()
         check (false, "tension solves returned modes");
 }
 
+// ---------------------------------------------------------------------------
+// 5. Sparse vs dense storage
+// ---------------------------------------------------------------------------
+// The two paths run the same assembly and the same eigensolver over the same
+// element matrices; only the storage between them differs. Compressed rows
+// keep their column indices sorted, so a row walk visits the non-zeros in the
+// same ascending order a dense walk would, and the sums agree far beyond what
+// "mathematically equivalent" alone would promise. The tolerance below is
+// therefore tight on purpose: loosening it would hide exactly the kind of
+// indexing slip this test exists to catch.
+static void testStorageEquivalence()
+{
+    std::printf ("\n== Sparse vs dense storage ==\n");
+
+    const auto mesh = generateMesh (rectangle (1.0, 0.8), 1.0 / 22.0);
+
+    BoundarySpec bc;
+    bc.segmentStart = { 0.0 };
+    bc.segmentBc = { BoundaryCondition::Clamped };
+
+    ModalOptions base;
+    base.numModes = 24;
+    base.tension = 12.0;
+    base.numThreads = 1;      // one thread: the comparison is of storage, and
+                              // a fixed schedule keeps the run reproducible
+
+    ModalOptions sparseOpt = base;
+    sparseOpt.storage = MatrixStorage::sparse;
+    ModalOptions denseOpt = base;
+    denseOpt.storage = MatrixStorage::dense;
+
+    const auto rs = computePlateModes (mesh, bc, sparseOpt);
+    const auto rd = computePlateModes (mesh, bc, denseOpt);
+
+    check (rs.valid() && rd.valid(), "both storage paths returned modes");
+    if (! (rs.valid() && rd.valid()))
+        return;
+
+    check (rs.numModes() == rd.numModes(), "same number of modes survived");
+    if (rs.numModes() != rd.numModes())
+        return;
+
+    double worstLambda = 0.0, worstG = 0.0, worstShape = 0.0;
+    for (int k = 0; k < rs.numModes(); ++k)
+    {
+        const double l0 = rd.lambda[(size_t) k], l1 = rs.lambda[(size_t) k];
+        worstLambda = std::max (worstLambda, std::abs (l1 - l0) / std::max (std::abs (l0), 1e-30));
+
+        const double g0 = rd.tensionG[(size_t) k], g1 = rs.tensionG[(size_t) k];
+        worstG = std::max (worstG, std::abs (g1 - g0) / std::max (std::abs (g0), 1e-30));
+
+        // Mode shapes are defined up to a sign; align on the largest component
+        // before comparing, then measure relative to that component.
+        const auto& a = rd.shapes[(size_t) k];
+        const auto& b = rs.shapes[(size_t) k];
+        if (a.size() != b.size())
+        {
+            worstShape = 1.0;
+            continue;
+        }
+        size_t big = 0;
+        for (size_t v = 0; v < a.size(); ++v)
+            if (std::abs (a[v]) > std::abs (a[big]))
+                big = v;
+        const double peak = std::max ((double) std::abs (a[big]), 1e-30);
+        const double sign = (a[big] * b[big] < 0.0f) ? -1.0 : 1.0;
+        for (size_t v = 0; v < a.size(); ++v)
+            worstShape = std::max (worstShape, std::abs (sign * b[v] - a[v]) / peak);
+    }
+
+    std::printf ("  worst relative difference: lambda %.2e, tensionG %.2e, shape %.2e\n",
+                 worstLambda, worstG, worstShape);
+    check (worstLambda < 1e-10, "eigenvalues agree between storage paths");
+    check (worstG < 1e-9, "tension coefficients agree between storage paths");
+    check (worstShape < 1e-6, "mode shapes agree between storage paths");
+
+    const double sparseMb = (double) rs.solverBytes / 1048576.0;
+    const double denseMb  = (double) rd.solverBytes / 1048576.0;
+    std::printf ("  footprint: sparse %.1f MB, dense %.1f MB (%.2fx)\n",
+                 sparseMb, denseMb, denseMb / std::max (sparseMb, 1e-9));
+    check (rs.solverBytes < rd.solverBytes, "sparse storage uses less memory");
+    check (rs.storageUsed == MatrixStorage::sparse
+           && rd.storageUsed == MatrixStorage::dense, "result reports the storage used");
+}
+
 int main()
 {
     std::printf ("fxme::acoustics plate FEM validation\n");
@@ -262,6 +349,7 @@ int main()
     testClampedCircle();
     testMixedBoundary();
     testTensionAndMesh();
+    testStorageEquivalence();
 
     std::printf ("\n%s (%d failure%s)\n",
                  failures == 0 ? "ALL TESTS PASSED" : "TESTS FAILED",

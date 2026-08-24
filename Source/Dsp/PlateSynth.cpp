@@ -184,6 +184,7 @@ void PlateSynth::update (const ModalModel* newModel, const Params& params)
 void PlateSynth::retune()
 {
     activeModes = 0;
+    liveModes = 0;
     if (model == nullptr || model->numModes() < 1)
         return;
 
@@ -257,6 +258,7 @@ void PlateSynth::retuneBank()
         nu[k] = std::sqrt (omegaSq / omega1SqEff);
     }
 
+    liveModes = 0;
     for (int k = 0; k < activeModes; ++k)
     {
         if (nu[k] <= 0.0 || freq[k] < 20.0 || freq[k] > maxFreq)
@@ -293,6 +295,8 @@ void PlateSynth::retuneBank()
                                      * spacing / (2.0 * freq[k]);
             zeta = juce::jmax (zeta, (float) juce::jlimit (0.0, 0.5, zetaFloor));
         }
+
+        liveModes = k + 1;      // freq ascends, so this ends up past the last live mode
 
         const float q = juce::jlimit (0.5f, 1.0e5f, 1.0f / (2.0f * zeta));
         filters[k].c = fxme::BiquadCoeffs::bandpass (fs, (float) freq[k], q);
@@ -569,7 +573,12 @@ float PlateSynth::processSample (float input) noexcept
     float stretch = 0.0f;
     float bandOut[numCascadeBands] = {};   // cascade source: band-mean velocity
     int band = 0;
-    for (int k = 0; k < activeModes; ++k)
+    // Only up to the last mode still inside the audible band: the bank is
+    // ordered by frequency, and everything above Nyquist is muted (b0 = 0),
+    // so processing it would cost exactly as much as a sounding mode and
+    // return silence. At a high Freq setting most of a large bank is up
+    // there.
+    for (int k = 0; k < liveModes; ++k)
     {
         while (band + 1 < numCascadeBands && k >= bandStart[band + 1])
             ++band;
@@ -592,7 +601,7 @@ float PlateSynth::processSample (float input) noexcept
     for (int b = 0; b < numCascadeBands; ++b)
         prevBandOut[b] = bandOut[b];
     if (snapField)
-        fieldCount.store (activeModes, std::memory_order_release);
+        fieldCount.store (liveModes, std::memory_order_release);
 
     // Global stretching, smoothed: an integral over the plate, so it does
     // not depend on where the pickup sits (see the header).

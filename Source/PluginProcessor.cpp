@@ -369,7 +369,7 @@ void FemPlateAudioProcessor::invalidateBoundary()
 
 bool FemPlateAudioProcessor::buildMesh()
 {
-    const double h = 1.0 / juce::jlimit (6, 40, shapeData.meshDensity);
+    const double h = 1.0 / juce::jlimit (6, 48, shapeData.meshDensity);
     auto mesh = std::make_shared<fxme::acoustics::FemMesh> (
         fxme::acoustics::generateMesh (shapeData.outline, h));
     if (mesh->empty())
@@ -394,14 +394,10 @@ void FemPlateAudioProcessor::computeModes()
         bc.segmentBc.push_back ((fxme::acoustics::BoundaryCondition) juce::jlimit (0, 3, b));
 
     fxme::acoustics::ModalOptions opt;
-    // Solve as many FEM modes as reasonable in one go (the Modes knob then
-    // selects without recomputing), but never ask for more than the mesh can
-    // resolve: the top discrete modes need several DOFs per half-wave to be
-    // physical, ~6 DOFs per mode in practice. A finer Grid setting unlocks
-    // more FEM modes; the statistical tail fills the bank above them.
-    opt.numModes = juce::jmin (fem::maxFemModes,
-                               juce::jmax (8, (displayMesh->numVertices()
-                                               + displayMesh->numEdges()) / 6));
+    // Solve as many FEM modes as reasonable in one go; fem::femModeCount says
+    // how many the mesh can resolve, and the editor's footprint readout uses
+    // the same rule so the two never disagree.
+    opt.numModes = fem::femModeCount (displayMesh->numVertices() + displayMesh->numEdges());
     opt.tension = pTension->load();
     opt.progress = [this] (float pr) { computeProgress.store (pr); };
 
@@ -412,7 +408,21 @@ void FemPlateAudioProcessor::computeModes()
     std::vector<fxme::BackgroundTaskRunner::Job> jobs;
     jobs.push_back ([this, mesh, bc, opt]
     {
-        pendingModel->modes = fxme::acoustics::computePlateModes (*mesh, bc, opt);
+        // The assembled matrices are sparse but the shifted operator is still
+        // factorised densely, so the working set is dominated by n^2 doubles
+        // and reaches hundreds of megabytes at the top of the Grid range (see
+        // fem::solverBytesEstimate). Let a failed allocation come back as "no
+        // modes" rather than as a terminate() on the worker thread; the
+        // completion handler below already treats an invalid result as a
+        // failed computation.
+        try
+        {
+            pendingModel->modes = fxme::acoustics::computePlateModes (*mesh, bc, opt);
+        }
+        catch (const std::bad_alloc&)
+        {
+            pendingModel->modes = {};
+        }
     });
 
     runner.runJobs (std::move (jobs),

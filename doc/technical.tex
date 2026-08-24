@@ -264,7 +264,9 @@ generalized eigenproblem
 solved at a \emph{reference tension} $T_0$ (the value of the Tension knob
 when the user presses \emph{Compute}). With $n$ free DOFs
 ($n \approx$ vertices $+$ edges $\approx 4\times$ vertices, typically
-$300$--$3000$) and only the lowest $m \le 128$ modes wanted (capped at $\sim n/6$ so the top modes stay resolved by the mesh), the solver is
+$300$--$5000$ over the Grid range) and only the lowest $m \le 256$ modes
+wanted (capped at $\sim n/6$ so the top modes stay resolved by the mesh),
+the solver is
 classical \emph{subspace iteration with Rayleigh--Ritz projection}
 \cite{bathe-wilson,bathe}:
 %
@@ -296,6 +298,92 @@ $\lambda^2 \sim 10^{12}$; an absolute threshold silently burns the full
 sweep budget on every call). Together these give a $\sim\!4\times$
 speed-up over the straightforward implementation ($23.6\,\mathrm{s}
 \rightarrow 5.6\,\mathrm{s}$ for 128 modes on a 931-DOF mesh).
+%
+\paragraph{Sparse storage.}
+A Morley element couples a degree of freedom only to the five others on
+its own triangle, so an assembled row of $K$, $G$ or $M$ holds about
+eleven non-zeros --- and, this being the useful part, about eleven
+whatever the mesh density. Dense storage of the same matrix is $n$ per
+row, so the fraction it wastes grows without bound: at $n = 5000$ the
+three matrices are $24$ million doubles standing in for $55$ thousand real
+numbers. They are therefore assembled in compressed sparse rows, in two
+passes over the triangles: the first gathers nothing but the six DOF
+indices of each element and builds the sparsity pattern (one pattern,
+shared by all three matrices --- same mesh, same couplings), the second is
+the expensive one and scatters element values into it. Both passes read
+the DOF indices through the same helper, so the pattern cannot fail to
+cover what the assembly scatters.
+
+The shifted operator $P = A + \sigma M$ is still factorised \emph{densely},
+which leaves one $n^2$ allocation and the $O(n^3/3)$ factorisation in
+place. The working set is thus
+%
+\begin{equation}
+  \underbrace{8 n^2}_{\text{Cholesky factor}}
+  \;+\; \underbrace{32\,p\,n}_{\text{iteration block}}
+  \;+\; \underbrace{\mathcal{O}(n)}_{\text{sparse operators}}
+  \quad\text{bytes},
+  \qquad\text{against } 32 n^2 \text{ dense},
+  \label{eq:footprint}
+\end{equation}
+%
+a factor of three to four in practice, with the matrix--vector products of
+the iteration --- three per vector per sweep --- dropping from $O(n^2)$ to
+$O(11n)$. Measured on the same machine, same meshes, both paths run
+back to back:
+%
+\begin{center}
+\begin{tabular}{rrrrrrr}
+\toprule
+& & \multicolumn{2}{c}{dense} & \multicolumn{2}{c}{sparse} & \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+$n$ & modes & time & memory & time & memory & gain \\
+\midrule
+$2149$ & $64$  & $13.1$\,s  & $125$\,MB   & $7.3$\,s   & $36$\,MB  & $1.8\times$ / $3.4\times$ \\
+$3841$ & $128$ & $114.8$\,s & $419$\,MB   & $59.9$\,s  & $122$\,MB & $1.9\times$ / $3.4\times$ \\
+$6029$ & $128$ & $335.5$\,s & $1040$\,MB  & $171.0$\,s & $287$\,MB & $2.0\times$ / $3.6\times$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+%
+The two agree bit for bit, not merely to round-off:
+compressed rows keep their column indices sorted, so a sparse row walk
+sums the non-zeros in exactly the order a dense row walk does. The console
+test suite asserts that equality, which makes it sharp enough to catch an
+indexing slip.
+
+\paragraph{What still sets the ceiling.}
+The remaining $n^2$ is the dense factorisation, and it is what caps the
+Grid knob. Over the Grid range the projected footprint is now $5$\,MB at
+Grid 16 ($n=554$), $24$\,MB at 24 ($n=1243$), $63$\,MB at 32 ($n=2195$),
+$132$\,MB at 40 ($n=3440$) and $243$\,MB at the top, Grid 48 ($n=4913$) ---
+one third of what the same range cost dense. The editor shows the figure
+next to the mesh size once it passes $150$\,MB. Removing the ceiling
+altogether means factorising sparsely too: a bandwidth-reducing
+(reverse Cuthill--McKee \cite{cuthill-mckee}) renumbering brings the
+profile of these matrices down by more than an order of magnitude, and a
+profile Cholesky over that envelope needs no symbolic analysis phase.
+Measured on the actual DOF graph, that would take the Grid-48
+factorisation from $39.5$ to $0.03$ Gflop and its storage from
+$737$ to $5$\,MB. It is not, however, where the time goes: solving for 8
+modes instead of 128 on the same mesh only drops the total from $85$ to
+$18$\,s, so the factorisation is a fifth of the cost and the subspace
+iteration is the rest. Sparsity would make the mesh nearly free and leave
+the $O(n p^2)$ Rayleigh--Ritz projections --- which scale with the number
+of modes asked for, not with the mesh --- as the thing to beat.
+
+\paragraph{Code layout.}
+None of the above is about plates, and it is not written as though it
+were. The matrix storage, the Cholesky and Jacobi kernels and the subspace
+iteration live in \code{FxmeTools/math}; \code{FxmeTools/acoustics} keeps
+the boundary conditions, the Morley element and the modal quantities. The
+eigensolver never sees a matrix at all --- it multiplies through a
+\code{SymmetricOperator} and solves through an \code{SpdSolver} --- which
+is what makes the storage a choice at the call site
+(\code{ModalOptions::storage}, sparse by default, dense kept as the
+reference the sparse path is validated against) rather than a rewrite, and
+what will let a profile factorisation drop in as one more \code{SpdSolver}
+with nothing else moving.
 
 Finally, the computed modal data (eigenvalues, tension coefficients,
 shapes, statistical tail) is cached inside the plugin state: loading a
@@ -373,7 +461,10 @@ FemPlate realises each oscillator as a second-order IIR resonator, exactly
 as in the MechanOdd modal resonators: one constant-peak-gain band-pass
 biquad per mode (RBJ ``cookbook'' coefficients \cite{rbj}) with
 $Q_k = 1/(2\zeta_k)$, excited by $\varphi_k(\bm{x}_h) F$ and weighted on
-output by $\varphi_k(\bm{x}_o)$. Up to 128 modes are active; the bank is
+output by $\varphi_k(\bm{x}_o)$. Up to 512 modes are active --- though the
+bank stops at the highest one still below $0.47 f_s$, which at a high $f_1$
+is a small fraction of them; the rest would cost a resonator each and
+return silence. The bank is
 allocation-free and retunable on the audio thread.
 
 \subsection{Frequency and damping laws}
@@ -467,7 +558,7 @@ the modes, cascading energy towards high frequencies (the cymbal
 von K\'arm\'an synthesis requires the cubic coupling tensors
 $\Gamma_{klmn}$ --- $O(N^3)$--$O(N^4)$ storage and work
 \cite{ducceschi-touze,bilbao-vk} --- which is beyond a realtime budget at
-128 modes. FemPlate implements two lightweight surrogates, one for each
+a few hundred modes. FemPlate implements two lightweight surrogates, one for each
 phenomenon; \S\ref{sec:related} compares them with the direct simulation
 of the full system, which is affordable in real time on a rectangle.
 
@@ -743,11 +834,11 @@ stage bounded).
 \subsection{The statistical mode tail}
 \label{sec:tail}
 
-Even a 128-mode FEM bank remains a sparse comb at the top of the
+Even a 256-mode FEM bank remains a sparse comb at the top of the
 spectrum, and solving for many hundreds of accurate FEM modes is
 prohibitive (\S\ref{sec:eig}) --- while a convincing crash needs a dense
 receiving continuum up to Nyquist. FemPlate therefore fills the bank
-(to 256 modes in all) with \emph{synthetic} modes above the FEM set,
+(to 512 modes in all) with \emph{synthetic} modes above the FEM set,
 built from asymptotics instead of the discrete operator:
 %
 \begin{itemize}
@@ -888,10 +979,12 @@ Nonlinearities \eqref{eq:gamma}, \eqref{eq:cascade} & audio & decimated $\gamma$
 \end{tabular}
 \end{center}
 
-The numerical core (\code{FemMesh}, \code{PlateModes}) is pure C++17 with
-no JUCE dependency and is validated by a console test suite; it lives in
-the \code{FxmeTools} submodule (\code{FxmeTools/acoustics}) for reuse in
-other projects.
+The numerical core is pure C++17 with no JUCE dependency and is validated
+by a console test suite; it lives in the \code{FxmeTools} submodule, split
+between \code{FxmeTools/acoustics} (\code{FemMesh}, \code{PlateModes}: the
+plate physics) and \code{FxmeTools/math} (matrix storage, Cholesky,
+subspace eigensolver: the part that has never heard of a plate), so that
+either half is reusable on its own.
 
 % ============================================================================
 \begin{thebibliography}{99}
@@ -927,6 +1020,10 @@ other projects.
 \bibitem{babuska-osborn} I.~Babu\v{s}ka, J.~Osborn, ``Eigenvalue
   problems'', in \emph{Handbook of Numerical Analysis}, Vol.~II,
   North-Holland, 1991, 641--787.
+
+\bibitem{cuthill-mckee} E.~Cuthill, J.~McKee, ``Reducing the bandwidth of
+  sparse symmetric matrices'', in \emph{Proc. 24th National Conference of
+  the ACM}, 1969, pp.~157--172.
 
 \bibitem{dunavant} D.~A. Dunavant, ``High degree efficient symmetrical
   Gaussian quadrature rules for the triangle'', \emph{International

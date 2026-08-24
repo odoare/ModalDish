@@ -146,7 +146,7 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     addAndMakeVisible (pointsKnob);
 
     fem::theme::styleKnob (densityKnob, "Grid", fem::theme::geomAccent);
-    densityKnob.setRange (8, 32, 1);
+    densityKnob.setRange (8, 48, 1);
     densityKnob.setValue (processor.shape().meshDensity, juce::dontSendNotification);
     densityKnob.onValueChange = [this]
     {
@@ -373,6 +373,18 @@ void FemPlateAudioProcessorEditor::refreshStatus()
     else
     {
         text << mesh->numVertices() << " nodes, " << mesh->numTriangles() << " elements";
+
+        // The assembled matrices are sparse, but the shifted operator is still
+        // factorised densely, so the footprint is still quadratic in the free
+        // DOFs (nodes + edges) — a few hundred megabytes at the top of the
+        // Grid range. Better seen before pressing Compute than wondered about
+        // afterwards.
+        const int n = mesh->numVertices() + mesh->numEdges();
+        const double solverMb = fem::solverBytesEstimate (n) / 1048576.0;
+        if (solverMb >= 150.0)
+            text << " - solver " << (solverMb >= 1024.0
+                                        ? juce::String (solverMb / 1024.0, 1) + " GB"
+                                        : juce::String (juce::roundToInt (solverMb)) + " MB");
         if (model != nullptr)
         {
             text << " - " << model->numModes() << " modes";

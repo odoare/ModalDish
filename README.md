@@ -85,15 +85,29 @@ nonlinearity (both 0 = exactly the linear model):
   Attack 30 ms/band, Release 2 s, Overlap 0.1, Deplete 0.07, with
   Viscous ≈ 10⁻⁴ and Material ≈ 7·10⁻⁶ (Material's ζ ∝ ν law otherwise
   kills the top octave in milliseconds).
-* **Statistical mode tail** — above the FEM-computed modes (≤ 128) the
-  bank is filled to 256 with synthetic modes: Weyl-law spacing with
+* **Statistical mode tail** — above the FEM-computed modes (≤ 256) the
+  bank is filled to 512 with synthetic modes: Weyl-law spacing with
   jittered gaps, tension sensitivity g = √λ (the exact high-frequency
   asymptote), and Berry random-plane-wave shapes `√(2/A)·cos(κ·x+ψ)`
   with κ = λ^¼ — so hit position still matters and the tail obeys the
   tension/damping/cascade laws like any FEM mode. This gives the cascade
   a dense receiving continuum up to Nyquist without solving for hundreds
   of FEM modes; raise the **Modes** knob past the FEM count to engage
-  it (the status line marks tail modes when displayed).
+  it (the status line marks tail modes when displayed). The bank only
+  processes modes below Nyquist, so at a high **Freq** the Modes knob
+  costs nothing past the point where the spectrum runs out: 512 modes at
+  f₁ = 110 Hz is 388 live and 7% of a core, at f₁ = 440 Hz it is 80 live
+  and under 2%.
+
+  The **Grid** knob reaches 48, and what stops it there is the eigensolver.
+  The assembled matrices are sparse (a Morley element couples each degree
+  of freedom to about eleven others whatever the mesh density), but the
+  shifted operator is still Cholesky-factored densely, so the footprint is
+  still n² doubles for n = nodes + edges: 63 MB at Grid 32, 132 MB at Grid
+  40, 243 MB at Grid 48 — one third of what the same range cost before the
+  matrices went sparse, and about half the time. The status line shows the
+  projected footprint once it passes 150 MB. Grid 16–32 is the interactive
+  range; above that, expect to wait.
 
 ## GUI workflow
 
@@ -175,7 +189,9 @@ ctest --test-dir Builds
 | `Source/Dsp/ModalModel.h` | immutable mesh + modes shared with the audio thread |
 | `Source/Components/ShapeCanvas.*` | shape drawing / boundary editing component |
 | `Source/PluginEditor.*` | FX-Mechanics UI (TopBar, knobs, plate view) |
-| `lib/FxmeTools/FxmeTools/acoustics/` | reusable FEM library (mesh, Morley solver, contour view) |
-| `Tests/FemTests.cpp` | numerical validation vs analytic plates |
+| `lib/FxmeTools/core/FxmeTools/acoustics/` | reusable FEM library (mesh, Morley plate solver) |
+| `lib/FxmeTools/core/FxmeTools/math/` | the linear algebra under it (sparse/dense storage, Cholesky, subspace eigensolver) |
+| `lib/FxmeTools/FxmeTools/acoustics/` | the contour view component |
+| `Tests/FemTests.cpp` | numerical validation vs analytic plates, and sparse vs dense storage |
 
 (c) 2026 Olivier Doaré — LGPL-3.0-or-later

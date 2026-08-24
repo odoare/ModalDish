@@ -196,6 +196,13 @@ public:
     void prepare (double sampleRate);
     void reset();
 
+    /** Number of modes the bank is actually sounding: the bank is ordered by
+        frequency and everything above the audible band is muted, so the
+        per-sample loop stops there. At a high Freq setting that can be a
+        small fraction of the Modes knob — the knob buys spectrum, and the
+        spectrum runs out at Nyquist. */
+    int getLiveModeCount() const noexcept { return liveModes; }
+
     /** Audio thread, once per block: applies a possibly-new model and the
         current parameters, retuning the filter bank only when something
         relevant changed. */
@@ -291,6 +298,7 @@ private:
     bool dirty = true;
 
     int activeModes = 0;
+    int liveModes = 0;                   // modes actually in band, always <= activeModes
     Resonator filters[fem::maxModes];
     float phiOut[fem::maxModes] {};      // phi_k(out)
     float outAmp[fem::maxModes] {};      // phi_k(out) * bandwidth compensation
