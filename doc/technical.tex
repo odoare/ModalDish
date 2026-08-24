@@ -468,7 +468,8 @@ von K\'arm\'an synthesis requires the cubic coupling tensors
 $\Gamma_{klmn}$ --- $O(N^3)$--$O(N^4)$ storage and work
 \cite{ducceschi-touze,bilbao-vk} --- which is beyond a realtime budget at
 128 modes. FemPlate implements two lightweight surrogates, one for each
-phenomenon.
+phenomenon; \S\ref{sec:related} compares them with the direct simulation
+of the full system, which is affordable in real time on a rectangle.
 
 \subsection{Dynamic tension: the Berger approximation}
 \label{sec:berger}
@@ -532,14 +533,10 @@ every other mode follows its own physical sensitivity $g_k$: $\gamma$ is
 plate-independent ($\gamma = 0.4$ always means ``mode 1 up $\approx 3$
 semitones''). It is also \emph{damping}-independent by construction: after
 an impulse $y_k \sim 2\zeta_k\omega_k$, so $\zeta_k$ cancels in
-$W_k y_k^2$. Measured on the default plate, the peak driver varies by less
-than $12\%$ over $\zeta_v, \zeta_m \in [10^{-5}, 10^{-3}]$, where the
-earlier pickup-amplitude driver $\langle w^2(\bm{x}_o)\rangle$ varied by a
-factor $100$ --- and by a factor $1300$ between a struck plate and the
-same plate driven through its audio input. Driving the effect from a
-global, calibrated quantity rather than from the amplitude at the output
-point also makes the glide independent of where the pickup sits: on a node
-it used to vanish, and moving the pickup moved the pitch.
+$W_k y_k^2$ and the peak driver varies by less than $12\%$ over
+$\zeta_v, \zeta_m \in [10^{-5}, 10^{-3}]$ on the default plate. And being
+a quantity integrated over $\Omega$, it is the same wherever one listens:
+the glide belongs to the plate, not to the pickup.
 
 \paragraph{Realtime scheduling.}
 $\gamma$ is updated every 32 samples, slewed by a factor $0.2$ per update
@@ -637,76 +634,71 @@ At $\mathrm{cascade}=0$ the linear model is untouched.
 \paragraph{Why the source is the motion and not the sound.}
 \label{par:drive}
 The obvious source signal for \eqref{eq:cascade} is the one already being
-summed for the output, $\varphi_k(\bm{x}_o)\,c_k\,y_k$. That is what
-FemPlate used until it was measured, and it made the effect depend steeply
-on \emph{damping}, in the wrong direction: turning a damping knob up made
-the shimmer louder. The mechanism is \eqref{eq:compensation}'s
-$c_k = \sqrt{\zeta_{\mathrm{ref}}/\zeta_k}$. A band-pass ring has peak
-$2\zeta_k\omega_k$, so the audible peak of a struck mode is
+summed for the output, $\varphi_k(\bm{x}_o)\,c_k\,y_k$ --- and that is
+precisely what it must not be. Two things stand between the audible signal
+and the plate's motion, and the ladder's cubic would raise both to the
+third power.
+
+The first is the loudness compensation \eqref{eq:compensation}. A band-pass
+ring has peak $2\zeta_k\omega_k$, so the audible peak of a struck mode is
 %
 \begin{equation}
   c_k \cdot 2\zeta_k \omega_k \;=\; 2\omega_k
       \sqrt{\zeta_{\mathrm{ref}}\,\zeta_k} \;\propto\; \sqrt{\zeta_k} :
+  \label{eq:peaklaw}
 \end{equation}
 %
-the compensation equalises each mode's ring \emph{energy} by trading
-duration for level, so a more damped mode peaks \emph{higher}. That is
-sound design, not physics --- a struck plate's modal amplitude is set by
-the impulse, and damping can only remove energy --- and the ladder then
-cubes the difference. Measured on the default plate (one strike, 4\,kHz and
-up, at 300\,ms), the shimmer rose by $38.7$\,dB across the Viscous knob's
-range while the plate was merely decaying faster; the low band's peak
-followed $\sqrt{\zeta_k}$ to within $0.2$\,dB of prediction
-($+18.7$\,dB measured, $+18.9$ predicted, for $\zeta$ increased $143\times$).
+$c_k$ equalises each mode's ring \emph{energy} by trading duration for
+level, so in the audible signal a more damped mode peaks \emph{higher}.
+That is sound design, and it is the right choice for what reaches the ear,
+but it is not what the plate does: a struck plate's modal amplitude is set
+by the impulse, and damping can only take energy away. Weighting the
+source by $v_k \propto 1/(\zeta_k\nu_k)$ removes the damping entirely,
+since $y_k \propto \zeta_k$; what is left is the modal velocity.
 
-Weighting the source by $v_k \propto 1/(\zeta_k\nu_k)$ instead removes the
-damping entirely, since $y_k \propto \zeta_k$: what is left is the modal
-velocity, which is what the plate actually does. The per-band divisor
-$n_c$ then restores the \emph{frequency} balance that the compensation had
-been supplying by accident --- physical modal amplitudes fall steeply with
-frequency, and a raw velocity sum outweighs band 1 with band 0 by a factor
-$\sim\!900$, starving the upper rungs --- but with a constant fixed by the
-mode indices alone, so no damping re-enters. Each rung is then driven by a
-band-mean modal velocity.
+The per-band divisor $n_c$ then supplies the \emph{frequency} balance the
+ladder needs, which \eqref{eq:peaklaw} had been providing as a side
+effect: physical modal amplitudes fall steeply with frequency, and a raw
+velocity sum outweighs band 1 with band 0 by a factor $\sim\!900$,
+starving the upper rungs. $n_c$ is fixed by the mode indices alone, so no
+damping re-enters.
 
-\paragraph{Nor at the pickup.}
-The same sum used to carry $\varphi_k(\bm{x}_o)$, so the entire cascade
-followed the output-point parameters: a mode nodal at the pickup drove
-nothing, however hard the plate was moving there, and dragging the output
-point across the plate moved the drive by $18.2$\,dB. A real plate's cubic
-coupling does not know where the microphone is. The weight is now the
-constant $1/\sqrt{|\Omega|}$, the typical size of a mass-normalised mode
-shape ($\int_\Omega \varphi_k^2 \dd A = 1$), which keeps the drive's level
-the same on any geometry while making it depend on no listening position
-at all --- measured across five pickup positions, the high-mode motion the
-cascade creates is now identical to the last digit. What the pickup still
-changes is what one \emph{hears} of that motion, which is what a pickup is
-for. The \emph{injection} keeps its $\varphi_l(\bm{x}_h)$: the hit point is
-where the plate deflects most, the one position the nonlinearity has a
-physical claim to, and it is what ties the cascade's character to how the
-plate is played.
+The second is the pickup. A mode nodal at $\bm{x}_o$ contributes nothing
+to the audible signal however hard the plate is moving there, and a real
+plate's cubic coupling does not know where the microphone is. The source
+weight is therefore the constant $1/\sqrt{|\Omega|}$, the typical size of
+a mass-normalised mode shape ($\int_\Omega \varphi_k^2 \dd A = 1$), which
+holds the drive's level on any geometry while tying it to no listening
+position: across five pickup positions the high-mode motion the cascade
+creates is identical to the last digit. What the pickup changes is what
+one \emph{hears} of that motion, which is what a pickup is for. The
+\emph{injection} does keep $\varphi_l(\bm{x}_h)$: the hit point is where
+the plate deflects most, the one position the nonlinearity has a physical
+claim to, and it is what ties the cascade's character to how the plate is
+played.
 
-With that source the drive is flat to a few dB across both damping knobs,
-and the fitted power law $\min(1, (2.3\cdot10^{-5}/\zeta_m)^{0.64})$ that
-used to scale the cascade amount --- an empirical correction for the
-material half of the same artefact --- has been removed: the knob now acts
-directly. \code{Tests/CascadeMeasure.cpp} renders these sweeps through the
-real synthesis and asserts both invariances, so the artefacts cannot
-return unnoticed:
+The Cascade knob therefore acts directly, with no damping correction on
+it. \code{Tests/CascadeMeasure.cpp} renders one strike through the real
+synthesis and asserts what the construction promises --- the drive is
+damping-free, so any real spread would mean a damping term had crept back
+into it:
 %
 \begin{center}
-\begin{tabular}{lcc}
+\begin{tabular}{lc}
 \toprule
-Shimmer at 300\,ms (dB) & spread, audio-driven & spread, motion-driven \\
+Shimmer at 300\,ms, spread over & dB \\
 \midrule
-Viscous $\zeta_v \in [10^{-5}, 10^{-3}]$  & $29.6$ & $3.6$ \\
-Material $\zeta_m \in [7\cdot10^{-6}, 3\cdot10^{-4}]$ & $39.3$ & $2.0$ \\
+Viscous $\zeta_v \in [10^{-5}, 10^{-3}]$              & $5.0$ \\
+Material $\zeta_m \in [7\cdot10^{-6}, 3\cdot10^{-4}]$ & $6.6$ \\
+Output point, five positions (drive, measured on the modes) & $0.00$ \\
 \bottomrule
 \end{tabular}
 \end{center}
 %
-while the Cascade knob still spans $18$\,dB over its travel and a
-force-$10$ hit still shimmers $45$\,dB more than a force-$1$ one: the
+The few dB left on the damping rows are not drive: the targets ring for
+longer or shorter with the damping, and the middle rungs are sources for
+the upper ones. Meanwhile the Cascade knob spans $18$\,dB over its travel
+and a force-$10$ hit shimmers $45$\,dB more than a force-$1$ one --- the
 effect stays amplitude-gated, which is the part that \emph{is} physical.
 
 \paragraph{Depletion (low-frequency loss).}
@@ -731,9 +723,10 @@ purely dissipative (it only removes energy), so it cannot affect
 stability.
 
 \paragraph{Stability by structure.}
-Two earlier designs closed a feedback loop through the full output. Around
-mode $k$'s resonance such a loop transmits with gain
-$|\varphi_k(\bm{x}_h)|\cdot|\varphi_k(\bm{x}_o)|\cdot c_k$ --- and the
+The obvious way to spread energy upward is a feedback loop closed through
+the bank's own output, and it does not survive contact with the gains
+involved. Around mode $k$'s resonance such a loop transmits with
+$|\varphi_k(\bm{x}_h)|\cdot|\varphi_k(\bm{x}_o)|\cdot c_k$, and the
 compensation $c_k \le 32$ must not be forgotten: an unnormalised loop is
 super-critical and latches into a full-scale limit cycle the moment the
 cubic's slope wakes up. Bounding the loop slope by the small-gain theorem
@@ -789,6 +782,95 @@ individual eigenfrequencies are perceptually interchangeable and only
 their density and statistics matter.
 
 % ============================================================================
+\subsection{Relation to other nonlinear plate synthesis}
+\label{sec:related}
+
+The closest published work to FemPlate's objective is the real-time gong
+synthesis of Bilbao, Webb, Wang and Ducceschi \cite{bilbao-gong23}, which
+reaches the same sounds --- pitch glide, crash, swell --- from the opposite
+direction, and the contrast is worth stating plainly because it delimits
+what the surrogates of \S\ref{sec:berger} and \S\ref{sec:cascade} can and
+cannot claim.
+
+Direct time-domain simulation of the von K\'arm\'an plate for synthesis
+goes back to Bilbao's offline work \cite{bilbao-nlplates,bilbao-vk}; what
+\cite{bilbao-gong23} adds is the algorithmic work needed to bring it inside
+a real-time budget.
+
+That work simulates the dynamic F\"oppl--von K\'arm\'an system directly: the
+deflection $w$ and the Airy stress function $\Phi$ are stepped on a uniform
+Cartesian grid, with the nonlinearity made fully explicit by a scalar
+auxiliary variable (energy quadratisation), a rank-one system solved in
+closed form by Sherman--Morrison, and a discrete energy balance that yields
+a provable stability condition \cite{bilbao-sav,bilbao-gong23}. The
+nonlinear effects are not modelled separately: they are consequences of the
+one equation, so the glides come out non-uniform across partials and the
+crash appears on its own as the amplitude rises. The price is paid in three
+places:
+
+\begin{itemize}
+\item \emph{Geometry.} The domain is a rectangle with simply supported
+  conditions on both $w$ and $\Phi$. This is not incidental. The run-time
+  bottleneck is the biharmonic solve $\Delta\Delta\Phi = -L(w,w)$ needed at
+  every sample, which consumes $72$--$76\%$ of the time step, and the fast
+  solver that makes it affordable \cite{wang-puckette} exploits the
+  Toeplitz-block-Toeplitz structure that the rectangle and those boundary
+  conditions produce. An arbitrary outline would cost the solver, and with
+  it the real-time budget.
+\item \emph{Cost.} Reported timings are $0.15$--$0.57$\,s of computation per
+  second of audio on a recent laptop CPU, and $0.26$--$0.99$\,s on an older
+  one, for grids of roughly $300$ to $720$ interior points. FemPlate's full
+  bank --- 256
+  modes with both the Berger glide and the cascade engaged --- measures
+  $0.054$\,s per second of audio on an Intel i7-10810U, roughly an order of
+  magnitude less, because nothing is solved at run time: the eigenproblem
+  was solved once, offline (\S\ref{sec:eig}; $0.5$\,s for the default
+  plate), and what remains is a bank of biquads whose coefficients are
+  rewritten when the tension moves.
+\item \emph{Resolution coupling.} The grid spacing is tied to the sample
+  rate by the stability condition, so spatial resolution is not a free
+  modelling choice. In a modal scheme the mesh density and the audio rate
+  are independent.
+\end{itemize}
+
+What is given up in exchange is exactness, and that paper names the
+limitation precisely: Berger's approximation ``[is] able to replicate pitch
+glides, but not the energy cascade to high frequencies characteristic of
+crashes'' \cite{bilbao-gong23}. That is correct, and it is why
+\S\ref{sec:cascade} exists as a \emph{separate} mechanism rather than
+falling out of \S\ref{sec:berger}. Two consequences follow. First, the
+glide here is driven by a single scalar $T_{\mathrm{dyn}}$: every mode
+follows it through its own $g_k$, so the pattern of glides is fixed by
+geometry and boundary conditions, where in a von K\'arm\'an solution mode
+$k$'s frequency shift depends on which modes actually carry the energy and
+therefore evolves through the decay. Second, the cascade of
+\S\ref{sec:cascade} is a caricature of the coupling, not the coupling: it
+reproduces the phenomenon --- energy climbing the spectrum rung by rung,
+gated by amplitude --- with a band ladder whose gains are voiced by ear,
+and it carries no energy balance. Stability comes from the transfer graph
+being acyclic rather than from a numerical invariant.
+
+The exact modal route sits between the two. Projecting von K\'arm\'an onto
+the linear modes gives cubic coupling tensors $\Gamma_{klmn}$, which is the
+basis of the gong and cymbal synthesis of Ducceschi and Touz\'e
+\cite{ducceschi-touze} and of the analytical work on circular plates and
+shallow shells by Touz\'e, Thomas and Chaigne
+\cite{touze-circular,thomas-shells}; Nguyen and Touz\'e extend it to plates
+of variable thickness for cymbals \cite{nguyen-touze}. That route keeps the
+modal picture --- and would keep FemPlate's arbitrary geometry, since the
+tensors can in principle be assembled from any set of FEM modes --- but the
+$O(N^3)$--$O(N^4)$ tensor is what rules it out at $N = 256$ in a plugin,
+and it is the reason the two cheap surrogates were chosen instead.
+
+Finally, the mechanism of \S\ref{sec:berger} is not new in synthesis: an
+amplitude-dependent tension computed from a global stretching estimate, fed
+back into the linear model's tuning, is the plate analogue of the
+tension-modulation models used for plucked strings, where the same
+first-order retuning reproduces the pitch drop of a hard pluck
+\cite{tolonen}. What is specific here is that the tension enters through
+the FEM sensitivities $g_k$ of \S\ref{sec:tension}, so it costs one scalar
+per audio block on any drawn shape.
+
 \section{Implementation summary}
 
 \begin{center}
@@ -915,6 +997,42 @@ other projects.
   nonlinear vibrations of damped impacted plates: application to sound
   synthesis of gongs and cymbals'', \emph{Journal of Sound and Vibration}
   344, 2015, 313--331.
+
+\bibitem{bilbao-gong23} S.~Bilbao, C.~Webb, Z.~Wang, M.~Ducceschi,
+  ``Real-time gong synthesis'', in \emph{Proceedings of the 26th
+  International Conference on Digital Audio Effects (DAFx23)}, Copenhagen,
+  2023, pp.~1--8.
+
+\bibitem{bilbao-nlplates} S.~Bilbao, ``Sound synthesis for nonlinear
+  plates'', in \emph{Proceedings of the 8th International Conference on
+  Digital Audio Effects (DAFx-05)}, Madrid, 2005, pp.~243--248.
+
+\bibitem{bilbao-sav} S.~Bilbao, M.~Ducceschi, F.~Zama, ``Explicit exactly
+  energy-conserving methods for Hamiltonian systems'', \emph{Journal of
+  Computational Physics}, 2023.
+
+\bibitem{wang-puckette} Z.~Wang, M.~Puckette, ``A fast algorithm for the
+  inversion of the biharmonic in plate dynamics applications'', in
+  \emph{Proceedings of the 5th Stockholm Music Acoustics Conference},
+  Stockholm, 2023.
+
+\bibitem{touze-circular} C.~Touz\'e, O.~Thomas, A.~Chaigne, ``Asymmetric
+  non-linear forced vibrations of free-edge circular plates, part I:
+  theory'', \emph{Journal of Sound and Vibration} 258(4), 2002, 649--676.
+
+\bibitem{thomas-shells} O.~Thomas, C.~Touz\'e, A.~Chaigne, ``Non-linear
+  vibrations of free-edge thin spherical shells: modal interaction rules
+  and 1:1:2 internal resonance'', \emph{International Journal of Solids and
+  Structures} 42, 2005, 3339--3373.
+
+\bibitem{nguyen-touze} Q.~Nguyen, C.~Touz\'e, ``Nonlinear vibrations of
+  thin plates with variable thickness: application to sound synthesis of
+  cymbals'', \emph{Journal of the Acoustical Society of America} 145, 2019,
+  977--988.
+
+\bibitem{tolonen} T.~Tolonen, V.~V\"alim\"aki, M.~Karjalainen, ``Modeling
+  of tension modulation nonlinearity in plucked strings'', \emph{IEEE
+  Transactions on Speech and Audio Processing} 8(3), 2000, 300--310.
 
 \bibitem{bilbao-vk} S.~Bilbao, ``A family of conservative finite
   difference schemes for the dynamical von K\'arm\'an plate equations'',

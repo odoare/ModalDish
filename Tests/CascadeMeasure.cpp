@@ -5,27 +5,29 @@
     Offline measurement of the mode cascade's drive, rendered through the real
     PlateSynth with no JUCE and no host (see Tests/juce_stub/JuceHeader.h).
 
-    Why this exists
-    ---------------
-    The cascade used to read its source bands from the *audible* signal,
-    phi_out(k) * c_k * y_k, where c_k = sqrt(zetaRef / zeta_k) is the loudness
-    compensation. A band-pass ring has peak 2 zeta omega and that compensation
-    removes only sqrt(zeta) of it, so a mode's audible peak grows as
-    sqrt(zeta_k): raising a damping knob made every mode hit *harder*, and the
-    ladder's cubic cubed the difference. Measured on the default plate, the
-    4-20 kHz shimmer rose by 38.7 dB at 300 ms across the Viscous knob's range
-    while the plate itself was only losing energy faster — a real plate cannot
-    ring louder because it is damped more.
+    What this checks
+    ----------------
+    The cascade's source is the band-mean modal *velocity* of the whole plate
+    (y_k * velScale_k, normalised per band by a constant fixed by the mode
+    indices alone, and by 1/sqrt(A) rather than by a mode shape at the
+    pickup). Two properties follow from that construction, and both are easy
+    to lose by accident, because the signal already being summed for the
+    output looks like a tempting source:
 
-    The source is now the band-mean modal *velocity* (y_k * velScale_k,
-    normalised per band by a constant fixed by the mode indices alone), which
-    has no damping in it at all. This test renders one strike over both damping
-    knobs and checks that the shimmer no longer tracks them, so the artefact
-    cannot come back unnoticed. Nor is the source read at the pickup any more:
-    weighted by phi_k(x_o), the drive moved by 18.2 dB as the output point was
-    moved around the plate, which the cubic coupling of a real plate has no way
-    of knowing about. It also checks that the Cascade knob still does something
-    and that the effect stays amplitude-gated.
+      - the drive carries no damping term. y_k is proportional to zeta_k and
+        velScale_k to its inverse, so they cancel. Take the audible signal
+        instead and the loudness compensation sqrt(zetaRef / zeta_k) leaves
+        sqrt(zeta_k) behind, which the ladder's cubic then cubes: a damping
+        knob would become a shimmer knob, while a real plate can only lose
+        energy to damping.
+      - the drive carries no listening position. A mode nodal at the pickup
+        contributes nothing to the audible signal however hard the plate is
+        moving there, and a real plate's cubic coupling does not know where
+        the microphone is.
+
+    So this renders one strike across both damping knobs and five output
+    points and checks that the cascade ignores them, then checks that it does
+    still follow the Cascade knob and stays amplitude-gated.
 
     Run: CascadeMeasure   (exit code 0 when every check passes)
 
@@ -294,20 +296,19 @@ int main()
 
     std::printf ("\n  viscous spread %.1f dB, material spread %.1f dB\n",
                  spread (viscAt300), spread (matAt300));
-    // Audio-driven, these spreads were 29.6 dB and 39.3 dB. What is left is
-    // not drive: the ladder's own targets ring for longer or shorter with the
-    // damping, and the middle rungs are sources for the upper ones, so a few
-    // dB of variation is the physics doing its job. The bar is set to catch a
-    // return of the artefact (which was four to five times larger), not to
-    // pin the sound down.
+    // What is left here is not drive: the ladder's own targets ring for
+    // longer or shorter with the damping, and the middle rungs are sources
+    // for the upper ones, so a few dB of variation is the physics doing its
+    // job. The bar is set to catch a damping term creeping back into the
+    // drive, which would be several times larger, not to pin the sound down.
     check (spread (viscAt300) < 10.0, "shimmer barely tracks the Viscous knob (< 10 dB)");
     check (spread (matAt300) < 10.0, "shimmer barely tracks the Material knob (< 10 dB)");
 
     // ---- 2. The drive must not depend on where the plate is listened to ----
     // Measured on the plate's own motion, not on the output: moving the
     // pickup legitimately changes what is *heard* (a microphone does that),
-    // but it must not change what the cascade does to the plate. When the
-    // source was summed with phi_k(x_o) this spread was 18.2 dB.
+    // but it must not change what the cascade does to the plate. Nothing in
+    // the drive path reads x_o, so this spread should be flat to the digit.
     std::printf ("\n== Pickup independence of the drive (high-mode motion, dB) ==\n");
     const float pickX[] = { 0.50f, 0.35f, 0.62f, 0.50f, 0.44f };
     const float pickY[] = { 0.47f, 0.40f, 0.55f, 0.30f, 0.62f };

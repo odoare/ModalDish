@@ -57,18 +57,16 @@
           driver     = < sum_k nlWeight_k y_k^2 >
 
       with the leftover constant folded into nlGain. The missing
-      1/(4 zeta^2 omega^4) is what made a naive sum of the filter outputs
-      underestimate the stretching by orders of magnitude. Driving the
-      effect from this quantity rather than from the amplitude at the
-      output point makes the glide independent of where the pickup sits
-      (on a node it used to vanish, and moving the pickup moved the
-      pitch), removes the purely cosmetic bandwidth compensation from the
-      physics, and weights the modes as the stretching really does
-      (contributions scale as 1/nu_k, so the lows dominate and the cascade
-      shimmer no longer drags the glide up). Peak gamma is also damping-
-      independent by construction: after an impulse y_k ~ 2 zeta_k omega_k,
-      so zeta_k cancels in nlWeight_k y_k^2 and only the *decay* of the
-      glide follows the damping knobs.
+      1/(4 zeta^2 omega^4) spans ten decades across the bank: leave it out
+      and a sum of the filter outputs underestimates the stretching by
+      orders of magnitude. Being an integral over the plate, the driver is
+      the same wherever one listens — the glide belongs to the plate, not
+      to the pickup — and it weights the modes as the stretching really
+      does (contributions scale as 1/nu_k, so the lows dominate and the
+      cascade shimmer does not drag the glide up). Peak gamma is damping-
+      independent by construction too: after an impulse y_k ~ 2 zeta_k
+      omega_k, so zeta_k cancels in nlWeight_k y_k^2 and only the *decay*
+      of the glide follows the damping knobs.
 
     * Mode cascade ("cascade" knob): a windowed multi-band ladder with
       transfer inertia. The bank is split into numCascadeBands frequency
@@ -93,48 +91,39 @@
       comb to catch the broadband products, low enough that the pumped
       modes keep a natural ring once the pumping stops.
 
-      The knob acts directly: there is no damping compensation on it any
-      more. The power law that used to scale it, min(1, (2.3e-5/zetaM)^0.64),
-      was fitted on listening limits to cancel one half (the material half)
-      of the drive artefact described below; with the source fixed at its
-      root, the measured drive is flat to about 1 dB across three decades of
-      either damping knob and the correction has nothing left to correct.
+      The knob acts directly: the drive below carries no damping term, so
+      there is nothing for a damping compensation to correct.
 
-      The source signal is the plate's *motion* over the whole plate, not
-      its audible output at a point.
-      Feeding the cascade the compensated audio (phi_out * c_k * y_k, what
-      reaches the ear) made the effect depend steeply on the damping knobs
-      for a reason that has nothing to do with physics: a band-pass ring has
-      peak 2 zeta omega, and the loudness compensation c_k = sqrt(zetaRef /
-      zeta_k) removes only sqrt(zeta) of that, so a mode's audible peak grows
-      as sqrt(zeta_k). More damping made every mode *hit harder*, the cubic
-      cubed the difference, and the shimmer rose by up to 39 dB across the
-      Viscous knob's range — while a real plate can only ever lose energy to
-      damping. Weighting by velScale_k instead cancels the zeta entirely
-      (y_k is proportional to zeta_k, velScale_k to its inverse), leaving the
-      modal velocity, which is what the plate actually does.
+      The source signal is the plate's *motion* over the whole plate, and
+      deliberately not its audible output: two things sit between the two,
+      and the ladder's cubic would raise both to the third power.
 
-      That leaves the *frequency* balance, which the compensation used to
-      supply by accident: physical modal amplitudes fall steeply with
-      frequency, so a raw velocity sum starves the upper rungs (band 0
-      outweighs band 1 by ~900x). Each band's source is therefore normalised
-      by sum(1/nu_k) over its own modes — a constant fixed by the mode
-      indices alone, with no damping in it — which makes the rungs
-      comparable, as the voiced ladder assumes, without reintroducing the
-      artefact. Every rung is then driven by a band-mean modal velocity.
+      The first is the loudness compensation. A band-pass ring has peak
+      2 zeta omega, and c_k = sqrt(zetaRef / zeta_k) removes only
+      sqrt(zeta) of that, so in the audible signal a more damped mode peaks
+      *higher* — right for what reaches the ear, wrong for physics, where a
+      struck plate's modal amplitude is set by the impulse and damping only
+      takes energy away. Weighting by velScale_k cancels the zeta entirely
+      (y_k is proportional to zeta_k, velScale_k to its inverse), leaving
+      the modal velocity, which is what the plate actually does. The
+      *frequency* balance the ladder needs then has to be supplied on
+      purpose: physical modal amplitudes fall steeply with frequency, so a
+      raw velocity sum starves the upper rungs (band 0 outweighs band 1 by
+      ~900x). Each band's source is therefore normalised by sum(1/nu_k)
+      over its own modes — a constant fixed by the mode indices alone, with
+      no damping in it. Every rung is then driven by a band-mean modal
+      velocity.
 
-      Nor is the source read at the pickup any more. It used to be summed
-      with phi_k(x_o), which made the whole cascade follow the output-point
-      knobs: a mode nodal at the pickup drove nothing, however hard the
-      plate was moving there. The cubic coupling of a real plate does not
-      know where you put the microphone. The weight is now the constant
-      1/sqrt(A), which is what a typical phi_k is worth on a mass-normalised
-      plate (int phi^2 dA = 1), so the drive keeps its level on any geometry
-      while depending on none of the listening positions. The *injection*
-      still carries phi_l(x_h): the hit point is where the plate deflects
-      most, so it is the one position the nonlinearity has a physical claim
-      to, and it is what keeps the cascade's character tied to how the plate
-      is played.
+      The second is the pickup. A mode nodal at x_o contributes nothing to
+      the audible signal however hard the plate is moving there, and the
+      cubic coupling of a real plate does not know where you put the
+      microphone. The weight is the constant 1/sqrt(A), what a typical
+      phi_k is worth on a mass-normalised plate (int phi^2 dA = 1), so the
+      drive keeps its level on any geometry while depending on no listening
+      position. The *injection* does carry phi_l(x_h): the hit point is
+      where the plate deflects most, so it is the one position the
+      nonlinearity has a physical claim to, and it is what keeps the
+      cascade's character tied to how the plate is played.
 
       Depletion ("Deplete" parameter): the transfer is otherwise purely
       additive, so the low modes would ring on untouched while the shimmer

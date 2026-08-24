@@ -44,12 +44,9 @@ namespace
     //     Force >~5 -> the gammaCap; in effect mode, a unity-peak input
     //     sits around gamma 2.
     // The driver is damping-independent by construction (within 12% over
-    // zetaV, zetaM in [1e-5, 1e-3]), so this calibration holds across the
-    // damping range — the former <out^2> driver varied by a factor 100 over
-    // the same span, and by 1300 between the struck and the effect path.
-    // (nlGain = 0.68 would reproduce the old struck-mode glide exactly, i.e.
-    // an inaudible gamma ~ 2e-4 at Force 1: the previous scaling only ever
-    // came alive on a hot external input.)
+    // zetaV, zetaM in [1e-5, 1e-3]), so this one calibration holds across
+    // the damping range, and being an integral over the plate it holds
+    // wherever the pickup sits.
     constexpr double nlGain = 500.0;
     constexpr double gammaCap = 4.0;
 
@@ -329,9 +326,8 @@ void PlateSynth::retuneBank()
     // per band by a constant that depends on the mode indices only (no
     // damping), and by the plate's own scale 1/sqrt(A) rather than by a
     // mode shape sampled at the pickup. Every rung of the ladder is then
-    // driven by a comparable band-mean velocity of the whole plate. See the
-    // header for why this replaces the audible, compensation-weighted signal
-    // read at the output point that the ladder used to use.
+    // driven by a comparable band-mean velocity of the whole plate. The
+    // header explains why the drive must not be the audible signal.
     for (int b = 0; b < numCascadeBands; ++b)
     {
         double norm = 0.0;
@@ -598,8 +594,8 @@ float PlateSynth::processSample (float input) noexcept
     if (snapField)
         fieldCount.store (activeModes, std::memory_order_release);
 
-    // Global stretching, smoothed: unlike the former <out^2> this does not
-    // depend on where the pickup sits (see the header).
+    // Global stretching, smoothed: an integral over the plate, so it does
+    // not depend on where the pickup sits (see the header).
     envStretch += envCoef * (stretch - envStretch);
     return out;
 }

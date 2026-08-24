@@ -69,21 +69,18 @@ nonlinearity (both 0 = exactly the linear model):
   energy to the shimmer instead of ringing on beneath it. All cascade
   internals live in the CASCADE panel, revealed by the **Advanced**
   button in the top bar (the window widens). The ladder is driven by the
-  plate's *motion* over the whole plate (a band-mean modal velocity), not
-  by its audible output at the pickup. Driving it from the output made the
-  shimmer follow the damping knobs upward — 38.7 dB across the Viscous
-  knob's range — because the
-  loudness compensation `√(ζ_ref/ζ_k)` makes a more damped mode peak
-  higher, and the ladder's cubic cubed the difference. A real plate can
-  only lose energy to damping. With the motion as the source the drive
-  is flat to a few dB across both knobs, so the material-damping
-  compensation that used to rescale the knob is gone and it now acts
-  directly. Moving the output point no longer changes the cascade either
-  (it used to move the drive by 18.2 dB); it changes only what you hear of
-  it, which is what a pickup is for. The hit point still shapes the
-  injection — that is the one position the nonlinearity has a physical
-  claim to. `Tests/CascadeMeasure.cpp` measures all of this. The voiced
-  defaults are
+  plate's *motion* over the whole plate (a band-mean modal velocity), and
+  deliberately not by its audible output: the loudness compensation
+  `√(ζ_ref/ζ_k)` makes a more damped mode peak higher in the audible
+  signal, and a mode nodal at the pickup vanishes from it altogether —
+  neither of which the plate itself does, and the ladder's cubic would
+  cube both. Driven by the motion, the cascade is flat to a few dB across
+  both damping knobs and identical wherever you put the output point; the
+  Cascade knob therefore acts directly, with no damping correction on it.
+  Moving the pickup still changes what you *hear* of the shimmer, which is
+  what a pickup is for, and the hit point still shapes the injection —
+  that is the one position the nonlinearity has a physical claim to.
+  `Tests/CascadeMeasure.cpp` measures all of this. The voiced defaults are
   Amp 1.1 (capped 1.5 — louder gets unpleasant), Drive 16, Window 4,
   Attack 30 ms/band, Release 2 s, Overlap 0.1, Deplete 0.07, with
   Viscous ≈ 10⁻⁴ and Material ≈ 7·10⁻⁶ (Material's ζ ∝ ν law otherwise
