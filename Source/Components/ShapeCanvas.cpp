@@ -510,6 +510,24 @@ void ShapeCanvas::paint (juce::Graphics& g)
 {
     g.fillAll (juce::Colour (0xff141a24));
 
+    // The mesh, faintly, underneath everything else: in design mode the grid
+    // is what is being designed, so it is always on screen rather than behind
+    // a button press. Interior edges only — the boundary is drawn below in
+    // its own per-segment colours.
+    if (mesh != nullptr && ! mesh->empty())
+    {
+        g.setColour (juce::Colour (0xff4a5670).withAlpha (0.45f));
+        for (int e = 0; e < mesh->numEdges(); ++e)
+        {
+            if (mesh->isBoundaryEdge (e))
+                continue;
+            const auto& ed = mesh->edges[(size_t) e];
+            const auto a = plateToScreen (mesh->vertices[(size_t) ed.v0]);
+            const auto b = plateToScreen (mesh->vertices[(size_t) ed.v1]);
+            g.drawLine (a.x, a.y, b.x, b.y, 0.6f);
+        }
+    }
+
     const auto border = getLocalBounds().toFloat().reduced (0.5f);
     g.setColour (juce::Colour (0xff35415a));
     g.drawRoundedRectangle (border, 4.0f, 1.0f);

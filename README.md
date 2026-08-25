@@ -36,8 +36,8 @@ against analytic plates in `Tests/FemTests.cpp`.
   damping (`Δ² dw/dt`) faster (ζ ∝ ν).
 * **Hammer** is the duration of the half-sine shock of a mouse hit, and
   **Force** its amplitude (past unity it drives the nonlinearities hard).
-* **Pk 1 X/Y** is pickup 1's position (also right-click/ctrl-drag on the
-  plate). The plate is heard through up to four pickups, each with its own
+* The plate is heard through pickups placed on it (right-click/ctrl-drag
+  moves pickup 1). The plate is heard through up to four pickups, each with its own
   position, level and pan, summing into a stereo pair; only pickup 1 is on by
   default, which is the single mono listening point this replaced. Pan is
   equal-power with the centre at unity, so a centred pickup at 0 dB is exactly
@@ -153,14 +153,24 @@ nonlinearity (both 0 = exactly the linear model):
 
 ## GUI workflow
 
-1. **GEOMETRY** — pick a tool: *Draw shape* (freehand, smoothed with a
-   closed spline), *Ellipse* / *Rectangle* (from the *Aspect* knob),
-   *Rotate* (drag), *Edit boundary*. In boundary mode, drag the border
-   points (*Points* knob sets how many) and click a segment to cycle its
-   condition (colour-coded, see legend).
-2. **Grid** builds the mesh (*Grid* knob = element density), **Compute**
-   runs the modal analysis in the background (progress bar).
-3. **Plate view** — click to hit the plate. The view selector next to it
+The plugin has two modes, and the controls on screen are the ones that
+belong to the mode you are in.
+
+1. **Modal design** — what the plate *is*. Pick a tool: *Draw shape*
+   (freehand, smoothed with a closed spline), *Ellipse* / *Rectangle* (from
+   the *Aspect* knob), *Rotate* (drag), *Edit boundary*. In boundary mode,
+   drag the border points (*Points* knob sets how many) and click a segment
+   to cycle its condition (colour-coded, see legend). *Grid* sets the element
+   density and *Modes* the size of the filter bank; the mesh is rebuilt as
+   you edit and drawn under the outline, so the grid is always in front of
+   you. **Modes lives here rather than with the playing controls on purpose**
+   — it reallocates and retunes the whole bank, and raising it while the
+   plate is ringing can produce a very loud transient.
+2. **Compute** runs the modal analysis in the background (progress bar) and
+   drops you into Perform when it finishes. **Perform** on its own goes back
+   to the last model computed, keeping the shape — so a shape can be worked
+   on across several passes without the plate ever falling silent.
+3. **Perform** — click to hit the plate. The view selector next to it
    chooses what the contours show: *Modes*, where the *Mode* knob picks a
    single eigenmode to display (its frequency shows in the status line), or
    *Displacement*, the live deflection of the sounding plate,

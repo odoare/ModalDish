@@ -76,6 +76,17 @@ public:
     std::function<void()> onBoundaryChanged;  // segment points / conditions changed
 
     //==========================================================================
+    /** The mesh to draw faintly behind the outline, so that the grid being
+        designed is visible while it is being designed. Drawn with this
+        component's own coordinate mapping rather than FemViewComponent's,
+        which fits the mesh bounding box and so would not line up with the
+        outline handles. */
+    void setMesh (std::shared_ptr<const fxme::acoustics::FemMesh> m)
+    {
+        mesh = std::move (m);
+        repaint();
+    }
+
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
@@ -108,6 +119,7 @@ private:
     double perimeter = 0.0;
 
     // Interaction state.
+    std::shared_ptr<const fxme::acoustics::FemMesh> mesh;   // drawn, never edited
     std::vector<juce::Point<float>> rawStroke;   // freehand, screen coords
     int draggedHandle = -1;
     bool rotating = false;

@@ -150,8 +150,8 @@ private:
     void addKnob (const juce::String& label, const char* paramId,
                   std::optional<double> centre = {})
     {
-        auto s = std::make_unique<fxme::FxmeSlider>();
-        fem::theme::styleKnob (*s, label, accent);
+        auto s = std::make_unique<fxme::FxmeNumberBox>();
+        fem::theme::styleBox (*s, label, accent);
         if (centre.has_value())
             s->setCentralValue (*centre);          // bipolar: arc grows from centre
         addAndMakeVisible (*s);
@@ -160,7 +160,7 @@ private:
         knobs.push_back (std::move (s));
     }
 
-    static constexpr int pad = 8, headerH = 22, rowH = 74, footerH = 26, knobW = 62;
+    static constexpr int pad = 8, headerH = 22, rowH = 42, footerH = 26, knobW = 62;
 
     FemPlateAudioProcessor& processor;
     const bool isPickup;
@@ -168,7 +168,7 @@ private:
     const juce::Colour accent;
     juce::String title;
 
-    std::vector<std::unique_ptr<fxme::FxmeSlider>> knobs;
+    std::vector<std::unique_ptr<fxme::FxmeNumberBox>> knobs;
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> attachments;
     std::unique_ptr<fxme::FxmeButton> onButton;
     juce::TextButton learnButton { "MIDI learn" };

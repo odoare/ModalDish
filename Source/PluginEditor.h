@@ -44,7 +44,17 @@ private:
     void timerCallback() override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
 
-    void showShapeView (bool showShape);
+    /** The plugin has two modes rather than two views.
+
+        Modal design shows the shape editor with its mesh, and the geometry
+        and Modes controls — everything that decides what the plate *is*.
+        Perform hides all of that and shows the controls that play it.
+
+        The split is not cosmetic: Modes reallocates and retunes the whole
+        filter bank, and raising it mid-performance can produce a very loud
+        transient. Putting it behind a mode change is the point. */
+    void setDesignMode (bool design);
+    void updateWindowSize();
     void setAdvancedVisible (bool shouldShow);
     void syncShapeToProcessor (bool geometryChanged);
     void refreshMeshAndField();
@@ -100,46 +110,52 @@ private:
     // Left: the two stacked views + the action strip.
     fem::ShapeCanvas canvas;
     fxme::acoustics::FemViewComponent plateView;
-    juce::TextButton shapeViewButton { "Shape" }, plateViewButton { "Plate" };
-    juce::TextButton gridButton { "Grid" }, computeButton { "Compute" };
+    juce::TextButton designButton { "Modal design" }, performButton { "Perform" };
+    juce::TextButton computeButton { "Compute" };
     double progressValue = 0.0;
     juce::ProgressBar progressBar { progressValue };
     juce::Label statusLabel;
 
-    // Right column — geometry.
+    // Right column — modal design (shape, mesh, bank size).
     juce::ComboBox toolBox;
-    fxme::FxmeSlider aspectKnob, pointsKnob, densityKnob;
+    fxme::FxmeNumberBox aspectKnob, pointsKnob, densityKnob, modesKnob;
+    std::unique_ptr<SliderAttachment> modesAtt;
 
-    // Right column — modal parameters.
-    fxme::FxmeSlider f1Knob, glideKnob, tensionKnob, hammerKnob, forceKnob,
-                     nonlinKnob, cascadeKnob, viscKnob, matKnob, modesKnob;
-    std::unique_ptr<SliderAttachment> f1Att, glideAtt, tensionAtt, hammerAtt,
+    // Right column — dynamics.
+    fxme::FxmeNumberBox f1Knob, tensionKnob, hammerKnob, forceKnob,
+                        nonlinKnob, cascadeKnob, viscKnob, matKnob, deplKnob;
+    std::unique_ptr<SliderAttachment> f1Att, tensionAtt, hammerAtt,
                                       forceAtt, nonlinAtt, cascadeAtt, viscAtt,
-                                      matAtt, modesAtt;
+                                      matAtt, deplAtt;
 
-    // Right column — cascade tuning.
-    fxme::FxmeSlider cascAmpKnob, cascDriveKnob, cascAttKnob, cascRelKnob,
-                     cascOverKnob, cascWinKnob, cascDeplKnob;
+    // Right column — cascade tuning (Advanced). Deplete moved out to the
+    // Dynamics panel: it is a voicing control, not a tuning constant.
+    fxme::FxmeNumberBox cascAmpKnob, cascDriveKnob, cascAttKnob, cascRelKnob,
+                        cascOverKnob, cascWinKnob;
     std::unique_ptr<SliderAttachment> cascAmpAtt, cascDriveAtt, cascAttAtt,
-                                      cascRelAtt, cascOverAtt, cascWinAtt, cascDeplAtt;
+                                      cascRelAtt, cascOverAtt, cascWinAtt;
 
-    // Right column — I/O.
-    fxme::FxmeSlider outXKnob, outYKnob, inGainKnob, outGainKnob;
-    std::unique_ptr<SliderAttachment> outXAtt, outYAtt, inGainAtt, outGainAtt;
+    // Right column — output. The pickup positions used to live here; they are
+    // on the plate now, where they belong, and the room went to metering.
+    fxme::FxmeNumberBox inGainKnob, outGainKnob;
+    std::unique_ptr<SliderAttachment> inGainAtt, outGainAtt;
+    fxme::VuMeterComponent outMeter[2];
 
     // Plate view contents: mode shapes (picked by the knob, 0 = bare grid)
     // or the live field, displacement or velocity.
     juce::ComboBox viewBox;
-    fxme::FxmeSlider modeViewKnob;
+    fxme::FxmeNumberBox modeViewKnob;
     std::vector<float> modalBuf, fieldBuf;   // scratch for the live field
     float fieldRef = 0.0f;                   // held amplitude reference
 
-    juce::Rectangle<int> geomPanel, modalPanel, cascPanel, ioPanel, legendArea;
+    juce::Rectangle<int> designPanel, dynPanel, excitePanel, cascPanel, ioPanel, legendArea;
+    juce::Rectangle<int> meterArea;
 
-    // "Advanced" toggle (parked in the top bar): shows the cascade tuning
-    // column and widens the window.
+    // "Advanced" toggle, in the Dynamics panel next to what it extends:
+    // shows the cascade tuning column and widens the window.
     juce::TextButton advancedButton { "Advanced" };
     bool advancedVisible = false;
+    bool designMode = true;
 
     int displayedModeCount = -1;         // status refresh bookkeeping
     /** A fading ring on a point that was struck. Held in *plate* coordinates

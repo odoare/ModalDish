@@ -26,11 +26,13 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     topBar.setAccentColour (fem::theme::accent);
 
     // Advanced toggle: shows the cascade tuning column, widening the window.
+    // The Advanced toggle sits in the Dynamics panel, in the slot next to the
+    // controls it extends, rather than in the top bar away from them.
     fem::theme::styleButton (advancedButton, fem::theme::cascAccent);
     advancedButton.setClickingTogglesState (true);
     advancedButton.setMouseClickGrabsKeyboardFocus (false);
     advancedButton.onClick = [this] { setAdvancedVisible (advancedButton.getToggleState()); };
-    topBar.setRightControls (nullptr, 0, &advancedButton, 86);
+    addAndMakeVisible (advancedButton);
 
     // --- left: views ---------------------------------------------------------
     addAndMakeVisible (canvas);
@@ -83,25 +85,27 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     };
 
     // --- left: action strip ---------------------------------------------------
-    for (auto* b : { &shapeViewButton, &plateViewButton, &gridButton, &computeButton })
+    for (auto* b : { &designButton, &performButton, &computeButton })
     {
         fem::theme::styleButton (*b, fem::theme::accent);
         b->setMouseClickGrabsKeyboardFocus (false);
         addAndMakeVisible (*b);
     }
-    shapeViewButton.setClickingTogglesState (false);
-    plateViewButton.setClickingTogglesState (false);
-    shapeViewButton.onClick = [this] { showShapeView (true); };
-    plateViewButton.onClick = [this] { showShapeView (false); };
-    gridButton.onClick = [this]
-    {
-        if (processor.buildMesh())
-            showShapeView (false);
-    };
+    designButton.setClickingTogglesState (false);
+    performButton.setClickingTogglesState (false);
+    designButton.onClick = [this] { setDesignMode (true); };
+    // Leaving design without computing keeps the shape but goes on sounding
+    // the last model that was computed, so the shape can be worked on across
+    // several passes without the plate falling silent in between.
+    performButton.onClick = [this] { setDesignMode (false); };
     computeButton.onClick = [this]
     {
         processor.computeModes();
     };
+
+    // The Grid button is gone: the mesh is rebuilt on every geometry change
+    // (syncShapeToProcessor) and drawn straight into the shape editor, so the
+    // grid being designed is always on screen without asking for it.
 
     addChildComponent (progressBar);
     progressBar.setColour (juce::ProgressBar::foregroundColourId, fem::theme::accent);
@@ -128,7 +132,7 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     };
     addAndMakeVisible (viewBox);
 
-    fem::theme::styleKnob (modeViewKnob, "Mode", fem::theme::accent);
+    fem::theme::styleBox (modeViewKnob, "Mode", fem::theme::accent);
     modeViewKnob.setRange (0, fem::maxModes, 1);
     modeViewKnob.setValue (0, juce::dontSendNotification);
     modeViewKnob.onValueChange = [this] { refreshField(); refreshStatus(); };
@@ -145,18 +149,18 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     toolBox.onChange = [this]
     {
         canvas.setTool ((fem::ShapeCanvas::Tool) (toolBox.getSelectedId() - 1));
-        showShapeView (true);
+        setDesignMode (true);
     };
     addAndMakeVisible (toolBox);
 
-    fem::theme::styleKnob (aspectKnob, "Aspect", fem::theme::geomAccent);
+    fem::theme::styleBox (aspectKnob, "Aspect", fem::theme::geomAccent);
     aspectKnob.setRange (0.25, 4.0, 0.01);
     aspectKnob.setSkewFactorFromMidPoint (1.0);
     aspectKnob.setValue (1.2, juce::dontSendNotification);
     aspectKnob.onValueChange = [this] { canvas.setAspect (aspectKnob.getValue()); };
     addAndMakeVisible (aspectKnob);
 
-    fem::theme::styleKnob (pointsKnob, "Points", fem::theme::geomAccent);
+    fem::theme::styleBox (pointsKnob, "Points", fem::theme::geomAccent);
     pointsKnob.setRange (1, 12, 1);
     pointsKnob.setValue (canvas.numBorderPoints(), juce::dontSendNotification);
     pointsKnob.onValueChange = [this]
@@ -165,7 +169,7 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     };
     addAndMakeVisible (pointsKnob);
 
-    fem::theme::styleKnob (densityKnob, "Grid", fem::theme::geomAccent);
+    fem::theme::styleBox (densityKnob, "Grid", fem::theme::geomAccent);
     densityKnob.setRange (8, 48, 1);
     densityKnob.setValue (processor.shape().meshDensity, juce::dontSendNotification);
     densityKnob.onValueChange = [this]
@@ -178,15 +182,14 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
 
     // --- right: modal parameters -----------------------------------------------
     auto& apvts = processor.apvts;
-    auto addModal = [&] (fxme::FxmeSlider& s, const char* text, const char* id,
+    auto addModal = [&] (fxme::FxmeNumberBox& s, const char* text, const char* id,
                          std::unique_ptr<SliderAttachment>& att)
     {
-        fem::theme::styleKnob (s, text, fem::theme::modesAccent);
+        fem::theme::styleBox (s, text, fem::theme::modesAccent);
         addAndMakeVisible (s);
         att = std::make_unique<SliderAttachment> (apvts, id, s);
     };
     addModal (f1Knob, "Freq", fem::id::f1, f1Att);
-    addModal (glideKnob, "Glide", fem::id::glide, glideAtt);
     addModal (tensionKnob, "Tension", fem::id::tension, tensionAtt);
     addModal (hammerKnob, "Hammer", fem::id::hammerMs, hammerAtt);
     addModal (forceKnob, "Force", fem::id::force, forceAtt);
@@ -194,13 +197,20 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     addModal (cascadeKnob, "Cascade", fem::id::cascade, cascadeAtt);
     addModal (viscKnob, "Viscous", fem::id::viscDamp, viscAtt);
     addModal (matKnob, "Material", fem::id::matDamp, matAtt);
-    addModal (modesKnob, "Modes", fem::id::numModes, modesAtt);
+    addModal (deplKnob, "Deplete", fem::id::cascDeplete, deplAtt);
+
+    // Modes belongs with the design, not the performance: it reallocates and
+    // retunes the whole bank, and raising it while the plate is ringing can
+    // produce a very loud transient. It is only reachable in design mode.
+    fem::theme::styleBox (modesKnob, "Modes", fem::theme::geomAccent);
+    addAndMakeVisible (modesKnob);
+    modesAtt = std::make_unique<SliderAttachment> (apvts, fem::id::numModes, modesKnob);
 
     // --- right: cascade tuning ---------------------------------------------------
-    auto addCasc = [&] (fxme::FxmeSlider& s, const char* text, const char* id,
+    auto addCasc = [&] (fxme::FxmeNumberBox& s, const char* text, const char* id,
                         std::unique_ptr<SliderAttachment>& att)
     {
-        fem::theme::styleKnob (s, text, fem::theme::cascAccent);
+        fem::theme::styleBox (s, text, fem::theme::cascAccent);
         addAndMakeVisible (s);
         att = std::make_unique<SliderAttachment> (apvts, id, s);
     };
@@ -210,26 +220,34 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     addCasc (cascAttKnob, "Attack", fem::id::cascAttack, cascAttAtt);
     addCasc (cascRelKnob, "Release", fem::id::cascRelease, cascRelAtt);
     addCasc (cascOverKnob, "Overlap", fem::id::cascOverlap, cascOverAtt);
-    addCasc (cascDeplKnob, "Deplete", fem::id::cascDeplete, cascDeplAtt);
 
     // --- right: I/O --------------------------------------------------------------
-    auto addIo = [&] (fxme::FxmeSlider& s, const char* text, const char* id,
+    auto addIo = [&] (fxme::FxmeNumberBox& s, const char* text, const char* id,
                       std::unique_ptr<SliderAttachment>& att)
     {
-        fem::theme::styleKnob (s, text, fem::theme::ioAccent);
+        fem::theme::styleBox (s, text, fem::theme::ioAccent);
         addAndMakeVisible (s);
         att = std::make_unique<SliderAttachment> (apvts, id, s);
     };
-    addIo (outXKnob, "Pk 1 X", fem::id::pickupX[0], outXAtt);
-    addIo (outYKnob, "Pk 1 Y", fem::id::pickupY[0], outYAtt);
     addIo (inGainKnob, "In", fem::id::inGain, inGainAtt);
     addIo (outGainKnob, "Out", fem::id::outGain, outGainAtt);
+
+    // Output metering, post Out Gain. The pickup positions used to occupy
+    // this room; they live on the plate now, where a position belongs.
+    for (auto& m : outMeter)
+    {
+        m.setRange (-60.0f, 6.0f);
+        m.setZeroLevel (0.0f);
+        m.setHorizontal (true);
+        m.setMeterColor (fem::theme::ioAccent);
+        addAndMakeVisible (m);
+    }
 
     processor.addChangeListener (this);
     refreshMeshAndField();
     refreshStatus();
     // Reopening on an already-computed plate lands on the playable view.
-    showShapeView (processor.getCurrentModel() == nullptr);
+    setDesignMode (processor.getCurrentModel() == nullptr);
     startTimerHz (30);
 
     setAdvancedVisible (false);   // also sets the window size
@@ -247,18 +265,56 @@ void FemPlateAudioProcessorEditor::setAdvancedVisible (bool shouldShow)
     advancedVisible = shouldShow;
     advancedButton.setToggleState (shouldShow, juce::dontSendNotification);
     for (auto* k : { &cascAmpKnob, &cascDriveKnob, &cascWinKnob,
-                     &cascAttKnob, &cascRelKnob, &cascOverKnob, &cascDeplKnob })
-        k->setVisible (shouldShow);
-    setSize (shouldShow ? 1412 : 1142, 730);   // triggers resized()
+                     &cascAttKnob, &cascRelKnob, &cascOverKnob })
+        k->setVisible (shouldShow && ! designMode);
+    updateWindowSize();
     repaint();
 }
 
-void FemPlateAudioProcessorEditor::showShapeView (bool showShape)
+void FemPlateAudioProcessorEditor::setDesignMode (bool design)
 {
-    canvas.setVisible (showShape);
-    plateView.setVisible (! showShape);
-    shapeViewButton.setToggleState (showShape, juce::dontSendNotification);
-    plateViewButton.setToggleState (! showShape, juce::dontSendNotification);
+    designMode = design;
+    canvas.setVisible (design);
+    plateView.setVisible (! design);
+    designButton.setToggleState (design, juce::dontSendNotification);
+    performButton.setToggleState (! design, juce::dontSendNotification);
+
+    // Design controls and performance controls are mutually exclusive: the
+    // panel a control is not in is not merely greyed but absent, so there is
+    // never a Modes knob on screen while the plate is being played.
+    //
+    // Typed arrays rather than braced lists: the elements are sliders, combo
+    // boxes and buttons, and a braced list deduces one element type without
+    // considering the derived-to-base conversion that would unify them.
+    juce::Component* const designOnly[] = {
+        &toolBox, &aspectKnob, &pointsKnob, &densityKnob, &modesKnob
+    };
+    for (auto* c : designOnly)
+        c->setVisible (design);
+
+    juce::Component* const performOnly[] = {
+        &f1Knob, &tensionKnob, &hammerKnob, &forceKnob, &nonlinKnob, &cascadeKnob,
+        &viscKnob, &matKnob, &deplKnob, &advancedButton, &inGainKnob, &outGainKnob,
+        &outMeter[0], &outMeter[1], &viewBox, &modeViewKnob
+    };
+    for (auto* c : performOnly)
+        c->setVisible (! design);
+
+    for (auto* k : { &cascAmpKnob, &cascDriveKnob, &cascWinKnob,
+                     &cascAttKnob, &cascRelKnob, &cascOverKnob })
+        k->setVisible (advancedVisible && ! design);
+
+    updateWindowSize();
+    resized();
+    repaint();
+}
+
+void FemPlateAudioProcessorEditor::updateWindowSize()
+{
+    // The cascade column only exists in Perform with Advanced up, so the
+    // window must not stay wide when design mode hides it. It is narrower
+    // than the main column because it is a single stack of number boxes.
+    setSize ((advancedVisible && ! designMode) ? 1302 : 1142, 730);
 }
 
 void FemPlateAudioProcessorEditor::syncShapeToProcessor (bool geometryChanged)
@@ -283,7 +339,11 @@ void FemPlateAudioProcessorEditor::syncShapeToProcessor (bool geometryChanged)
 
 void FemPlateAudioProcessorEditor::refreshMeshAndField()
 {
-    plateView.setMesh (processor.getDisplayMesh());
+    const auto mesh = processor.getDisplayMesh();
+    plateView.setMesh (mesh);
+    // The shape editor draws the same mesh, in its own coordinates, so the
+    // grid is visible while it is being designed.
+    canvas.setMesh (mesh);
     refreshField();
 }
 
@@ -678,6 +738,9 @@ void FemPlateAudioProcessorEditor::timerCallback()
     if (showingLiveField() && plateView.isVisible())
         refreshLiveField();
 
+    for (int ch = 0; ch < 2; ++ch)
+        outMeter[ch].setValue (processor.getOutputLevelDb (ch));
+
     // A MIDI learn capture is applied here rather than on the audio thread,
     // which must not touch a parameter. Consumed with exchange so a note is
     // applied once even if the timer and the audio thread race.
@@ -725,9 +788,9 @@ void FemPlateAudioProcessorEditor::changeListenerCallback (juce::ChangeBroadcast
 {
     refreshMeshAndField();
     refreshStatus();
-    // A finished computation switches to the plate view, ready to play.
+    // A finished computation switches to Perform, ready to play.
     if (processor.getCurrentModel() != nullptr && ! processor.isComputing())
-        showShapeView (false);
+        setDesignMode (false);
 }
 
 //==============================================================================
@@ -749,10 +812,26 @@ void FemPlateAudioProcessorEditor::paint (juce::Graphics& g)
                     juce::Justification::centredLeft);
     };
 
-    drawPanel (geomPanel, "GEOMETRY", fem::theme::geomAccent);
-    drawPanel (modalPanel, "MODES", fem::theme::modesAccent);
+    drawPanel (designPanel, "MODAL DESIGN", fem::theme::geomAccent);
+    drawPanel (dynPanel, "DYNAMICS", fem::theme::modesAccent);
+    drawPanel (excitePanel, "HAMMER", fem::theme::modesAccent);
     drawPanel (cascPanel, "CASCADE", fem::theme::cascAccent);
     drawPanel (ioPanel, "OUTPUT", fem::theme::ioAccent);
+
+    // Scale under the output meters, so a reading means something.
+    if (! meterArea.isEmpty())
+    {
+        g.setFont (juce::Font (juce::FontOptions (9.0f)));
+        g.setColour (fem::theme::dimText);
+        for (const int db : { -60, -36, -24, -12, 0 })
+        {
+            const float t = juce::jmap ((float) db, -60.0f, 6.0f, 0.0f, 1.0f);
+            const int x = meterArea.getX() + juce::roundToInt (t * meterArea.getWidth());
+            g.drawText (juce::String (db),
+                        juce::Rectangle<int> (x - 13, meterArea.getBottom() - 11, 26, 10),
+                        juce::Justification::centred);
+        }
+    }
 
     // Boundary-condition legend.
     if (! legendArea.isEmpty())
@@ -775,120 +854,148 @@ void FemPlateAudioProcessorEditor::paint (juce::Graphics& g)
 
 void FemPlateAudioProcessorEditor::resized()
 {
+    // Two columns of number boxes throughout. A box is legible at a third of
+    // the height a knob needs for the same information, which is what makes
+    // pairing them up worthwhile: every panel is shorter *and* wider-spaced
+    // than the single column of knobs it replaces.
+    constexpr int boxH = 38, gap = 6, titleH = 22, padding = 10;
+
+    // Lays `controls` out two per row inside `r`, left to right, top to
+    // bottom; a null entry leaves its cell empty.
+    const auto twoColumns = [boxH, gap] (juce::Rectangle<int> r,
+                                std::initializer_list<juce::Component*> controls)
+    {
+        const int colW = r.getWidth() / 2;
+        int i = 0;
+        juce::Rectangle<int> row;
+        for (auto* c : controls)
+        {
+            if (i % 2 == 0)
+            {
+                if (i > 0)
+                    r.removeFromTop (gap);
+                row = r.removeFromTop (boxH);
+            }
+            auto cell = (i % 2 == 0) ? row.removeFromLeft (colW) : row;
+            if (c != nullptr)
+                c->setBounds (cell.reduced (2, 0));
+            ++i;
+        }
+    };
+
     auto area = getLocalBounds();
     topBar.setBounds (area.removeFromTop (54));
-    area.reduce (10, 10);
+    area.reduce (padding, padding);
 
-    // Column A = geometry + modes + output; column B (Advanced only) =
-    // cascade tuning.
+    // Column B is the cascade tuning: one narrow column, so a single stack of
+    // boxes fills it rather than being stretched across a wide panel.
     juce::Rectangle<int> colB;
-    if (advancedVisible)
+    if (advancedVisible && ! designMode)
     {
-        colB = area.removeFromRight (270);
+        colB = area.removeFromRight (150);
         area.removeFromRight (10);
     }
     auto colA = area.removeFromRight (270);
     area.removeFromRight (10);
 
-    geomPanel = colA.removeFromTop (196);
+    designPanel = dynPanel = excitePanel = ioPanel = cascPanel = {};
+    legendArea = meterArea = {};
+
+    if (designMode)
     {
-        auto r = geomPanel.reduced (10);
-        r.removeFromTop (22);
+        designPanel = colA.removeFromTop (2 * padding + titleH + 26 + gap + 2 * boxH + gap);
+        auto r = designPanel.reduced (padding);
+        r.removeFromTop (titleH);
         toolBox.setBounds (r.removeFromTop (26));
-        r.removeFromTop (6);
-        legendArea = r.removeFromBottom (18);
-        auto knobs = r;
-        const int w = knobs.getWidth() / 3;
-        aspectKnob.setBounds (knobs.removeFromLeft (w).reduced (2));
-        pointsKnob.setBounds (knobs.removeFromLeft (w).reduced (2));
-        densityKnob.setBounds (knobs.reduced (2));
-    }
-    colA.removeFromTop (10);
-
-    modalPanel = colA.removeFromTop (310);
-    {
-        auto r = modalPanel.reduced (10);
-        r.removeFromTop (22);
-        const int rowH = r.getHeight() / 3;
-        const int w = r.getWidth() / 3;
-
-        // Four across on the excitation row (the I/O panel's width), three on
-        // the others: Glide belongs next to the frequency it glides.
-        auto row1 = r.removeFromTop (rowH);          // excitation
-        const int w4 = r.getWidth() / 4;
-        f1Knob.setBounds (row1.removeFromLeft (w4).reduced (2));
-        glideKnob.setBounds (row1.removeFromLeft (w4).reduced (2));
-        hammerKnob.setBounds (row1.removeFromLeft (w4).reduced (2));
-        forceKnob.setBounds (row1.reduced (2));
-
-        auto row2 = r.removeFromTop (rowH);          // tension / nonlinearity
-        tensionKnob.setBounds (row2.removeFromLeft (w).reduced (2));
-        nonlinKnob.setBounds (row2.removeFromLeft (w).reduced (2));
-        cascadeKnob.setBounds (row2.reduced (2));
-
-        auto row3 = r;                               // damping / bank size
-        viscKnob.setBounds (row3.removeFromLeft (w).reduced (2));
-        matKnob.setBounds (row3.removeFromLeft (w).reduced (2));
-        modesKnob.setBounds (row3.reduced (2));
-    }
-
-    colA.removeFromTop (10);
-    ioPanel = colA.removeFromTop (130);
-    {
-        auto r = ioPanel.reduced (10);
-        r.removeFromTop (22);
-        const int w = r.getWidth() / 4;
-        outXKnob.setBounds (r.removeFromLeft (w).reduced (2));
-        outYKnob.setBounds (r.removeFromLeft (w).reduced (2));
-        inGainKnob.setBounds (r.removeFromLeft (w).reduced (2));
-        outGainKnob.setBounds (r.reduced (2));
-    }
-
-    if (advancedVisible)
-    {
-        cascPanel = colB.removeFromTop (330);
-        auto r = cascPanel.reduced (10);
-        r.removeFromTop (22);
-        const int rowH = r.getHeight() / 3;
-        const int w = r.getWidth() / 3;
-
-        auto row1 = r.removeFromTop (rowH);
-        cascAmpKnob.setBounds (row1.removeFromLeft (w).reduced (2));
-        cascDriveKnob.setBounds (row1.removeFromLeft (w).reduced (2));
-        cascWinKnob.setBounds (row1.reduced (2));
-
-        auto row2 = r.removeFromTop (rowH);
-        cascAttKnob.setBounds (row2.removeFromLeft (w).reduced (2));
-        cascRelKnob.setBounds (row2.removeFromLeft (w).reduced (2));
-        cascOverKnob.setBounds (row2.reduced (2));
-
-        auto row3 = r;
-        cascDeplKnob.setBounds (row3.removeFromLeft (w).reduced (2));
+        r.removeFromTop (gap);
+        twoColumns (r, { &aspectKnob, &pointsKnob, &densityKnob, &modesKnob });
     }
     else
     {
-        cascPanel = {};
+        dynPanel = colA.removeFromTop (2 * padding + titleH + 4 * boxH + 3 * gap);
+        {
+            auto r = dynPanel.reduced (padding);
+            r.removeFromTop (titleH);
+            twoColumns (r, { &f1Knob,      &advancedButton,
+                             &tensionKnob, &nonlinKnob,
+                             &viscKnob,    &matKnob,
+                             &cascadeKnob, &deplKnob });
+        }
+
+        colA.removeFromTop (10);
+        excitePanel = colA.removeFromTop (2 * padding + titleH + boxH);
+        {
+            auto r = excitePanel.reduced (padding);
+            r.removeFromTop (titleH);
+            twoColumns (r, { &hammerKnob, &forceKnob });
+        }
+
+        colA.removeFromTop (10);
+        const int meterH = 14, scaleH = 12;
+        ioPanel = colA.removeFromTop (2 * padding + titleH + boxH + gap
+                                      + 2 * meterH + 4 + scaleH);
+        {
+            auto r = ioPanel.reduced (padding);
+            r.removeFromTop (titleH);
+            twoColumns (r, { &inGainKnob, &outGainKnob });
+            r.removeFromTop (boxH + gap);
+
+            // Horizontal bars across the panel's full width, with the dB
+            // scale drawn under them in paint().
+            meterArea = r;
+            outMeter[0].setBounds (r.removeFromTop (meterH).reduced (2, 1));
+            r.removeFromTop (4);
+            outMeter[1].setBounds (r.removeFromTop (meterH).reduced (2, 1));
+        }
     }
 
-    // Left: action strip at the bottom, views above.
+    if (advancedVisible && ! designMode)
+    {
+        cascPanel = colB.removeFromTop (2 * padding + titleH + 6 * boxH + 5 * gap);
+        auto r = cascPanel.reduced (padding);
+        r.removeFromTop (titleH);
+        for (auto* k : { &cascAmpKnob, &cascDriveKnob, &cascWinKnob,
+                         &cascAttKnob, &cascRelKnob, &cascOverKnob })
+        {
+            k->setBounds (r.removeFromTop (boxH));
+            r.removeFromTop (gap);
+        }
+    }
+
+    // Left: action strip at the bottom, views above. In design mode the
+    // boundary-condition legend sits directly under the sketch it explains,
+    // rather than across the panel on the far side of the window.
     auto strip = area.removeFromBottom (64);
     strip.removeFromTop (8);
-    shapeViewButton.setBounds (strip.removeFromLeft (58).reduced (0, 14));
+    designButton.setBounds (strip.removeFromLeft (96).reduced (0, 14));
     strip.removeFromLeft (4);
-    plateViewButton.setBounds (strip.removeFromLeft (58).reduced (0, 14));
+    performButton.setBounds (strip.removeFromLeft (72).reduced (0, 14));
     strip.removeFromLeft (12);
-    gridButton.setBounds (strip.removeFromLeft (52).reduced (0, 14));
-    strip.removeFromLeft (4);
     computeButton.setBounds (strip.removeFromLeft (76).reduced (0, 14));
     strip.removeFromLeft (10);
-    viewBox.setBounds (strip.removeFromLeft (116).reduced (0, 18));
-    strip.removeFromLeft (6);
-    modeViewKnob.setBounds (strip.removeFromLeft (64));
-    strip.removeFromLeft (10);
+    if (! designMode)
+    {
+        viewBox.setBounds (strip.removeFromLeft (116).reduced (0, 18));
+        strip.removeFromLeft (6);
+        modeViewKnob.setBounds (strip.removeFromLeft (64).reduced (0, 12));
+        strip.removeFromLeft (10);
+    }
     progressBar.setBounds (strip.removeFromLeft (110).reduced (0, 20));
     strip.removeFromLeft (8);
     statusLabel.setBounds (strip);
 
+    if (designMode)
+    {
+        area.removeFromBottom (4);
+        legendArea = area.removeFromBottom (18);
+        // Held to a readable width instead of stretched across the whole
+        // sketch: four swatches spread over 800 px read as four unrelated
+        // labels rather than as one key.
+        legendArea = legendArea.withWidth (juce::jmin (legendArea.getWidth(), 420));
+    }
+
     canvas.setBounds (area);
     plateView.setBounds (area);
 }
+
+

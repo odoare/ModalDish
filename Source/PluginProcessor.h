@@ -37,6 +37,8 @@
 #include "Dsp/ModalModel.h"
 #include "Dsp/PlateSynth.h"
 
+#include <FxmeTools/dsp/VuMeter.h>
+
 //==============================================================================
 class FemPlateAudioProcessor : public juce::AudioProcessor,
                                public juce::ChangeBroadcaster,
@@ -133,6 +135,13 @@ public:
         a source scatters its hits, and one note can fire several sources.
         Replaces the old note counter, which could only say that *something*
         had been hit and left the editor to guess where. */
+    /** Output level in dBFS, channel 0 = left. Post Out Gain, so what the
+        meter shows is what leaves the plugin. */
+    float getOutputLevelDb (int channel) const noexcept
+    {
+        return channel == 0 ? outMeterL.getRMS() : outMeterR.getRMS();
+    }
+
     int getHitCount() const noexcept              { return synth.getHitCount(); }
     fem::PlateSynth::HitPoint getHit (int i) const noexcept { return synth.getHit (i); }
 
@@ -168,6 +177,7 @@ private:
     int lastStrikeSeen = 0;
 
     fem::PlateSynth synth;
+    fxme::VuMeter outMeterL, outMeterR;
 
     // Cached raw parameter pointers (APVTS owns the atomics).
     std::atomic<float>* pF1 = nullptr;

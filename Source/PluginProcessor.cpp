@@ -196,8 +196,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout FemPlateAudioProcessor::crea
         juce::ParameterID (fem::id::force, 1), "Force",
         juce::NormalisableRange<float> (0.0f, 20.0f, 0.0f, 0.4f), 1.0f));
 
-    // Portamento between played notes. 0 (the default) tunes the plate the
-    // instant the note arrives; the Freq knob is never glided.
+    // Portamento between played notes. Currently inert and deliberately kept:
+    // notes stopped setting the pitch when they became per-source triggers,
+    // so nothing reads it and it has no GUI control. The glide machinery in
+    // PlateSynth is intact, so this comes back as a one-line change if notes
+    // are ever given the tuning again.
     p.push_back (std::make_unique<FloatParam> (
         juce::ParameterID (fem::id::glide, 1), "Glide",
         juce::NormalisableRange<float> (0.0f, 2000.0f, 0.0f, 0.35f), 0.0f,
@@ -363,6 +366,8 @@ void FemPlateAudioProcessor::prepareToPlay (double sampleRate, int)
 {
     juce::FloatVectorOperations::disableDenormalisedNumberSupport();
     synth.prepare (sampleRate);
+    outMeterL.prepare (sampleRate);
+    outMeterR.prepare (sampleRate);
 }
 
 void FemPlateAudioProcessor::releaseResources()
@@ -514,6 +519,13 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             out0[i] = 0.5f * (outL + outR);
         }
     }
+
+    // Metering reads what actually leaves, Out Gain included: the meters are
+    // there to show clipping headroom, which a pre-gain reading would miss.
+    if (out0 != nullptr)
+        outMeterL.process (out0, numSamples);
+    outMeterR.process (out1 != nullptr ? out1 : (out0 != nullptr ? out0 : nullptr),
+                       out0 != nullptr ? numSamples : 0);
 }
 
 //==============================================================================

@@ -77,18 +77,37 @@ namespace fem::theme
         return names[juce::jlimit (0, 3, bc)];
     }
 
-    // FxmeTools rotary knob: dark disc, one accent per control on the value
-    // arc / outline / pointer; FxmeLookAndFeel draws the value read-out inside
-    // the knob and the label (the slider's name) just below it.
-    inline void styleKnob (fxme::FxmeSlider& s, const juce::String& name, juce::Colour a)
+    // Two shapes, one accent vocabulary. accentControl sets the colour ids
+    // both read; styleKnob adds the rotary geometry, styleBox the number
+    // box's own name colour. The panels use boxes — they pair up two to a row
+    // in the space one knob needed — and styleKnob is kept for anywhere a
+    // rotary is still the right shape.
+    inline void accentControl (fxme::FxmeSlider& s, const juce::String& name, juce::Colour a)
     {
-        s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
         s.setName (name);
         s.setShowLabel (true);
         s.setColour (juce::Slider::rotarySliderFillColourId,    juce::Colour (0xff2b2b2b));
         s.setColour (juce::Slider::rotarySliderOutlineColourId, a.darker (1.6f));
         s.setColour (juce::Slider::trackColourId,               a);
         s.setColour (juce::Slider::thumbColourId,               a.brighter (0.4f));
+    }
+
+    inline void styleKnob (fxme::FxmeSlider& s, const juce::String& name, juce::Colour a)
+    {
+        s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+        accentControl (s, name, a);
+    }
+
+    // FxmeTools number box: the same colour ids a knob uses, so this is a
+    // type change rather than a re-theming — except that the box draws its
+    // own name, in textBoxTextColourId, which a knob never reads. The slider
+    // style is deliberately left alone: the box sets RotaryVerticalDrag in
+    // its constructor, and a box this small is unusable with the horizontal
+    // mapping a knob wants.
+    inline void styleBox (fxme::FxmeNumberBox& s, const juce::String& name, juce::Colour a)
+    {
+        accentControl (s, name, a);
+        s.setColour (juce::Slider::textBoxTextColourId, text);
     }
 
     inline void styleCombo (juce::ComboBox& c, juce::Colour a)

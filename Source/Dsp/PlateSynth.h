@@ -224,7 +224,7 @@ public:
         float force     = 1.0f;     // hammer force amplitude
         float nonlin    = 0.0f;     // 0..1 dynamic-tension (Berger) amount
         float cascade   = 0.0f;     // 0..1 upward-cascade amount
-        float glideMs   = 0.0f;     // portamento time between played notes
+        float glideMs   = 0.0f;     // portamento; inert while notes only trigger
 
         // Cascade tuning set (see the class comment; defaults = voiced values).
         float cascAmp       = 1.1f;    // injection gain A
