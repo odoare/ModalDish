@@ -84,8 +84,9 @@
       receives from below), so stability is unconditional with no gain
       restriction, unlike a full-output feedback (which needs a small-gain
       bound that renders it inaudible). Each target mode's injection is
-      divided by its bandwidth compensation so the audible cascade level
-      is damping-independent, and target bandwidths are floored —
+      weighted by sqrt(zeta_k / zetaRef) — the ladder's own calibration,
+      deliberately not the output gain rule, see cascadeInjectionGain in
+      the .cpp — and target bandwidths are floored —
       proportionally to the cascade knob and the Overlap parameter — at a
       fraction of the local mode spacing: enough overlap for the receiving
       comb to catch the broadband products, low enough that the pumped
@@ -98,14 +99,14 @@
       deliberately not its audible output: two things sit between the two,
       and the ladder's cubic would raise both to the third power.
 
-      The first is the loudness compensation. A band-pass ring has peak
-      2 zeta omega, and c_k = sqrt(zetaRef / zeta_k) removes only
-      sqrt(zeta) of that, so in the audible signal a more damped mode peaks
-      *higher* — right for what reaches the ear, wrong for physics, where a
-      struck plate's modal amplitude is set by the impulse and damping only
-      takes energy away. Weighting by velScale_k cancels the zeta entirely
-      (y_k is proportional to zeta_k, velScale_k to its inverse), leaving
-      the modal velocity, which is what the plate actually does. The
+      The first is the output gain. The bank models plate *acceleration*:
+      c_k = compZetaRef / zeta_k exactly undoes the band-pass's own factor
+      2 zeta omega, leaving 2 compZetaRef omega_k times the modal velocity,
+      so the audible signal carries a frequency tilt omega_k that the
+      plate's motion does not. Weighting the source by velScale_k removes
+      both that tilt and the zeta (y_k is proportional to zeta_k omega_k,
+      velScale_k to its inverse), leaving the modal velocity, which is what
+      the plate actually does. The
       *frequency* balance the ladder needs then has to be supplied on
       purpose: physical modal amplitudes fall steeply with frequency, so a
       raw velocity sum starves the upper rungs (band 0 outweighs band 1 by
@@ -303,7 +304,8 @@ private:
     float phiOut[fem::maxModes] {};      // phi_k(out)
     float outAmp[fem::maxModes] {};      // phi_k(out) * bandwidth compensation
     float inWeights[fem::maxModes] {};   // phi_k(last hit) for the external input
-    float compensation[fem::maxModes] {};// bandwidth gain compensation per mode
+    float compensation[fem::maxModes] {};// output gain per mode (zetaRef / zeta)
+    float cascInjW[fem::maxModes] {};    // cascade injection gain per mode
     float nlWeight[fem::maxModes] {};    // g_k q_k^2 per unit y_k^2 (Berger driver)
     float dispScale[fem::maxModes] {};   // q_k per unit y_k (display field)
     float velScale[fem::maxModes] {};    // qdot_k per unit y_k (display field)

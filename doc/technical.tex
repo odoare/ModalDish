@@ -556,21 +556,76 @@ $\varphi_k(\bm{x}_h)$. The external audio input is injected identically at
 the last hit point (\emph{effect mode}), and the output point
 $\bm{x}_o$ is a pair of automatable parameters.
 
-Because a constant-peak band-pass transmits energy proportionally to its
-bandwidth ($\propto \zeta_k$), lightly damped modes would ring much quieter
-than damped ones. Each mode is therefore compensated by
-$c_k = \sqrt{\zeta_{\mathrm{ref}}/\zeta_k}$ (clamped to $[0.5, 32]$,
-$\zeta_{\mathrm{ref}}=10^{-2}$), the loudness compensation inherited from
-the MechanOdd modal resonators:
+\paragraph{Output gain, and why it is exactly $1/\zeta_k$.}
+The RBJ constant-$0$\,dB-peak band-pass has, as an analog prototype,
 %
 \begin{equation}
-  c_k \;=\; \sqrt{\zeta_{\mathrm{ref}}/\zeta_k} .
+  H_k(s) \;=\; \frac{2\zeta_k\omega_k\, s}{s^2 + 2\zeta_k\omega_k s + \omega_k^2},
+  \label{eq:bpf}
+\end{equation}
+%
+which is $2\zeta_k\omega_k$ times the \emph{velocity} transfer function of
+the modal oscillator. The bank therefore does not output the plate's motion
+but its motion scaled by each mode's own bandwidth, and an impulse response
+whose peak ought to be fixed by the strike alone peaks proportionally to
+$\zeta_k$ instead. Damping would set the attack level as well as the decay
+--- the opposite of the physics, where a struck mode's amplitude is set by
+the impulse and damping can only take energy away afterwards.
+
+Dividing that factor straight back out is the whole of the correction. With
+%
+\begin{equation}
+  c_k \;=\; \zeta^{\,c}_{\mathrm{ref}}/\zeta_k ,
+  \qquad \zeta^{\,c}_{\mathrm{ref}} = 10^{-3},
   \label{eq:compensation}
 \end{equation}
 %
-It equalises each mode's ring energy rather than its peak, which has a
-consequence for anything driven from the output signal --- see
-\S\ref{par:drive}. Retunes triggered by parameter changes
+the chain becomes $c_k H_k(s) = 2\zeta^{\,c}_{\mathrm{ref}}\omega_k\,s/(s^2
++ \ldots)$: an exact model of modal \emph{acceleration}, up to the constant
+$2\zeta^{\,c}_{\mathrm{ref}}$ --- which is the right output quantity in any
+case, a plate radiating pressure proportional to its acceleration. Strike
+and damping then stop interfering,
+%
+\begin{equation}
+  \text{peak} \;\propto\; 2\zeta^{\,c}_{\mathrm{ref}}\,\omega_k J_k
+  \quad(\text{no } \zeta),
+  \qquad
+  \text{decay} \;\propto\; e^{-\zeta_k \omega_k t}
+  \quad(\zeta \text{ alone}),
+  \label{eq:peaklaw}
+\end{equation}
+%
+with $J_k$ the modal impulse the hammer delivers. Measured on the default
+plate over the full range of each knob, cascade and nonlinearity off:
+%
+\begin{center}
+\begin{tabular}{lrrl}
+\toprule
+& peak, $\sqrt{\zeta}$ rule & peak, $1/\zeta$ rule & decay \\
+\midrule
+Viscous, $10^{-5} \to 10^{-2}$   & $+22.3$\,dB & $0.5$\,dB & $>8\,$s $\to 0.68\,$s \\
+Material, $10^{-6} \to 10^{-3}$  & $+14.2$\,dB & $1.2$\,dB & unchanged \\
+\bottomrule
+\end{tabular}
+\end{center}
+%
+The decay times are identical under both rules; only the level moved. The
+clamp on \eqref{eq:compensation} spans $[10^{-3}, 10^{3}]$ and does not bind
+anywhere in the parameter ranges the plugin offers, which matters: a clamp
+that bit would reintroduce exactly the damping-dependent level the rule
+exists to remove. $\zeta^{\,c}_{\mathrm{ref}}$ carries no physics, only gain
+staging, and is set so the default patch lands within $0.2$\,dB of the level
+it had before.
+
+It is deliberately \emph{not} the $\zeta_{\mathrm{ref}} = 10^{-2}$ that
+normalises the modal reconstruction $q_k = y_k/(2\zeta_k\omega_k^2)$ used by
+the Berger driver, the cascade source and the display field. Those are
+calibrated against it --- $g_{\mathrm{nl}}$ in particular is a measured
+number that assumes it --- so sharing one constant between the two roles
+would mean that every future adjustment of the output level silently
+rescaled the nonlinearity by its square.
+
+Retunes triggered by parameter changes
 rewrite only the biquad coefficients (the states are preserved), which is
 inaudible for the small throttled steps used here.
 
@@ -759,27 +814,17 @@ precisely what it must not be. Two things stand between the audible signal
 and the plate's motion, and the ladder's cubic would raise both to the
 third power.
 
-The first is the loudness compensation \eqref{eq:compensation}. A band-pass
-ring has peak $2\zeta_k\omega_k$, so the audible peak of a struck mode is
-%
-\begin{equation}
-  c_k \cdot 2\zeta_k \omega_k \;=\; 2\omega_k
-      \sqrt{\zeta_{\mathrm{ref}}\,\zeta_k} \;\propto\; \sqrt{\zeta_k} :
-  \label{eq:peaklaw}
-\end{equation}
-%
-$c_k$ equalises each mode's ring \emph{energy} by trading duration for
-level, so in the audible signal a more damped mode peaks \emph{higher}.
-That is sound design, and it is the right choice for what reaches the ear,
-but it is not what the plate does: a struck plate's modal amplitude is set
-by the impulse, and damping can only take energy away. Weighting the
-source by $v_k \propto 1/(\zeta_k\nu_k)$ removes the damping entirely,
-since $y_k \propto \zeta_k$; what is left is the modal velocity.
+The first is the output gain
+\eqref{eq:compensation}. By \eqref{eq:peaklaw} the bank models plate
+\emph{acceleration}, so the audible signal carries a frequency tilt
+$\omega_k$ that the plate's motion does not. Weighting the source by
+$v_k \propto 1/(\zeta_k\nu_k)$ removes both that tilt and the bandwidth
+factor, since $y_k \propto \zeta_k\omega_k$; what is left is the modal
+velocity.
 
 The per-band divisor $n_c$ then supplies the \emph{frequency} balance the
-ladder needs, which \eqref{eq:peaklaw} had been providing as a side
-effect: physical modal amplitudes fall steeply with frequency, and a raw
-velocity sum outweighs band 1 with band 0 by a factor $\sim\!900$,
+ladder needs: physical modal velocities fall steeply with frequency, and a
+raw velocity sum outweighs band 1 with band 0 by a factor $\sim\!900$,
 starving the upper rungs. $n_c$ is fixed by the mode indices alone, so no
 damping re-enters.
 

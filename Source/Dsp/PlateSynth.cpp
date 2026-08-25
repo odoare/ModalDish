@@ -15,18 +15,108 @@ namespace fem
 
 namespace
 {
-    // A 0 dB-peak band-pass passes energy proportional to its bandwidth
-    // (~ zeta), so lightly damped (narrow) modes would ring much quieter
-    // than wide ones. Scale each mode by sqrt(zetaRef / zeta) to keep the
-    // perceived level roughly constant across the damping range (the
-    // MechanOdd modal-resonator compensation).
-    constexpr float zetaRef = 0.01f;
+    // Damping compensation, and why it is exactly 1/zeta.
+    //
+    // The RBJ constant-0 dB-peak band-pass is, as an analog prototype,
+    //
+    //     H(s) = 2 zeta omega s / (s^2 + 2 zeta omega s + omega^2)
+    //
+    // that is, 2 zeta_k omega_k times the velocity transfer function of the
+    // modal oscillator. The bank output is therefore not the plate's motion
+    // but its motion scaled by each mode's own bandwidth, and an impulse
+    // response that ought to peak at a level set by the strike alone peaks
+    // proportionally to zeta instead. More damping, louder attack: the
+    // opposite of the physics, where damping governs how fast a mode gives
+    // its energy back and not how much the strike put in.
+    //
+    // Dividing that factor straight back out is the whole fix. With
+    //
+    //     c_k = zetaRef / zeta_k
+    //
+    // the chain becomes c_k H(s) = 2 zetaRef omega_k s / (s^2 + ...), an
+    // exact model of modal *acceleration* (velocity times omega, up to the
+    // constant 2 zetaRef) — which is the right output quantity anyway, since
+    // a plate radiates pressure proportional to its acceleration. The strike
+    // then sets the peak, the damping sets the decay, and the two stop
+    // interfering:
+    //
+    //     peak    2 zetaRef omega_k J_k     no zeta at all
+    //     decay   exp(-zeta_k omega_k t)    zeta alone
+    //
+    // The previous rule was sqrt(zetaRef / zeta), which removes half of the
+    // 2 zeta omega in the exponent and leaves peak proportional to sqrt(zeta)
+    // — measured at +22 dB across the Viscous knob and +14 dB across the
+    // Material knob, which is what this replaces.
+    //
+    // compZetaRef is not a free parameter of the physics, only of the gain
+    // staging: it is picked so that the default patch comes out at the level
+    // it always did (measured 0.18 dB apart), so presets keep their balance.
+    //
+    // It is deliberately NOT zetaRef below. That one normalises the modal
+    // reconstruction q_k = y_k / (2 zeta_k omega_k^2) that the Berger driver,
+    // the cascade source and the display field are all calibrated against —
+    // nlGain in particular is a measured number that assumes it. Sharing one
+    // constant between the two roles means every future adjustment of the
+    // output level silently rescales the nonlinearity by its square, which is
+    // exactly the trap this comment exists to keep the next reader out of.
+    constexpr float compZetaRef = 1.0e-3f;
+
+    // The bounds never bind over the parameter ranges the plugin offers
+    // (zeta is itself clamped to [1e-6, 0.5], giving c in [2e-3, 1e3]); they
+    // are here to keep a pathological model from producing a pathological
+    // gain, not to shape the response. A clamp that bit would reintroduce
+    // exactly the damping-dependent level this rule exists to remove.
+    constexpr float minCompensation = 1.0e-3f;
+    constexpr float maxCompensation = 1.0e3f;
+
+    // Injection reference of the cascade ladder, and why it is NOT the output
+    // gain above.
+    //
+    // A rung of the ladder is driven continuously by the rung below, not
+    // struck, and a continuously driven mode settles at a velocity
+    // proportional to 1/zeta. The ladder's rung-to-rung gain therefore
+    // carries a 1/zeta whatever weight is used, and the cubic then cubes
+    // whatever is left of it. Weighting the injection by sqrt(zeta) cancels
+    // half of that, which is the calibration the Cascade knob and its Amp,
+    // Drive and gate settings were all tuned against.
+    //
+    // Measured, sweeping the exponent of zeta in this weight:
+    //
+    //     exponent   Material spread   Cascade knob over its range
+    //       0.5        24.8 dB           -71 -> -60 dB  (works)
+    //       0.75       11.9 dB           -71 -> -74 dB  (inverted)
+    //       1.0         9.3 dB           -71 -> -77 dB  (inverted)
+    //
+    // Cancelling the ladder's 1/zeta outright does flatten the shimmer
+    // against the damping knobs, and starves the ladder doing it: past about
+    // 0.5 the injection falls faster than the cubic can make up, so turning
+    // Cascade up makes the plate quieter at the top. 0.5 is the calibration
+    // the Cascade knob, its Amp and Drive settings and the gate thresholds
+    // were all tuned against, and it stays.
+    //
+    // How flat the shimmer should be against damping is a playability
+    // question, not a physical one — a real plate cascades far more freely
+    // when it is lightly damped — and it was answered earlier by ear. This
+    // rule is where that answer lives.
+    float cascadeInjectionGain (float zeta) noexcept
+    {
+        return juce::jlimit (1.0f / 32.0f, 2.0f,
+                             std::sqrt (juce::jmax (zeta, 1.0e-7f) / 0.01f));
+    }
 
     float gainCompensation (float zeta) noexcept
     {
-        const float g = std::sqrt (zetaRef / juce::jmax (zeta, 1.0e-7f));
-        return juce::jlimit (0.5f, 32.0f, g);
+        const float g = compZetaRef / juce::jmax (zeta, 1.0e-7f);
+        return juce::jlimit (minCompensation, maxCompensation, g);
     }
+
+    // Reference damping of the modal reconstruction, unrelated to the output
+    // gain above: q_k and qdot_k are expressed relative to this, and the
+    // remaining constant factors are folded into nlGain and the cascade
+    // source normalisation. Changing it rescales the Berger driver by its
+    // square and the cascade source linearly, so it is calibration, not a
+    // tuning knob.
+    constexpr float zetaRef = 0.01f;
 
     // Hammer forces are impulsive and benefit from a little headroom. Note
     // that a velocity-1, force-1 hit peaks well below unity (~0.012 on the
@@ -268,6 +358,7 @@ void PlateSynth::retuneBank()
             // muted (b0 = 0) so it cannot feed the feedback paths.
             outAmp[k] = 0.0f;
             compensation[k] = 1.0f;
+            cascInjW[k] = 0.0f;
             nlWeight[k] = 0.0f;
             dispScale[k] = 0.0f;
             velScale[k] = 0.0f;
@@ -301,6 +392,7 @@ void PlateSynth::retuneBank()
         const float q = juce::jlimit (0.5f, 1.0e5f, 1.0f / (2.0f * zeta));
         filters[k].c = fxme::BiquadCoeffs::bandpass (fs, (float) freq[k], q);
         compensation[k] = gainCompensation (zeta);
+        cascInjW[k] = cascadeInjectionGain (zeta);
         outAmp[k] = phiOut[k] * compensation[k];
 
         // Berger driver: this mode's contribution g_k q_k^2 to the
@@ -367,14 +459,14 @@ void PlateSynth::computeInputWeights (float x, float y)
 void PlateSynth::updateCascadeWeights() noexcept
 {
     // Target (high) modes receive the distorted low-mode signal at the hit
-    // point; dividing by each target's bandwidth compensation makes the
-    // audible cascade level independent of the damping settings (the
-    // compensation is re-applied on output). Source modes get zero: the
-    // low -> high transfer graph stays acyclic, hence unconditionally
-    // stable with no gain restriction.
+    // point, weighted by cascadeInjectionGain (see there for why that rule is
+    // deliberately not the output gain rule). Source modes get zero, so the
+    // low -> high transfer graph stays acyclic and is unconditionally stable
+    // with no gain restriction.
+    //
     for (int k = 0; k < fem::maxModes; ++k)
         cascadeW[k] = (k >= cascadeSplit && k < activeModes)
-                        ? inWeights[k] / juce::jmax (compensation[k], 0.5f)
+                        ? inWeights[k] * cascInjW[k]
                         : 0.0f;
 }
 

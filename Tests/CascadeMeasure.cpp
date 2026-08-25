@@ -263,6 +263,93 @@ int main()
 
     const double probes[] = { 0.1, 0.3, 0.6 };
 
+    // ---- 0. The strike sets the peak, the damping sets the decay -----------
+    // A struck mode's peak is fixed by the impulse; damping governs how fast
+    // it gives that energy back, not how much went in. The band-pass bank
+    // does not know that on its own — the RBJ constant-peak form carries a
+    // factor 2 zeta omega, so without the 1/zeta output gain the attack gets
+    // louder as the plate is damped harder. That is what this pins down.
+    //
+    // Cascade and nonlinearity are off here on purpose: this is a statement
+    // about the linear bank, and the ladder has damping behaviour of its own
+    // (section 1) that would confuse the reading.
+    std::printf ("== Peak level vs the damping knobs (linear bank, dB) ==\n");
+    {
+        std::vector<double> byVisc, byMat;
+        std::vector<double> decays;
+
+        const auto peakAndDecay = [&] (float zv, float zm, double& decay)
+        {
+            Patch p;
+            p.viscDamp = zv;
+            p.matDamp = zm;
+            p.cascade = 0.0f;
+            p.force = 1.0f;
+            const auto x = render (model, p);
+            double peak = 0.0;
+            for (float v : x)
+                peak = std::max (peak, (double) std::abs (v));
+
+            // Time for the 20 ms running RMS to fall 40 dB below its peak.
+            const int w = (int) (0.02 * sampleRate);
+            double best = 0.0;
+            std::vector<double> env;
+            for (size_t i = 0; i + (size_t) w < x.size(); i += (size_t) w)
+            {
+                double e = 0.0;
+                for (size_t j = i; j < i + (size_t) w; ++j)
+                    e += (double) x[j] * x[j];
+                env.push_back (std::sqrt (e / w));
+                best = std::max (best, env.back());
+            }
+            decay = renderSeconds;
+            for (size_t i = 0; i < env.size(); ++i)
+                if (env[i] < best * 0.01) { decay = (double) i * w / sampleRate; break; }
+
+            return 20.0 * std::log10 (peak + 1.0e-30);
+        };
+
+        std::printf ("  Viscous     peak dB   t(-40 dB)\n");
+        for (float zv : { 1.0e-5f, 1.0e-4f, 1.0e-3f, 1.0e-2f })
+        {
+            double d = 0.0;
+            const double pk = peakAndDecay (zv, 7.0e-6f, d);
+            byVisc.push_back (pk);
+            decays.push_back (d);
+            std::printf ("  %9.0e   %7.2f    %6.2f s\n", zv, pk, d);
+        }
+        std::printf ("  Material    peak dB   t(-40 dB)\n");
+        for (float zm : { 1.0e-6f, 7.0e-6f, 1.0e-4f, 1.0e-3f })
+        {
+            double d = 0.0;
+            const double pk = peakAndDecay (1.0e-4f, zm, d);
+            byMat.push_back (pk);
+            std::printf ("  %9.0e   %7.2f    %6.2f s\n", zm, pk, d);
+        }
+
+        std::printf ("\n  viscous peak spread %.1f dB, material peak spread %.1f dB\n",
+                     spread (byVisc), spread (byMat));
+
+        // A few dB of slack, for two honest reasons. The bank is a sum over
+        // modes whose zeta values move differently under each knob; and
+        // material damping in particular is proportional to mode number, so
+        // at the top of its range the highest partials are already dying
+        // inside the attack itself. A genuinely softer attack from a heavily
+        // material-damped plate is the physics, not a leak — it measures
+        // about 2 dB over a thousandfold range. The bar is set to catch a
+        // damping term returning to the output gain, which was tens of dB.
+        check (spread (byVisc) < 2.0, "the attack ignores the Viscous knob (< 2 dB)");
+        check (spread (byMat) < 3.0, "the attack ignores the Material knob (< 3 dB)");
+
+        // ...while the decay must still respond to it, or the compensation
+        // would have flattened the effect instead of isolating it. Compared
+        // as a ratio rather than against an absolute time: the lighter
+        // settings ring longer than this test renders, so their measured
+        // decay saturates at the render length and understates the contrast.
+        check (decays.back() < 0.5 * decays.front(),
+               "heavier viscous damping still shortens the decay");
+    }
+
     // ---- 1. The shimmer must not track the damping knobs -------------------
     // Both sweeps stop short of the settings where the plate is genuinely dead
     // within the render (zetaV 1e-2, zetaM 1e-3): there the shimmer *should*

@@ -70,11 +70,10 @@ nonlinearity (both 0 = exactly the linear model):
   internals live in the CASCADE panel, revealed by the **Advanced**
   button in the top bar (the window widens). The ladder is driven by the
   plate's *motion* over the whole plate (a band-mean modal velocity), and
-  deliberately not by its audible output: the loudness compensation
-  `√(ζ_ref/ζ_k)` makes a more damped mode peak higher in the audible
-  signal, and a mode nodal at the pickup vanishes from it altogether —
-  neither of which the plate itself does, and the ladder's cubic would
-  cube both. Driven by the motion, the cascade is flat to a few dB across
+  deliberately not by its audible output: the output models plate
+  acceleration, so it carries a frequency tilt ω_k the motion does not,
+  and a mode nodal at the pickup vanishes from it altogether — neither of
+  which the plate itself does, and the ladder's cubic would cube both. Driven by the motion, the cascade is flat to a few dB across
   both damping knobs and identical wherever you put the output point; the
   Cascade knob therefore acts directly, with no damping correction on it.
   Moving the pickup still changes what you *hear* of the shimmer, which is
