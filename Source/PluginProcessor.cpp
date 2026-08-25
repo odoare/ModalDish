@@ -165,10 +165,18 @@ juce::AudioProcessorValueTreeState::ParameterLayout FemPlateAudioProcessor::crea
 
     // Hammer force amplitude. With the nonlinearities engaged the absolute
     // level matters (it drives the dynamic tension and the cascade), so this
-    // goes well past unity.
+    // goes well past unity — to 20. The skew stays at 0.4, which already
+    // spreads the quiet end generously enough that doubling the top only
+    // moves the 1.0 default from 40% to 30% of the travel.
+    //
+    // Nothing downstream is unbounded in it: the linear bank is linear in the
+    // force, the Berger driver saturates at gammaCap well below Force 5, and
+    // the cascade ladder is a strict DAG whose carriers the tanh holds to
+    // +/-1. What a hard hit buys past that point is the gating and the
+    // depletion, not more level from the nonlinearity.
     p.push_back (std::make_unique<FloatParam> (
         juce::ParameterID (fem::id::force, 1), "Force",
-        juce::NormalisableRange<float> (0.0f, 10.0f, 0.0f, 0.4f), 1.0f));
+        juce::NormalisableRange<float> (0.0f, 20.0f, 0.0f, 0.4f), 1.0f));
 
     // Portamento between played notes. 0 (the default) tunes the plate the
     // instant the note arrives; the Freq knob is never glided.
@@ -191,7 +199,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout FemPlateAudioProcessor::crea
     // with a hot Drive get loud enough to be unpleasant.
     p.push_back (std::make_unique<FloatParam> (
         juce::ParameterID (fem::id::cascAmp, 1), "Casc Amp",
-        juce::NormalisableRange<float> (0.0f, 1.5f, 0.0f, 0.7f), 1.1f));
+        juce::NormalisableRange<float> (0.0f, 2.5f, 0.0f, 0.7f), 1.1f));
     p.push_back (std::make_unique<FloatParam> (
         juce::ParameterID (fem::id::cascDrive, 1), "Casc Drive", logRange (0.25f, 20.0f), 16.0f));
     p.push_back (std::make_unique<FloatParam> (
