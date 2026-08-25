@@ -170,8 +170,9 @@ namespace
         p.cascade = patch.cascade;
         p.force = patch.force;
         p.numModes = 192;
-        p.outX = patch.outX;
-        p.outY = patch.outY;
+        p.pickups[0].x = patch.outX;
+        p.pickups[0].y = patch.outY;
+        p.pickups[0].on = true;
         synth.update (&model, p);
         synth.strike (0.38f, 0.45f, 1.0f);
 
@@ -180,7 +181,9 @@ namespace
         std::vector<float> out ((size_t) n);
         for (int i = 0; i < n; ++i)
         {
-            out[(size_t) i] = synth.processSample (0.0f);
+            float l = 0.0f, r = 0.0f;
+            synth.processSample (0.0f, 0.0f, l, r);
+            out[(size_t) i] = 0.5f * (l + r);
             if (modalProbe != nullptr && i == probeAt)
             {
                 modalProbe->assign ((size_t) fem::maxModes, 0.0f);

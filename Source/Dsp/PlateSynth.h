@@ -168,6 +168,23 @@ class PlateSynth
 public:
     static constexpr int maxStrikes = 8;
 
+    /** One listening point. `level` is a linear gain and `pan` runs -1 (left)
+        to +1 (right), equal-power with the centre at unity. A pickup that is
+        off contributes nothing and costs nothing — not even the mode-shape
+        evaluation at its position.
+
+        Every pickup defaults to *off*: the caller says which listening points
+        exist, and a Params with none on is silent rather than guessing. The
+        position default is the plate's long-standing output point, so
+        switching the first one on reproduces the mono output this replaced. */
+    struct Pickup
+    {
+        float x = 0.5f, y = 0.47f;
+        float level = 1.0f;
+        float pan = 0.0f;
+        bool  on = false;
+    };
+
     struct Params
     {
         float f1        = 110.0f;   // Hz
@@ -189,8 +206,7 @@ public:
         int   cascWindow    = 4;       // source window, bands below each rung
         float cascDeplete   = 0.07f;   // source-band energy loss while pumping
 
-        float outX      = 0.5f;     // output point (plate coordinates)
-        float outY      = 0.47f;
+        Pickup pickups[fem::maxPickups];
         int   numModes  = 32;       // active modes (<= model modes, <= fem::maxModes)
     };
 
@@ -214,19 +230,29 @@ public:
         the external-input injection point there. */
     void strike (float x, float y, float velocity);
 
-    /** Audio thread: a MIDI note. Retunes the plate so that mode 1 lands on
-        `frequencyHz` (gliding there over the Glide time, except on the first
-        note of the session, which snaps so the attack is never a swoop from
-        wherever the Freq knob happened to sit) and strikes it at the
-        last hit point with `velocity` (0..1, i.e. MIDI velocity / 127, which
-        the Force parameter then scales). */
-    void noteOn (float frequencyHz, float velocity) noexcept;
+    /** Audio thread: a MIDI note strikes the plate at the last hit point with
+        `velocity` (0..1, i.e. MIDI velocity / 127, which the Force parameter
+        then scales).
+
+        A note no longer sets the pitch. It used to retune the plate so mode 1
+        landed on the note, gliding there over the Glide time; notes are
+        becoming per-source triggers instead, and a trigger that also moved
+        the whole plate's tuning would make eight independently mapped sources
+        fight over it. The glide machinery below is left in place and still
+        governs Freq knob moves, so restoring the behaviour is a one-line
+        change rather than a rewrite. */
+    void noteOn (float velocity) noexcept;
 
     /** Base frequency the bank is currently sounding at (Hz), for display. */
     float getBaseFrequency() const noexcept { return (float) std::exp2 (f1Log); }
 
-    /** Audio thread: one sample of external input in, one plate sample out. */
-    float processSample (float input) noexcept;
+    /** Audio thread: one stereo input sample in, one stereo plate sample out.
+
+        The output is a stereo pair because the pickups pan; the input is a
+        pair because a source takes its own L/R balance of it (see Params).
+        Both collapse into per-mode weight vectors, so the loop cost does not
+        grow with the number of pickups or sources. */
+    void processSample (float inL, float inR, float& outL, float& outR) noexcept;
 
     /** Current relative stiffening of mode 1 (0 = linear), for display. */
     float getNonlinearGamma() const noexcept { return (float) gamma; }
@@ -261,7 +287,8 @@ public:
 private:
     void retune();                    // full: mode count, weights, then bank
     void retuneBank();                // coefficients/amps at tension + T_dyn(gamma)
-    void computeOutputWeights();      // phi_k(out) -> phiOut
+    void computeOutputWeights();      // phi_k at each pickup -> phiPickup
+    void updatePickupMix() noexcept;  // phiPickup + levels/pans -> outAmpL/R
     void computeInputWeights (float x, float y);
     void updateCascadeWeights() noexcept;    // injection weights of the target modes
     void updateCascadeEnvelopes();           // attack/release coefficients from params
@@ -301,8 +328,14 @@ private:
     int activeModes = 0;
     int liveModes = 0;                   // modes actually in band, always <= activeModes
     Resonator filters[fem::maxModes];
-    float phiOut[fem::maxModes] {};      // phi_k(out)
-    float outAmp[fem::maxModes] {};      // phi_k(out) * bandwidth compensation
+    // Mode shapes sampled at each pickup, and the two vectors they collapse
+    // into once levels and pans are applied. The per-sample loop only ever
+    // touches the collapsed pair.
+    float phiPickup[fem::maxPickups][fem::maxModes] {};
+    float pickupGainL[fem::maxPickups] {};
+    float pickupGainR[fem::maxPickups] {};
+    float outAmpL[fem::maxModes] {};
+    float outAmpR[fem::maxModes] {};
     float inWeights[fem::maxModes] {};   // phi_k(last hit) for the external input
     float compensation[fem::maxModes] {};// output gain per mode (zetaRef / zeta)
     float cascInjW[fem::maxModes] {};    // cascade injection gain per mode

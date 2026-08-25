@@ -171,8 +171,11 @@ private:
     std::atomic<float>* pCascWindow = nullptr;
     std::atomic<float>* pCascDeplete = nullptr;
     std::atomic<float>* pNumModes = nullptr;
-    std::atomic<float>* pOutX = nullptr;
-    std::atomic<float>* pOutY = nullptr;
+    std::atomic<float>* pPickupX[fem::maxPickups] {};
+    std::atomic<float>* pPickupY[fem::maxPickups] {};
+    std::atomic<float>* pPickupLevel[fem::maxPickups] {};
+    std::atomic<float>* pPickupPan[fem::maxPickups] {};
+    std::atomic<float>* pPickupOn[fem::maxPickups] {};
     std::atomic<float>* pInGain = nullptr;
     std::atomic<float>* pOutGain = nullptr;
 

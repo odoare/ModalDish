@@ -200,8 +200,8 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
         addAndMakeVisible (s);
         att = std::make_unique<SliderAttachment> (apvts, id, s);
     };
-    addIo (outXKnob, "Out X", fem::id::outX, outXAtt);
-    addIo (outYKnob, "Out Y", fem::id::outY, outYAtt);
+    addIo (outXKnob, "Pk 1 X", fem::id::pickupX[0], outXAtt);
+    addIo (outYKnob, "Pk 1 Y", fem::id::pickupY[0], outYAtt);
     addIo (inGainKnob, "In", fem::id::inGain, inGainAtt);
     addIo (outGainKnob, "Out", fem::id::outGain, outGainAtt);
 
@@ -422,8 +422,8 @@ void FemPlateAudioProcessorEditor::setOutputPosition (double x, double y)
         if (auto* param = processor.apvts.getParameter (id))
             param->setValueNotifyingHost (param->convertTo0to1 (value));
     };
-    setParam (fem::id::outX, (float) juce::jlimit (0.0, 1.0, x));
-    setParam (fem::id::outY, (float) juce::jlimit (0.0, 1.0, y));
+    setParam (fem::id::pickupX[0], (float) juce::jlimit (0.0, 1.0, x));
+    setParam (fem::id::pickupY[0], (float) juce::jlimit (0.0, 1.0, y));
     plateView.repaint();
 }
 
@@ -468,8 +468,8 @@ void FemPlateAudioProcessorEditor::drawPlateOverlay (juce::Graphics& g,
     }
 
     // Output point marker.
-    const float ox = processor.apvts.getRawParameterValue (fem::id::outX)->load();
-    const float oy = processor.apvts.getRawParameterValue (fem::id::outY)->load();
+    const float ox = processor.apvts.getRawParameterValue (fem::id::pickupX[0])->load();
+    const float oy = processor.apvts.getRawParameterValue (fem::id::pickupY[0])->load();
     const auto op = v.plateToScreen (ox, oy);
     g.setColour (fem::theme::ioAccent);
     g.drawEllipse (op.x - 6.0f, op.y - 6.0f, 12.0f, 12.0f, 2.0f);

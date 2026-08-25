@@ -36,14 +36,29 @@ namespace fem::id
     inline constexpr const char* cascWindow  = "cascwin";   // source window, bands
     inline constexpr const char* cascDeplete = "cascdepl";  // source-band energy loss
     inline constexpr const char* numModes  = "nmodes";    // active modes
-    inline constexpr const char* outX      = "outx";      // output position on the plate
-    inline constexpr const char* outY      = "outy";
+    // Pickups. Up to four listening points, each with its own level and pan;
+    // the plate sums into a stereo pair through them. Indexed 0..3 for
+    // pickups labelled 1..4 in the interface, which is the only place the
+    // one-based labels appear.
+    inline constexpr const char* pickupX[]     = { "pickup1x",     "pickup2x",     "pickup3x",     "pickup4x"     };
+    inline constexpr const char* pickupY[]     = { "pickup1y",     "pickup2y",     "pickup3y",     "pickup4y"     };
+    inline constexpr const char* pickupLevel[] = { "pickup1level", "pickup2level", "pickup3level", "pickup4level" };
+    inline constexpr const char* pickupPan[]   = { "pickup1pan",   "pickup2pan",   "pickup3pan",   "pickup4pan"   };
+    inline constexpr const char* pickupOn[]    = { "pickup1on",    "pickup2on",    "pickup3on",    "pickup4on"    };
     inline constexpr const char* inGain    = "ingain";    // external-signal drive (effect mode)
     inline constexpr const char* outGain   = "outgain";   // output level (dB)
 }
 
 namespace fem
 {
+    // Listening points on the plate. Four is a deliberate cap rather than a
+    // technical one: the mix into the stereo pair is linear, so any number of
+    // pickups collapses into two per-mode weight vectors and costs the audio
+    // loop exactly the same (see PlateSynth::updatePickupMix). What four buys
+    // is a plate you can place across the image; more would be knobs without
+    // a use.
+    inline constexpr int maxPickups = 4;
+
     // Synthesis bank capacity: FEM-computed modes plus the statistical
     // (Berry random-wave) tail appended above them — see ModalModel.h.
     inline constexpr int maxModes = 512;

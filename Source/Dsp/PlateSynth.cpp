@@ -244,9 +244,25 @@ void PlateSynth::update (const ModalModel* newModel, const Params& params)
         || ! juce::approximatelyEqual (params.matDamp,  current.matDamp)
         || ! juce::approximatelyEqual (params.cascade,  current.cascade)      // overlap floor
         || ! juce::approximatelyEqual (params.cascOverlap, current.cascOverlap)
-        || ! juce::approximatelyEqual (params.outX,     current.outX)
-        || ! juce::approximatelyEqual (params.outY,     current.outY)
         || params.numModes != current.numModes;
+
+    // Pickups are split in two, because moving one is not the same kind of
+    // change as re-levelling one. A new position needs the mode shapes
+    // resampled there; a new level, pan or on/off only needs the collapsed
+    // mix rebuilt, which is a few thousand multiply-adds rather than a full
+    // retune of the bank.
+    bool pickupMoved = false, pickupMixChanged = false;
+    for (int p = 0; p < fem::maxPickups; ++p)
+    {
+        const auto& a = params.pickups[p];
+        const auto& b = current.pickups[p];
+        if (! juce::approximatelyEqual (a.x, b.x) || ! juce::approximatelyEqual (a.y, b.y))
+            pickupMoved = true;
+        if (! juce::approximatelyEqual (a.level, b.level)
+            || ! juce::approximatelyEqual (a.pan, b.pan)
+            || a.on != b.on)
+            pickupMixChanged = true;
+    }
 
     const bool envChanged =
            ! juce::approximatelyEqual (params.cascAttackMs,  current.cascAttackMs)
@@ -268,6 +284,15 @@ void PlateSynth::update (const ModalModel* newModel, const Params& params)
     {
         retune();
         dirty = false;
+    }
+    else if (pickupMoved)
+    {
+        computeOutputWeights();
+        updatePickupMix();
+    }
+    else if (pickupMixChanged)
+    {
+        updatePickupMix();
     }
 }
 
@@ -356,8 +381,10 @@ void PlateSynth::retuneBank()
             // Keep the bank index aligned with the mode index so the shape
             // weights stay matched; the mode is silent and its filter is
             // muted (b0 = 0) so it cannot feed the feedback paths.
-            outAmp[k] = 0.0f;
-            compensation[k] = 1.0f;
+            // Zero rather than one: compensation doubles as the mode's
+            // liveness marker, so the pickup mix and the cascade injection
+            // both mute a dead mode without a second test.
+            compensation[k] = 0.0f;
             cascInjW[k] = 0.0f;
             nlWeight[k] = 0.0f;
             dispScale[k] = 0.0f;
@@ -393,7 +420,6 @@ void PlateSynth::retuneBank()
         filters[k].c = fxme::BiquadCoeffs::bandpass (fs, (float) freq[k], q);
         compensation[k] = gainCompensation (zeta);
         cascInjW[k] = cascadeInjectionGain (zeta);
-        outAmp[k] = phiOut[k] * compensation[k];
 
         // Berger driver: this mode's contribution g_k q_k^2 to the
         // stretching integral, per unit y_k^2 (header: q_k is the filter
@@ -437,14 +463,64 @@ void PlateSynth::retuneBank()
 
     appliedGamma = gamma;
     updateCascadeWeights();
+    // compensation[] has just been rewritten, and the pickup mix is built on
+    // top of it, so it has to follow every retune.
+    updatePickupMix();
 }
 
 void PlateSynth::computeOutputWeights()
 {
-    for (float& w : phiOut)
-        w = 0.0f;
-    if (model != nullptr)
-        model->evalShapes (current.outX, current.outY, phiOut, activeModes);
+    for (int p = 0; p < fem::maxPickups; ++p)
+    {
+        for (float& w : phiPickup[p])
+            w = 0.0f;
+        // A pickup that is off is not sampled at all: evalShapes is a point
+        // location plus one interpolation per mode, and there is no reason to
+        // pay it for a listening point nobody is listening through.
+        if (model != nullptr && current.pickups[p].on)
+            model->evalShapes (current.pickups[p].x, current.pickups[p].y,
+                               phiPickup[p], activeModes);
+    }
+    updatePickupMix();
+}
+
+void PlateSynth::updatePickupMix() noexcept
+{
+    // Equal-power pan, normalised so that a centred pickup is unity in both
+    // channels rather than the usual -3 dB. Sine/cosine alone would make the
+    // default single centred pickup 3 dB quieter than the mono output it
+    // replaces, for no reason the player would recognise; the sqrt(2) puts
+    // the centre back at unity and hard-panned at +3 dB in its own channel,
+    // which is the same total power either way.
+    constexpr float centreUnity = 1.41421356f;   // sqrt(2)
+    for (int p = 0; p < fem::maxPickups; ++p)
+    {
+        const auto& pk = current.pickups[p];
+        if (! pk.on)
+        {
+            pickupGainL[p] = pickupGainR[p] = 0.0f;
+            continue;
+        }
+        const float theta = 0.25f * juce::MathConstants<float>::pi
+                            * (juce::jlimit (-1.0f, 1.0f, pk.pan) + 1.0f);
+        pickupGainL[p] = centreUnity * pk.level * std::cos (theta);
+        pickupGainR[p] = centreUnity * pk.level * std::sin (theta);
+    }
+
+    // The collapse: however many pickups are on, the audio loop sees two
+    // numbers per mode. compensation[k] is zero for a mode outside the
+    // audible band, which mutes it here without a second test.
+    for (int k = 0; k < fem::maxModes; ++k)
+    {
+        float l = 0.0f, r = 0.0f;
+        for (int p = 0; p < fem::maxPickups; ++p)
+        {
+            l += pickupGainL[p] * phiPickup[p][k];
+            r += pickupGainR[p] * phiPickup[p][k];
+        }
+        outAmpL[k] = compensation[k] * l;
+        outAmpR[k] = compensation[k] * r;
+    }
 }
 
 void PlateSynth::computeInputWeights (float x, float y)
@@ -465,7 +541,7 @@ void PlateSynth::updateCascadeWeights() noexcept
     // with no gain restriction.
     //
     for (int k = 0; k < fem::maxModes; ++k)
-        cascadeW[k] = (k >= cascadeSplit && k < activeModes)
+        cascadeW[k] = (k >= cascadeSplit && k < activeModes && compensation[k] > 0.0f)
                         ? inWeights[k] * cascInjW[k]
                         : 0.0f;
 }
@@ -503,34 +579,16 @@ int PlateSynth::copyModalField (Field which, float* dest, int maxCount) const no
     return n;
 }
 
-void PlateSynth::noteOn (float frequencyHz, float velocity) noexcept
+void PlateSynth::noteOn (float velocity) noexcept
 {
     if (model == nullptr || activeModes < 1)
         return;
 
-    // Keep the fundamental itself in the audible band; the bank mutes any
-    // partial that falls outside it anyway (retuneBank).
-    const double target = std::log2 (juce::jlimit (20.0, 0.45 * fs,
-                                                   (double) frequencyHz));
-    const double glideSec = 1.0e-3 * (double) juce::jmax (0.0f, current.glideMs);
-
-    if (glideSec <= 0.0 || ! notePlayed)
-    {
-        // No glide time, or nothing to glide *from* yet: land in tune now, so
-        // the strike below is already at the right pitch.
-        f1Log = f1LogTarget = target;
-        gliding = false;
-        retuneBank();
-    }
-    else
-    {
-        f1LogTarget = target;
-        const double steps = juce::jmax (1.0, glideSec * fs / (double) nlUpdatePeriod);
-        glideStep = (f1LogTarget - f1Log) / steps;
-        gliding = std::abs (f1LogTarget - f1Log) > 1.0e-9;   // repeated note: nothing to do
-    }
-
-    notePlayed = true;
+    // A note is a trigger and nothing else. It used to retune the plate to
+    // the note's pitch, gliding there; that is switched off while notes
+    // become per-source triggers, because eight sources each mapped to their
+    // own note cannot all own the tuning. The glide state still follows the
+    // Freq knob, so the machinery is intact.
     strike (lastHitX, lastHitY, velocity);
 }
 
@@ -572,10 +630,16 @@ void PlateSynth::updateDynamicTension() noexcept
         retuneBank();
 }
 
-float PlateSynth::processSample (float input) noexcept
+void PlateSynth::processSample (float inL, float inR, float& outL, float& outR) noexcept
 {
+    outL = outR = 0.0f;
     if (activeModes < 1)
-        return 0.0f;
+        return;
+
+    // Until the sources land, the external input is still a single injection
+    // point at the last hit, fed the mono sum. Step 2 replaces this with the
+    // per-source sends, at which point inL and inR stop being summed here.
+    const float input = 0.5f * (inL + inR);
 
     const bool snapField = (--nlCountdown <= 0);
     if (snapField)
@@ -661,7 +725,7 @@ float PlateSynth::processSample (float input) noexcept
         }
     }
 
-    float out = 0.0f;
+    float sumL = 0.0f, sumR = 0.0f;
     float stretch = 0.0f;
     float bandOut[numCascadeBands] = {};   // cascade source: band-mean velocity
     int band = 0;
@@ -678,7 +742,6 @@ float PlateSynth::processSample (float input) noexcept
         for (int p = 0; p < numPulses; ++p)
             x += pulse[p] * hammers[pulseSlot[p]].weights[k];
         const float y = filters[k].process (x);
-        const float contrib = outAmp[k] * y;
         stretch += nlWeight[k] * y * y;   // Berger driver, g_k q_k^2 term
         if (snapField)
         {
@@ -687,7 +750,8 @@ float PlateSynth::processSample (float input) noexcept
         }
         filters[k].z1 *= bandDecay[band];
         filters[k].z2 *= bandDecay[band];
-        out += contrib;
+        sumL += outAmpL[k] * y;
+        sumR += outAmpR[k] * y;
         bandOut[band] += cascSrcW[k] * y;
     }
     for (int b = 0; b < numCascadeBands; ++b)
@@ -698,7 +762,8 @@ float PlateSynth::processSample (float input) noexcept
     // Global stretching, smoothed: an integral over the plate, so it does
     // not depend on where the pickup sits (see the header).
     envStretch += envCoef * (stretch - envStretch);
-    return out;
+    outL = sumL;
+    outR = sumR;
 }
 
 } // namespace fem

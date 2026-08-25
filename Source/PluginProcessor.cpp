@@ -113,8 +113,14 @@ FemPlateAudioProcessor::FemPlateAudioProcessor()
     pCascWindow  = apvts.getRawParameterValue (fem::id::cascWindow);
     pCascDeplete = apvts.getRawParameterValue (fem::id::cascDeplete);
     pNumModes = apvts.getRawParameterValue (fem::id::numModes);
-    pOutX     = apvts.getRawParameterValue (fem::id::outX);
-    pOutY     = apvts.getRawParameterValue (fem::id::outY);
+    for (int i = 0; i < fem::maxPickups; ++i)
+    {
+        pPickupX[i]     = apvts.getRawParameterValue (fem::id::pickupX[i]);
+        pPickupY[i]     = apvts.getRawParameterValue (fem::id::pickupY[i]);
+        pPickupLevel[i] = apvts.getRawParameterValue (fem::id::pickupLevel[i]);
+        pPickupPan[i]   = apvts.getRawParameterValue (fem::id::pickupPan[i]);
+        pPickupOn[i]    = apvts.getRawParameterValue (fem::id::pickupOn[i]);
+    }
     pInGain   = apvts.getRawParameterValue (fem::id::inGain);
     pOutGain  = apvts.getRawParameterValue (fem::id::outGain);
 
@@ -222,12 +228,41 @@ juce::AudioProcessorValueTreeState::ParameterLayout FemPlateAudioProcessor::crea
     p.push_back (std::make_unique<juce::AudioParameterInt> (
         juce::ParameterID (fem::id::numModes, 1), "Modes", 1, fem::maxModes, 192));
 
-    p.push_back (std::make_unique<FloatParam> (
-        juce::ParameterID (fem::id::outX, 1), "Out X",
-        juce::NormalisableRange<float> (0.0f, 1.0f, 1.0e-3f), 0.5f));
-    p.push_back (std::make_unique<FloatParam> (
-        juce::ParameterID (fem::id::outY, 1), "Out Y",
-        juce::NormalisableRange<float> (0.0f, 1.0f, 1.0e-3f), 0.47f));
+    // Pickups. Only the first is on by default, centred and at unity, so the
+    // plate out of the box is the single mono listening point it always was.
+    // The others start spread across the plate and across the image, so that
+    // switching one on is immediately audible as a position rather than
+    // needing three knob moves first.
+    {
+        struct Defaults { float x, y, pan; bool on; };
+        static constexpr Defaults defaults[fem::maxPickups] = {
+            { 0.50f, 0.47f,  0.0f, true  },
+            { 0.30f, 0.50f, -0.7f, false },
+            { 0.70f, 0.50f,  0.7f, false },
+            { 0.50f, 0.72f,  0.0f, false },
+        };
+
+        for (int i = 0; i < fem::maxPickups; ++i)
+        {
+            const auto label = juce::String (i + 1);
+            p.push_back (std::make_unique<FloatParam> (
+                juce::ParameterID (fem::id::pickupX[i], 1), "Pickup " + label + " X",
+                juce::NormalisableRange<float> (0.0f, 1.0f, 1.0e-3f), defaults[i].x));
+            p.push_back (std::make_unique<FloatParam> (
+                juce::ParameterID (fem::id::pickupY[i], 1), "Pickup " + label + " Y",
+                juce::NormalisableRange<float> (0.0f, 1.0f, 1.0e-3f), defaults[i].y));
+            p.push_back (std::make_unique<FloatParam> (
+                juce::ParameterID (fem::id::pickupLevel[i], 1), "Pickup " + label + " Level",
+                juce::NormalisableRange<float> (-60.0f, 12.0f, 0.1f), 0.0f,
+                juce::AudioParameterFloatAttributes().withLabel ("dB")));
+            p.push_back (std::make_unique<FloatParam> (
+                juce::ParameterID (fem::id::pickupPan[i], 1), "Pickup " + label + " Pan",
+                juce::NormalisableRange<float> (-1.0f, 1.0f, 1.0e-2f), defaults[i].pan));
+            p.push_back (std::make_unique<juce::AudioParameterBool> (
+                juce::ParameterID (fem::id::pickupOn[i], 1), "Pickup " + label + " On",
+                defaults[i].on));
+        }
+    }
 
     p.push_back (std::make_unique<FloatParam> (
         juce::ParameterID (fem::id::inGain, 1), "In Gain",
@@ -306,8 +341,15 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     params.cascOverlap   = pCascOverlap->load();
     params.cascWindow    = (int) pCascWindow->load();
     params.cascDeplete   = pCascDeplete->load();
-    params.outX     = pOutX->load();
-    params.outY     = pOutY->load();
+    for (int i = 0; i < fem::maxPickups; ++i)
+    {
+        auto& pk = params.pickups[i];
+        pk.x     = pPickupX[i]->load();
+        pk.y     = pPickupY[i]->load();
+        pk.level = juce::Decibels::decibelsToGain (pPickupLevel[i]->load(), -60.0f);
+        pk.pan   = pPickupPan[i]->load();
+        pk.on    = pPickupOn[i]->load() > 0.5f;
+    }
     params.numModes = (int) pNumModes->load();
     synth.update (model, params);
 
@@ -330,6 +372,8 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     const float* in0 = numIns > 0 ? buffer.getReadPointer (0) : nullptr;
     const float* in1 = numIns > 1 ? buffer.getReadPointer (1) : nullptr;
+    float* out0 = numOuts > 0 ? buffer.getWritePointer (0) : nullptr;
+    float* out1 = numOuts > 1 ? buffer.getWritePointer (1) : nullptr;
 
     // Notes are consumed in step with the render loop, so a note lands on its
     // own sample rather than at the block boundary (audible on short blocks
@@ -344,19 +388,33 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             const auto msg = (*midiEvent).getMessage();
             if (msg.isNoteOn())
             {
-                synth.noteOn ((float) juce::MidiMessage::getMidiNoteInHertz (msg.getNoteNumber()),
-                              msg.getFloatVelocity());
+                // The note number is ignored for now: a note triggers, it no
+                // longer tunes. Per-source note mapping arrives with the
+                // sources, and it is the note number's only future job.
+                synth.noteOn (msg.getFloatVelocity());
                 midiStrikeCounter.fetch_add (1, std::memory_order_release);
             }
         }
 
-        float input = 0.0f;
-        if (in0 != nullptr)
-            input = in1 != nullptr ? 0.5f * (in0[i] + in1[i]) : in0[i];
+        const float inL = in0 != nullptr ? in0[i] : 0.0f;
+        const float inR = in1 != nullptr ? in1[i] : inL;
 
-        const float y = outGain * synth.processSample (inGain * input);
-        for (int ch = 0; ch < numOuts; ++ch)
-            buffer.getWritePointer (ch)[i] = y;
+        float outL = 0.0f, outR = 0.0f;
+        synth.processSample (inGain * inL, inGain * inR, outL, outR);
+        outL *= outGain;
+        outR *= outGain;
+
+        if (out1 != nullptr)
+        {
+            out0[i] = outL;
+            out1[i] = outR;
+        }
+        else if (out0 != nullptr)
+        {
+            // Folding down rather than dropping a side: on a mono bus a
+            // hard-panned pickup would otherwise be inaudible.
+            out0[i] = 0.5f * (outL + outR);
+        }
     }
 }
 

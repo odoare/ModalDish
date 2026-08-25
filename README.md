@@ -36,7 +36,12 @@ against analytic plates in `Tests/FemTests.cpp`.
   damping (`Δ² dw/dt`) faster (ζ ∝ ν).
 * **Hammer** is the duration of the half-sine shock of a mouse hit, and
   **Force** its amplitude (past unity it drives the nonlinearities hard).
-* **Out X/Y** is the pickup point (also right-click/ctrl-drag on the plate).
+* **Pk 1 X/Y** is pickup 1's position (also right-click/ctrl-drag on the
+  plate). The plate is heard through up to four pickups, each with its own
+  position, level and pan, summing into a stereo pair; only pickup 1 is on by
+  default, which is the single mono listening point this replaced. Pan is
+  equal-power with the centre at unity, so a centred pickup at 0 dB is exactly
+  what the mono output used to be.
 * **In** injects the external audio input at the last hit point — the
   effect mode.
 
