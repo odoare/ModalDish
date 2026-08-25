@@ -285,6 +285,39 @@ public:
         change rather than a rewrite. */
     void noteOn (float velocity) noexcept;
 
+    //==========================================================================
+    // Where the plate was actually struck, published for display.
+    //
+    // Only the synth knows this. A source scatters its hits around its point
+    // when Spread is up, and one MIDI note can fire several sources at once,
+    // so the position the caller asked for is not the position that was hit —
+    // and for a note there was no position in the call at all.
+    //
+    // Lock-free, one producer (audio) and one consumer (the editor's timer):
+    // the reader takes the count, then reads that many entries back. A reader
+    // more than hitRingSize behind loses the oldest hits, which for a piece of
+    // decoration is the right way to fail.
+
+    static constexpr int hitRingSize = 16;
+
+    /** `amplitude` is what the hammer actually delivered — velocity times the
+        Force that applied, the source's own or the global one. Velocity alone
+        would not do: two sources at the same velocity but Force 1 and Force 10
+        hit the plate ten times as hard, and the display should say so. */
+    struct HitPoint { float x = 0.0f, y = 0.0f, amplitude = 0.0f; };
+
+    /** Hits since construction, only ever increasing. */
+    int getHitCount() const noexcept { return hitCount.load (std::memory_order_acquire); }
+
+    /** Hit number `index`, valid while index >= getHitCount() - hitRingSize. */
+    HitPoint getHit (int index) const noexcept
+    {
+        const int slot = ((index % hitRingSize) + hitRingSize) % hitRingSize;
+        return { hitX[slot].load (std::memory_order_relaxed),
+                 hitY[slot].load (std::memory_order_relaxed),
+                 hitAmp[slot].load (std::memory_order_relaxed) };
+    }
+
     /** Base frequency the bank is currently sounding at (Hz), for display. */
     float getBaseFrequency() const noexcept { return (float) std::exp2 (f1Log); }
 
@@ -383,6 +416,14 @@ private:
     // into once levels and pans are applied. The per-sample loop only ever
     // touches the collapsed pair.
     fxme::Random rng { 0x5eed1234u };    // hit-position jitter; audio thread only
+
+    // Published hit positions (see getHitCount). Deliberately not cleared by
+    // reset(): the count is what the editor counts from, and restarting it
+    // would replay old hits as new ones.
+    std::atomic<float> hitX[hitRingSize] {};
+    std::atomic<float> hitY[hitRingSize] {};
+    std::atomic<float> hitAmp[hitRingSize] {};
+    std::atomic<int> hitCount { 0 };
 
     float phiPickup[fem::maxPickups][fem::maxModes] {};
     float pickupGainL[fem::maxPickups] {};

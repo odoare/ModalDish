@@ -490,7 +490,6 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 {
                     if (synth.strikeSourcesForNote (note, velocity) == 0)
                         synth.noteOn (velocity);
-                    midiStrikeCounter.fetch_add (1, std::memory_order_release);
                 }
             }
         }

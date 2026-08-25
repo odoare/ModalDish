@@ -257,6 +257,98 @@ int main()
         check(s.strikeSourcesForNote(62, 1.0f) == 0, "an unmapped note fires nothing");
     }
 
+    // --- 6. Published hit positions ---------------------------------------
+    // The editor's hit markers read these. Nothing else knows where a hit
+    // landed: a source scatters its own, and one note can fire several at
+    // once, so a marker drawn from the position the caller asked for would be
+    // wrong in exactly the cases the controls exist to make visible.
+    std::printf ("\n== Published hit positions ==\n");
+    {
+        auto p = basePatch();
+        p.sources[0].on = true; p.sources[0].x = 0.36f; p.sources[0].y = 0.52f;
+        p.sources[1].on = true; p.sources[1].x = 0.62f; p.sources[1].y = 0.44f;
+        p.sources[0].note = 60; p.sources[1].note = 60;
+
+        fem::PlateSynth s; s.prepare (fs); s.update (&model, p);
+        check (s.getHitCount() == 0, "no hits before anything is struck");
+
+        // A plain strike reports exactly where it was aimed.
+        s.strike (0.44f, 0.41f, 1.0f);
+        const auto h0 = s.getHit (s.getHitCount() - 1);
+        std::printf ("  strike (0.440, 0.410) -> (%.3f, %.3f)\n", h0.x, h0.y);
+        check (s.getHitCount() == 1, "a strike publishes one hit");
+        check (std::abs (h0.x - 0.44f) < 1e-6f && std::abs (h0.y - 0.41f) < 1e-6f,
+               "the published point is the struck point");
+
+        // ...and how hard, which is what sizes the marker.
+        check (std::abs (h0.amplitude - 1.0f) < 1e-6f,
+               "the published amplitude is velocity x the force that applied");
+
+        // A source with no spread reports its own point, not the last one.
+        s.strikeSource (1, 1.0f);
+        const auto h1 = s.getHit (s.getHitCount() - 1);
+        std::printf ("  source b (0.620, 0.440) -> (%.3f, %.3f)\n", h1.x, h1.y);
+        check (std::abs (h1.x - 0.62f) < 1e-6f && std::abs (h1.y - 0.44f) < 1e-6f,
+               "a source publishes its own point");
+
+        // Amplitude follows the source's own Force, not the global one, and
+        // scales with velocity: a soft hit on a strong source and a hard hit
+        // on a weak one are different sizes on the plate, as they should be.
+        {
+            auto q = basePatch();
+            q.force = 1.0f;
+            q.sources[3].on = true;
+            q.sources[3].x = 0.5f; q.sources[3].y = 0.47f;
+            q.sources[3].force = 8.0f;
+
+            fem::PlateSynth u; u.prepare (fs); u.update (&model, q);
+            u.strikeSource (3, 1.0f);
+            const float loud = u.getHit (u.getHitCount() - 1).amplitude;
+            u.strikeSource (3, 0.25f);
+            const float soft = u.getHit (u.getHitCount() - 1).amplitude;
+            std::printf ("  source d (Force 8): velocity 1.00 -> %.2f, 0.25 -> %.2f\n",
+                         loud, soft);
+            check (std::abs (loud - 8.0f) < 1e-4f, "amplitude uses the source's own Force");
+            check (std::abs (soft - 2.0f) < 1e-4f, "and scales with velocity");
+        }
+
+        // One note firing two sources publishes two distinct hits.
+        const int before = s.getHitCount();
+        const int fired = s.strikeSourcesForNote (60, 1.0f);
+        const int after = s.getHitCount();
+        const auto a0 = s.getHit (after - 2);
+        const auto a1 = s.getHit (after - 1);
+        std::printf ("  note 60 fired %d, published %d: (%.3f, %.3f) and (%.3f, %.3f)\n",
+                     fired, after - before, a0.x, a0.y, a1.x, a1.y);
+        check (after - before == 2, "two sources on one note publish two hits");
+        check (std::abs (a0.x - a1.x) > 1e-3f, "and they are at different points");
+
+        // Spread shows up as scatter in the published points, all on the plate.
+        p.sources[0].spread = 0.10f;
+        fem::PlateSynth t; t.prepare (fs); t.update (&model, p);
+        float minX = 1e30f, maxX = -1e30f;
+        bool allInside = true;
+        for (int i = 0; i < 24; ++i)
+        {
+            t.strikeSource (0, 1.0f);
+            const auto h = t.getHit (t.getHitCount() - 1);
+            minX = std::min (minX, h.x); maxX = std::max (maxX, h.x);
+            double bary[3];
+            if (findTriangle (*model.mesh, h.x, h.y, bary) < 0)
+                allInside = false;
+        }
+        std::printf ("  spread 0.10 over 24 hits: x in %.3f..%.3f\n", minX, maxX);
+        check (maxX - minX > 1e-3f, "spread scatters the published points");
+        check (allInside, "every published point is on the plate");
+
+        // The ring wraps without the count going backwards.
+        const int n0 = t.getHitCount();
+        for (int i = 0; i < 3 * fem::PlateSynth::hitRingSize; ++i)
+            t.strikeSource (0, 1.0f);
+        check (t.getHitCount() == n0 + 3 * fem::PlateSynth::hitRingSize,
+               "the hit count keeps counting past the ring size");
+    }
+
     std::printf("\n%s (%d failure%s)\n", failures==0?"ALL TESTS PASSED":"TESTS FAILED",
                 failures, failures==1?"":"s");
     return failures==0?0:1;

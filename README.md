@@ -70,6 +70,11 @@ against analytic plates in `Tests/FemTests.cpp`.
   | click anywhere else | hit the plate there, with the global Hammer and Force |
   | right-click / ctrl-drag | move pickup 1, as before |
 
+  A hit flashes a white ring where it actually landed — so a source with
+  Spread visibly scatters, and a note firing several sources flashes each —
+  sized by how hard the plate was struck (velocity times that source's own
+  Force, not the global one).
+
   A source's panel carries a **MIDI learn** button: arm it and the next note
   received is captured as that source's note (and swallowed, so learning never
   costs you a stray hit). Clicking it again, or closing the panel, gives up.

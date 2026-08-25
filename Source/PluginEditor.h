@@ -18,6 +18,9 @@
 
 #include <JuceHeader.h>
 
+#include <algorithm>
+#include <vector>
+
 #include "PluginProcessor.h"
 #include "Theme.h"
 #include "Components/ShapeCanvas.h"
@@ -139,9 +142,22 @@ private:
     bool advancedVisible = false;
 
     int displayedModeCount = -1;         // status refresh bookkeeping
-    juce::uint32 lastStrikeMs = 0;       // strike marker fade
-    juce::Point<float> lastStrikePos;
-    int lastMidiStrikeSeen = 0;          // MIDI notes already marked
+    /** A fading ring on a point that was struck. Held in *plate* coordinates
+        rather than screen ones, so a flash stays where it landed if the view
+        is resized mid-fade. Several can be alive at once: one note can fire
+        several sources, and a source with Spread scatters its hits — showing
+        only the most recent would hide exactly what those controls do. */
+    struct HitFlash
+    {
+        float x = 0.0f, y = 0.0f;
+        float amplitude = 0.0f;
+        juce::uint32 startMs = 0;
+    };
+
+    static constexpr juce::uint32 hitFlashMs = 700;
+
+    std::vector<HitFlash> hitFlashes;
+    int lastHitSeen = 0;                 // hits already turned into flashes
 
     // Declared last: fixes keyboard focus for all TextEditors under the editor
     // (including FxmeSlider's right-click value entry).

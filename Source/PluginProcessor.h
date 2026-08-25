@@ -128,8 +128,13 @@ public:
 
     /** Message thread: how many MIDI notes have struck the plate. The editor
         watches it so a played note flashes the same marker a click does. */
-    int getMidiStrikeCount() const noexcept
-        { return midiStrikeCounter.load (std::memory_order_acquire); }
+    /** Where the plate has actually been struck, for the editor's hit
+        markers. Forwarded from the synth, which is the only thing that knows:
+        a source scatters its hits, and one note can fire several sources.
+        Replaces the old note counter, which could only say that *something*
+        had been hit and left the editor to guess where. */
+    int getHitCount() const noexcept              { return synth.getHitCount(); }
+    fem::PlateSynth::HitPoint getHit (int i) const noexcept { return synth.getHit (i); }
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -159,7 +164,6 @@ private:
     std::atomic<std::uint64_t> audioSeenGeneration { 0 };
 
     std::atomic<int> strikeCounter { 0 };
-    std::atomic<int> midiStrikeCounter { 0 };   // audio -> editor, marker only
     std::atomic<float> strikeX { 0.5f }, strikeY { 0.5f }, strikeVel { 1.0f };
     int lastStrikeSeen = 0;
 

@@ -634,6 +634,15 @@ void PlateSynth::fireHammer (float x, float y, float velocity,
     lastHitX = x;
     lastHitY = y;
     computeHitWeights (x, y);
+
+    // Publish the position for the display. Written before the count is
+    // released, so a reader that sees the count sees the point.
+    const int n = hitCount.load (std::memory_order_relaxed);
+    const int slot = n % hitRingSize;
+    hitX[slot].store (x, std::memory_order_relaxed);
+    hitY[slot].store (y, std::memory_order_relaxed);
+    hitAmp[slot].store (h.amplitude, std::memory_order_relaxed);
+    hitCount.store (n + 1, std::memory_order_release);
 }
 
 void PlateSynth::randomSourcePoint (int s, float& x, float& y) noexcept

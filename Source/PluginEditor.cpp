@@ -65,10 +65,11 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
             setOutputPosition (x, y);
         else
         {
+            // No marker is drawn from here: the flash follows the hit the
+            // synth actually made, which arrives back through the hit ring
+            // one block later. That is what makes a scattered source show
+            // its scatter instead of the point it was aimed at.
             processor.requestStrike ((float) x, (float) y, 1.0f);
-            lastStrikeMs = juce::Time::getMillisecondCounter();
-            lastStrikePos = plateView.plateToScreen (x, y);
-            plateView.repaint();
         }
     };
     plateView.onPlateDrag = [this] (double x, double y, const juce::MouseEvent& e)
@@ -635,14 +636,31 @@ void FemPlateAudioProcessorEditor::drawPlateOverlay (juce::Graphics& g,
                     juce::Justification::centred);
     }
 
-    // Fading marker on the last hit point.
-    const auto elapsed = juce::Time::getMillisecondCounter() - lastStrikeMs;
-    if (lastStrikeMs != 0 && elapsed < 700)
+    // Fading rings on the points that were struck, sized by how hard.
+    //
+    // The square root is there because the amplitude range is wide — Force
+    // spans 0 to 20 and velocity scales it further — and a linear mapping
+    // would make everything below the hardest hit indistinguishable. It also
+    // has the reading that the ring's area, not its radius, follows the hit.
+    // The bounds keep the softest hit visible and the hardest from swallowing
+    // the plate; only a full-velocity hit above Force ~7 reaches the top one.
+    // Amplitude 1 — full velocity at the default Force — maps to exactly 1, so
+    // the default patch's marker looks as it always did and the scaling only
+    // shows up once hits differ from one another.
+    const auto now = juce::Time::getMillisecondCounter();
+    for (const auto& f : hitFlashes)
     {
-        const float a = 1.0f - (float) elapsed / 700.0f;
-        g.setColour (juce::Colours::white.withAlpha (a));
-        const float r = 5.0f + 14.0f * (1.0f - a);
-        g.drawEllipse (lastStrikePos.x - r, lastStrikePos.y - r, 2 * r, 2 * r, 2.0f);
+        const auto elapsed = now - f.startMs;
+        if (elapsed >= hitFlashMs)
+            continue;
+
+        const float a = 1.0f - (float) elapsed / (float) hitFlashMs;
+        const float scale = juce::jlimit (0.35f, 2.6f, std::sqrt (juce::jmax (0.0f, f.amplitude)));
+        const auto p = v.plateToScreen (f.x, f.y);
+
+        g.setColour (juce::Colours::white.withAlpha (a * juce::jlimit (0.4f, 1.0f, scale)));
+        const float r = (5.0f + 14.0f * (1.0f - a)) * scale;
+        g.drawEllipse (p.x - r, p.y - r, 2 * r, 2 * r, 2.0f);
     }
 }
 
@@ -672,21 +690,35 @@ void FemPlateAudioProcessorEditor::timerCallback()
                 param->setValueNotifyingHost (param->convertTo0to1 ((float) learned));
     }
 
-    // A MIDI note strikes at the last clicked point (or the plate centre if
-    // it has never been clicked): mark it exactly like a click.
-    const int midiStrikes = processor.getMidiStrikeCount();
-    if (midiStrikes != lastMidiStrikeSeen)
+    // Drain the synth's hit ring into flashes. Every hit comes through here,
+    // whether it started as a click, a MIDI note or several sources firing on
+    // one note, so the editor never has to guess a position.
+    const auto now = juce::Time::getMillisecondCounter();
+    const int hits = processor.getHitCount();
+    if (hits != lastHitSeen)
     {
-        if (lastStrikeMs == 0)
-            lastStrikePos = plateView.plateToScreen (0.5, 0.5);
-        lastMidiStrikeSeen = midiStrikes;
-        lastStrikeMs = juce::Time::getMillisecondCounter();
+        // A reader further behind than the ring is deep has lost the oldest
+        // hits; take what is still there rather than reading wrapped slots.
+        for (int i = juce::jmax (lastHitSeen, hits - fem::PlateSynth::hitRingSize);
+             i < hits; ++i)
+        {
+            const auto p = processor.getHit (i);
+            hitFlashes.push_back ({ p.x, p.y, p.amplitude, now });
+        }
+        lastHitSeen = hits;
     }
 
-    if (lastStrikeMs != 0
-         && juce::Time::getMillisecondCounter() - lastStrikeMs < 750
-         && plateView.isVisible())
-        plateView.repaint();
+    if (! hitFlashes.empty())
+    {
+        const auto expired = [now] (const HitFlash& f)
+        {
+            return now - f.startMs >= hitFlashMs;
+        };
+        hitFlashes.erase (std::remove_if (hitFlashes.begin(), hitFlashes.end(), expired),
+                          hitFlashes.end());
+        if (plateView.isVisible())
+            plateView.repaint();
+    }
 }
 
 void FemPlateAudioProcessorEditor::changeListenerCallback (juce::ChangeBroadcaster*)
