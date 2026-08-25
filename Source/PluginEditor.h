@@ -21,6 +21,7 @@
 #include "PluginProcessor.h"
 #include "Theme.h"
 #include "Components/ShapeCanvas.h"
+#include "Components/PlatePointPanel.h"
 
 //==============================================================================
 class FemPlateAudioProcessorEditor : public juce::AudioProcessorEditor,
@@ -51,6 +52,38 @@ private:
     void refreshStatus();
     void setOutputPosition (double x, double y);
     void drawPlateOverlay (juce::Graphics& g, fxme::acoustics::FemViewComponent& v);
+
+    //==========================================================================
+    // Plate markers: the pickups and sources drawn on the plate, and the
+    // gestures that act on them.
+
+    /** One marker's identity and state, read from the parameters. The two
+        kinds share a struct because everything that acts on them — drawing,
+        hit-testing, alt-click, the popup — treats them the same way and
+        differs only in which parameter ids it reaches for. */
+    struct PlateMarker
+    {
+        bool isPickup = true;
+        int index = 0;
+        float x = 0.0f, y = 0.0f;
+        bool on = false;
+
+        juce::String label() const;
+        juce::Colour colour() const;
+    };
+
+    /** Every marker, pickups first. Reads the current parameter values. */
+    std::vector<PlateMarker> plateMarkers() const;
+
+    /** The marker under a plate-space point, or -1. `markers` must be the
+        result of plateMarkers(); the search is in screen space so that the
+        hit radius is a constant number of pixels rather than of plate. */
+    int markerAt (const std::vector<PlateMarker>& markers, juce::Point<float> screenPos) const;
+
+    void setMarkerPosition (const PlateMarker& m, double x, double y);
+    void setMarkerOn (const PlateMarker& m, bool shouldBeOn);
+    void showMarkerPanel (const PlateMarker& m);
+    bool keyPressed (const juce::KeyPress& key) override;
 
     FemPlateAudioProcessor& processor;
 

@@ -475,9 +475,23 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 // is how it ships.
                 const int note = msg.getNoteNumber();
                 const float velocity = msg.getFloatVelocity();
-                if (synth.strikeSourcesForNote (note, velocity) == 0)
-                    synth.noteOn (velocity);
-                midiStrikeCounter.fetch_add (1, std::memory_order_release);
+
+                const int armed = midiLearnArmed.load (std::memory_order_acquire);
+                if (armed >= 0)
+                {
+                    // Learning: capture and swallow. Firing the source as well
+                    // would make every mapping start with a hit nobody asked
+                    // for, which is exactly the note being used to teach.
+                    midiLearnSource.store (armed, std::memory_order_relaxed);
+                    midiLearnNote.store (note, std::memory_order_release);
+                    midiLearnArmed.store (-1, std::memory_order_release);
+                }
+                else
+                {
+                    if (synth.strikeSourcesForNote (note, velocity) == 0)
+                        synth.noteOn (velocity);
+                    midiStrikeCounter.fetch_add (1, std::memory_order_release);
+                }
             }
         }
 

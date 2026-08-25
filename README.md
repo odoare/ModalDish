@@ -57,6 +57,22 @@ against analytic plates in `Tests/FemTests.cpp`.
 
   Both are linear mixes, so the audio loop costs the same whether one pickup
   and one source are on or four and eight.
+
+  On the plate, pickups are orchid circles labelled 1–4 and sources teal
+  circles labelled a–h; a disabled one is a faint ring rather than gone, so it
+  can still be found. The gestures:
+
+  | Gesture | Effect |
+  | --- | --- |
+  | `1`–`4` / `a`–`h` with the mouse over the plate | put that pickup or source under the cursor, switching it on |
+  | click a marker | open its panel — every parameter of that one point |
+  | alt-click a marker | switch it off |
+  | click anywhere else | hit the plate there, with the global Hammer and Force |
+  | right-click / ctrl-drag | move pickup 1, as before |
+
+  A source's panel carries a **MIDI learn** button: arm it and the next note
+  received is captured as that source's note (and swallowed, so learning never
+  costs you a stray hit). Clicking it again, or closing the panel, gives up.
 * **In** injects the external audio input at the last hit point — the
   effect mode.
 

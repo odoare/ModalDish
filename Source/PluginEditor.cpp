@@ -15,6 +15,11 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     : AudioProcessorEditor (&p), processor (p)
 {
     setLookAndFeel (&lnf);
+    // The plate takes 1..4 / a..h to place a pickup or a source under the
+    // mouse, so the editor has to be able to hold the keyboard focus itself
+    // — key presses bubble up from a focused child, but only if something in
+    // the window has focus at all.
+    setWantsKeyboardFocus (true);
     lnf.setAccentColour (fem::theme::accent);   // tints the combo drop-downs
     addAndMakeVisible (topBar);
     topBar.setBackgroundColour (fem::theme::topBarBg);
@@ -42,6 +47,20 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
                           fem::theme::fieldNeg, fem::theme::fieldPos);
     plateView.onPlateClick = [this] (double x, double y, const juce::MouseEvent& e)
     {
+        // A marker under the cursor claims the click: alt turns it off, a
+        // plain click opens its panel. Everywhere else the plate behaves as
+        // it always has — a click is a hit.
+        const auto markers = plateMarkers();
+        const int hit = markerAt (markers, e.position);
+        if (hit >= 0)
+        {
+            if (e.mods.isAltDown())
+                setMarkerOn (markers[(size_t) hit], false);
+            else
+                showMarkerPanel (markers[(size_t) hit]);
+            return;
+        }
+
         if (e.mods.isRightButtonDown() || e.mods.isCtrlDown())
             setOutputPosition (x, y);
         else
@@ -427,6 +446,127 @@ void FemPlateAudioProcessorEditor::setOutputPosition (double x, double y)
     plateView.repaint();
 }
 
+juce::String FemPlateAudioProcessorEditor::PlateMarker::label() const
+{
+    return isPickup ? juce::String (index + 1)
+                    : juce::String::charToString ((juce::juce_wchar) fem::sourceLabel (index));
+}
+
+juce::Colour FemPlateAudioProcessorEditor::PlateMarker::colour() const
+{
+    return isPickup ? fem::theme::pickupAccent : fem::theme::sourceAccent;
+}
+
+std::vector<FemPlateAudioProcessorEditor::PlateMarker>
+FemPlateAudioProcessorEditor::plateMarkers() const
+{
+    const auto value = [this] (const char* id)
+    {
+        return processor.apvts.getRawParameterValue (id)->load();
+    };
+
+    std::vector<PlateMarker> out;
+    out.reserve ((size_t) (fem::maxPickups + fem::maxSources));
+
+    for (int i = 0; i < fem::maxPickups; ++i)
+        out.push_back ({ true, i, value (fem::id::pickupX[i]), value (fem::id::pickupY[i]),
+                         value (fem::id::pickupOn[i]) > 0.5f });
+    for (int i = 0; i < fem::maxSources; ++i)
+        out.push_back ({ false, i, value (fem::id::sourceX[i]), value (fem::id::sourceY[i]),
+                         value (fem::id::sourceOn[i]) > 0.5f });
+    return out;
+}
+
+int FemPlateAudioProcessorEditor::markerAt (const std::vector<PlateMarker>& markers,
+                                            juce::Point<float> screenPos) const
+{
+    // Nearest within the radius rather than the first one inside it: markers
+    // can be dropped on top of each other, and the one whose centre is
+    // closest is the one being pointed at. A disabled marker carries a small
+    // penalty so that it loses to an enabled one nearly underneath it — it is
+    // still reachable, just not in the way.
+    constexpr float radius = 11.0f;
+    constexpr float disabledPenalty = 3.0f;
+
+    int best = -1;
+    float bestDist = radius;
+
+    for (size_t i = 0; i < markers.size(); ++i)
+    {
+        const auto p = plateView.plateToScreen (markers[i].x, markers[i].y);
+        const float d = p.getDistanceFrom (screenPos)
+                        + (markers[i].on ? 0.0f : disabledPenalty);
+        if (d < bestDist)
+        {
+            best = (int) i;
+            bestDist = d;
+        }
+    }
+    return best;
+}
+
+void FemPlateAudioProcessorEditor::setMarkerPosition (const PlateMarker& m, double x, double y)
+{
+    const auto setParam = [this] (const char* id, float value)
+    {
+        if (auto* param = processor.apvts.getParameter (id))
+            param->setValueNotifyingHost (param->convertTo0to1 (value));
+    };
+    setParam (m.isPickup ? fem::id::pickupX[m.index] : fem::id::sourceX[m.index],
+              (float) juce::jlimit (0.0, 1.0, x));
+    setParam (m.isPickup ? fem::id::pickupY[m.index] : fem::id::sourceY[m.index],
+              (float) juce::jlimit (0.0, 1.0, y));
+    plateView.repaint();
+}
+
+void FemPlateAudioProcessorEditor::setMarkerOn (const PlateMarker& m, bool shouldBeOn)
+{
+    const char* id = m.isPickup ? fem::id::pickupOn[m.index] : fem::id::sourceOn[m.index];
+    if (auto* param = processor.apvts.getParameter (id))
+        param->setValueNotifyingHost (shouldBeOn ? 1.0f : 0.0f);
+    plateView.repaint();
+}
+
+void FemPlateAudioProcessorEditor::showMarkerPanel (const PlateMarker& m)
+{
+    auto panel = std::make_unique<PlatePointPanel> (processor, m.isPickup, m.index);
+    const auto centre = plateView.plateToScreen (m.x, m.y);
+    const auto area = juce::Rectangle<int> (0, 0, 1, 1)
+                        .withCentre (getLocalPoint (&plateView, centre).roundToInt());
+
+    // Parented to the editor rather than the desktop, so the callout inherits
+    // FxmeLookAndFeel; a desktop callout would be drawn in stock JUCE style.
+    juce::CallOutBox::launchAsynchronously (std::move (panel), area, this);
+}
+
+bool FemPlateAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
+{
+    // 1..4 place a pickup, a..h a source, at whatever the mouse is over.
+    // Placing something also switches it on: the gesture that turns a marker
+    // off is alt-click, so this is the one that has to turn it back on, and
+    // positioning an invisible point would otherwise do nothing at all.
+    if (! plateView.isVisible())
+        return false;
+
+    const auto local = plateView.getMouseXYRelative();
+    if (! plateView.getLocalBounds().contains (local))
+        return false;
+
+    const auto ch = juce::CharacterFunctions::toLowerCase (key.getTextCharacter());
+    PlateMarker m;
+    if (ch >= '1' && ch < (juce::juce_wchar) ('1' + fem::maxPickups))
+        m = { true, (int) (ch - '1'), 0.0f, 0.0f, false };
+    else if (ch >= 'a' && ch < (juce::juce_wchar) ('a' + fem::maxSources))
+        m = { false, (int) (ch - 'a'), 0.0f, 0.0f, false };
+    else
+        return false;
+
+    const auto p = plateView.screenToPlate (local.toFloat());
+    setMarkerPosition (m, p.x, p.y);
+    setMarkerOn (m, true);
+    return true;
+}
+
 void FemPlateAudioProcessorEditor::drawPlateOverlay (juce::Graphics& g,
                                                      fxme::acoustics::FemViewComponent& v)
 {
@@ -467,14 +607,33 @@ void FemPlateAudioProcessorEditor::drawPlateOverlay (juce::Graphics& g,
         }
     }
 
-    // Output point marker.
-    const float ox = processor.apvts.getRawParameterValue (fem::id::pickupX[0])->load();
-    const float oy = processor.apvts.getRawParameterValue (fem::id::pickupY[0])->load();
-    const auto op = v.plateToScreen (ox, oy);
-    g.setColour (fem::theme::ioAccent);
-    g.drawEllipse (op.x - 6.0f, op.y - 6.0f, 12.0f, 12.0f, 2.0f);
-    g.drawLine (op.x - 9.0f, op.y, op.x + 9.0f, op.y, 1.0f);
-    g.drawLine (op.x, op.y - 9.0f, op.x, op.y + 9.0f, 1.0f);
+    // Pickup and source markers. An enabled one is filled and labelled; a
+    // disabled one is a faint ring, still visible so it can be found and
+    // switched back on, but clearly not taking part.
+    g.setFont (juce::Font (juce::FontOptions (11.0f)).boldened());
+    for (const auto& m : plateMarkers())
+    {
+        const auto p = v.plateToScreen (m.x, m.y);
+        const auto c = m.colour();
+        const float r = m.isPickup ? 7.0f : 6.0f;
+
+        if (m.on)
+        {
+            g.setColour (c.withAlpha (0.30f));
+            g.fillEllipse (p.x - r, p.y - r, 2 * r, 2 * r);
+            g.setColour (c);
+            g.drawEllipse (p.x - r, p.y - r, 2 * r, 2 * r, 2.0f);
+        }
+        else
+        {
+            g.setColour (c.withAlpha (0.30f));
+            g.drawEllipse (p.x - r, p.y - r, 2 * r, 2 * r, 1.0f);
+        }
+
+        g.setColour (m.on ? juce::Colours::white : c.withAlpha (0.45f));
+        g.drawText (m.label(), juce::Rectangle<float> (p.x - 10.0f, p.y - 8.0f, 20.0f, 16.0f),
+                    juce::Justification::centred);
+    }
 
     // Fading marker on the last hit point.
     const auto elapsed = juce::Time::getMillisecondCounter() - lastStrikeMs;
@@ -500,6 +659,18 @@ void FemPlateAudioProcessorEditor::timerCallback()
     }
     if (showingLiveField() && plateView.isVisible())
         refreshLiveField();
+
+    // A MIDI learn capture is applied here rather than on the audio thread,
+    // which must not touch a parameter. Consumed with exchange so a note is
+    // applied once even if the timer and the audio thread race.
+    const int learned = processor.midiLearnNote.exchange (-1, std::memory_order_acq_rel);
+    if (learned >= 0)
+    {
+        const int src = processor.midiLearnSource.load (std::memory_order_relaxed);
+        if (juce::isPositiveAndBelow (src, fem::maxSources))
+            if (auto* param = processor.apvts.getParameter (fem::id::sourceNote[src]))
+                param->setValueNotifyingHost (param->convertTo0to1 ((float) learned));
+    }
 
     // A MIDI note strikes at the last clicked point (or the plate centre if
     // it has never been clicked): mark it exactly like a click.

@@ -73,6 +73,18 @@ public:
     //==========================================================================
     juce::AudioProcessorValueTreeState apvts;
 
+    /** MIDI learn, editor <-> audio thread.
+
+        `midiLearnArmed` is the source index the editor is waiting to map, or
+        -1. The audio thread captures the next note-on into `midiLearnNote` /
+        `midiLearnSource`, disarms, and swallows that note rather than firing
+        anything with it. The editor's timer applies the capture to the
+        parameter, so nothing writes a parameter from the audio thread. */
+    std::atomic<int> midiLearnArmed { -1 };
+    std::atomic<int> midiLearnSource { -1 };
+    std::atomic<int> midiLearnNote { -1 };
+
+
     /** The user-editable geometry (message thread only). */
     struct ShapeData
     {

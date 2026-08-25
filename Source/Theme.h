@@ -44,6 +44,14 @@ namespace fem::theme
     inline const juce::Colour ioAccent    { 0xffd96cd0 };   // orchid — in/out section
     inline const juce::Colour cascAccent  { 0xffd9b13a };   // amber — cascade tuning
 
+    // Plate markers. Pickups borrow the in/out orchid; sources get a colour of
+    // their own rather than sharing one, because the two sit on the same
+    // picture and telling them apart at a glance is the whole job of the
+    // marker. Deliberately not coral or lime: those already mean a boundary
+    // condition a few pixels away on the outline.
+    inline const juce::Colour pickupAccent { 0xffd96cd0 };  // orchid, = ioAccent
+    inline const juce::Colour sourceAccent { 0xff5ad1a5 };  // teal
+
     // Plate display: canvas background and the diverging contour map ends.
     inline const juce::Colour plateBg   { 0xff141a24 };
     inline const juce::Colour plateGrid { 0xff4a5670 };
