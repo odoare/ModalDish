@@ -142,6 +142,17 @@ if(FEMPLATE_BUILD_TESTS)
     # header, so this needs neither JUCE nor a host. Should the stub ever stop
     # sufficing, the DSP has acquired a real JUCE dependency worth knowing
     # about.
+    # The plate's input/output topology: pickups, sources, sends, note
+    # dispatch. Same offline-render trick as CascadeMeasure below.
+    add_executable(IoTests Tests/IoTests.cpp Source/Dsp/PlateSynth.cpp)
+    target_include_directories(IoTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/juce_stub
+        ${CMAKE_CURRENT_SOURCE_DIR}/Source
+        ${CMAKE_CURRENT_SOURCE_DIR}/Source/Dsp)
+    target_link_libraries(IoTests PRIVATE FxmeCore)
+    target_compile_features(IoTests PRIVATE cxx_std_17)
+    add_test(NAME IoTests COMMAND IoTests)
+
     add_executable(CascadeMeasure Tests/CascadeMeasure.cpp Source/Dsp/PlateSynth.cpp)
     target_include_directories(CascadeMeasure PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/juce_stub

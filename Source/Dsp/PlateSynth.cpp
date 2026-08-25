@@ -264,6 +264,22 @@ void PlateSynth::update (const ModalModel* newModel, const Params& params)
             pickupMixChanged = true;
     }
 
+    // Sources split the same way: a move needs the shapes resampled, a send
+    // or balance change only needs the collapsed mix rebuilt. Hammer, force,
+    // spread and note are read at strike time and need neither.
+    bool sourceMoved = false, sourceMixChanged = false;
+    for (int i = 0; i < fem::maxSources; ++i)
+    {
+        const auto& a = params.sources[i];
+        const auto& b = current.sources[i];
+        if (! juce::approximatelyEqual (a.x, b.x) || ! juce::approximatelyEqual (a.y, b.y)
+            || a.on != b.on)
+            sourceMoved = true;
+        if (! juce::approximatelyEqual (a.send, b.send)
+            || ! juce::approximatelyEqual (a.pan, b.pan))
+            sourceMixChanged = true;
+    }
+
     const bool envChanged =
            ! juce::approximatelyEqual (params.cascAttackMs,  current.cascAttackMs)
         || ! juce::approximatelyEqual (params.cascReleaseMs, current.cascReleaseMs);
@@ -285,14 +301,17 @@ void PlateSynth::update (const ModalModel* newModel, const Params& params)
         retune();
         dirty = false;
     }
-    else if (pickupMoved)
+    else
     {
-        computeOutputWeights();
-        updatePickupMix();
-    }
-    else if (pickupMixChanged)
-    {
-        updatePickupMix();
+        if (pickupMoved)
+            computeOutputWeights();     // rebuilds the pickup mix itself
+        else if (pickupMixChanged)
+            updatePickupMix();
+
+        if (sourceMoved)
+            computeSourceShapes();      // likewise the source mix
+        else if (sourceMixChanged)
+            updateSourceMix();
     }
 }
 
@@ -331,7 +350,8 @@ void PlateSynth::retune()
     srcAmp = (float) (1.0 / std::sqrt (juce::jmax (1.0e-6, area)));
 
     computeOutputWeights();
-    computeInputWeights (lastHitX, lastHitY);
+    computeSourceShapes();
+    computeHitWeights (lastHitX, lastHitY);
     retuneBank();
 }
 
@@ -523,13 +543,51 @@ void PlateSynth::updatePickupMix() noexcept
     }
 }
 
-void PlateSynth::computeInputWeights (float x, float y)
+void PlateSynth::computeHitWeights (float x, float y)
 {
-    for (float& w : inWeights)
+    for (float& w : hitWeights)
         w = 0.0f;
     if (model != nullptr)
-        model->evalShapes (x, y, inWeights, activeModes);
+        model->evalShapes (x, y, hitWeights, activeModes);
     updateCascadeWeights();
+}
+
+void PlateSynth::computeSourceShapes()
+{
+    for (int i = 0; i < fem::maxSources; ++i)
+    {
+        for (float& w : phiSource[i])
+            w = 0.0f;
+        // As with the pickups, a source that is off is never sampled: no
+        // point paying a point location plus a per-mode interpolation for an
+        // injection point that injects nothing.
+        if (model != nullptr && current.sources[i].on)
+            model->evalShapes (current.sources[i].x, current.sources[i].y,
+                               phiSource[i], activeModes);
+    }
+    updateSourceMix();
+}
+
+void PlateSynth::updateSourceMix() noexcept
+{
+    // Input balance, not a pan law: a source takes a weighted mean of the two
+    // incoming channels, and the weights sum to one so that a centred source
+    // receives exactly the mono sum the single injection point used to get.
+    for (int k = 0; k < fem::maxModes; ++k)
+    {
+        float l = 0.0f, r = 0.0f;
+        for (int i = 0; i < fem::maxSources; ++i)
+        {
+            const auto& src = current.sources[i];
+            if (! src.on)
+                continue;
+            const float p = juce::jlimit (-1.0f, 1.0f, src.pan);
+            l += src.send * 0.5f * (1.0f - p) * phiSource[i][k];
+            r += src.send * 0.5f * (1.0f + p) * phiSource[i][k];
+        }
+        inWL[k] = l;
+        inWR[k] = r;
+    }
 }
 
 void PlateSynth::updateCascadeWeights() noexcept
@@ -542,11 +600,17 @@ void PlateSynth::updateCascadeWeights() noexcept
     //
     for (int k = 0; k < fem::maxModes; ++k)
         cascadeW[k] = (k >= cascadeSplit && k < activeModes && compensation[k] > 0.0f)
-                        ? inWeights[k] * cascInjW[k]
+                        ? hitWeights[k] * cascInjW[k]
                         : 0.0f;
 }
 
 void PlateSynth::strike (float x, float y, float velocity)
+{
+    fireHammer (x, y, velocity, current.hammerMs, current.force);
+}
+
+void PlateSynth::fireHammer (float x, float y, float velocity,
+                             float hammerMs, float force) noexcept
 {
     if (model == nullptr || activeModes < 1)
         return;
@@ -558,16 +622,83 @@ void PlateSynth::strike (float x, float y, float velocity)
         w = 0.0f;
     model->evalShapes (x, y, h.weights, activeModes);
 
-    const double lenSamples = juce::jmax (1.0, fs * (double) current.hammerMs * 1.0e-3);
+    const double lenSamples = juce::jmax (1.0, fs * (double) hammerMs * 1.0e-3);
     h.phase = 0.0f;
     h.phaseInc = (float) (1.0 / lenSamples);
-    h.amplitude = juce::jlimit (0.0f, 1.0f, velocity) * current.force;
+    h.amplitude = juce::jlimit (0.0f, 1.0f, velocity) * force;
     h.active = true;
 
-    // The external input follows the last hit point.
+    // The cascade injects wherever the plate was last struck — the one point
+    // the nonlinearity has a physical claim to (see the header). The external
+    // input no longer follows it: the sources say where that goes.
     lastHitX = x;
     lastHitY = y;
-    computeInputWeights (x, y);
+    computeHitWeights (x, y);
+}
+
+void PlateSynth::randomSourcePoint (int s, float& x, float& y) noexcept
+{
+    const auto& src = current.sources[s];
+    x = src.x;
+    y = src.y;
+
+    const float sigma = juce::jmax (0.0f, src.spread);
+    if (sigma <= 0.0f || model == nullptr || model->mesh == nullptr)
+        return;
+
+    // Box-Muller, at strike rate rather than sample rate, so the transcendentals
+    // are free in context. sigma is the per-axis standard deviation.
+    for (int attempt = 0; attempt < 8; ++attempt)
+    {
+        const float u1 = juce::jmax (1.0e-7f, rng.nextFloat());
+        const float u2 = rng.nextFloat();
+        const float mag = sigma * std::sqrt (-2.0f * std::log (u1));
+        const float ang = juce::MathConstants<float>::twoPi * u2;
+        const float px = src.x + mag * std::cos (ang);
+        const float py = src.y + mag * std::sin (ang);
+
+        // A draw that lands off the plate excites nothing at all — evalShapes
+        // would return silence and the hammer would be spent on nothing — so
+        // it is redrawn rather than clamped. Clamping would pile hits onto the
+        // boundary, which is exactly where most modes have a node.
+        double bary[3];
+        if (fxme::acoustics::findTriangle (*model->mesh, px, py, bary) >= 0)
+        {
+            x = px;
+            y = py;
+            return;
+        }
+    }
+    // Eight misses means the point is close to an edge relative to the spread;
+    // striking it exactly is a better answer than not striking at all.
+}
+
+void PlateSynth::strikeSource (int s, float velocity) noexcept
+{
+    if (s < 0 || s >= fem::maxSources)
+        return;
+    const auto& src = current.sources[s];
+    if (! src.on)
+        return;
+
+    float x = 0.0f, y = 0.0f;
+    randomSourcePoint (s, x, y);
+    fireHammer (x, y, velocity, src.hammerMs, src.force);
+}
+
+int PlateSynth::strikeSourcesForNote (int note, float velocity) noexcept
+{
+    int fired = 0;
+    for (int i = 0; i < fem::maxSources; ++i)
+    {
+        const auto& src = current.sources[i];
+        if (src.on && src.note == note)
+        {
+            strikeSource (i, velocity);
+            ++fired;
+        }
+    }
+    return fired;
 }
 
 int PlateSynth::copyModalField (Field which, float* dest, int maxCount) const noexcept
@@ -636,10 +767,6 @@ void PlateSynth::processSample (float inL, float inR, float& outL, float& outR) 
     if (activeModes < 1)
         return;
 
-    // Until the sources land, the external input is still a single injection
-    // point at the last hit, fed the mono sum. Step 2 replaces this with the
-    // per-source sends, at which point inL and inR stop being summed here.
-    const float input = 0.5f * (inL + inR);
 
     const bool snapField = (--nlCountdown <= 0);
     if (snapField)
@@ -738,7 +865,7 @@ void PlateSynth::processSample (float inL, float inR, float& outL, float& outR) 
     {
         while (band + 1 < numCascadeBands && k >= bandStart[band + 1])
             ++band;
-        float x = inWeights[k] * input + cascadeW[k] * cascadeFb[band];
+        float x = inWL[k] * inL + inWR[k] * inR + cascadeW[k] * cascadeFb[band];
         for (int p = 0; p < numPulses; ++p)
             x += pulse[p] * hammers[pulseSlot[p]].weights[k];
         const float y = filters[k].process (x);

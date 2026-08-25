@@ -160,13 +160,19 @@
 
 #include "ModalModel.h"
 
+#include <FxmeTools/util/Random.h>
+
 namespace fem
 {
 
 class PlateSynth
 {
 public:
-    static constexpr int maxStrikes = 8;
+    // Hammers that can be in flight at once. Eight sources each mapped to
+    // their own MIDI note can overlap, and so can mouse hits on top of them;
+    // at eight slots a busy passage steals its own tails round-robin. Each
+    // slot carries a full mode-weight vector, so the raise costs 16 KB.
+    static constexpr int maxStrikes = 16;
 
     /** One listening point. `level` is a linear gain and `pan` runs -1 (left)
         to +1 (right), equal-power with the centre at unity. A pickup that is
@@ -182,6 +188,29 @@ public:
         float x = 0.5f, y = 0.47f;
         float level = 1.0f;
         float pan = 0.0f;
+        bool  on = false;
+    };
+
+    /** One striking / injection point.
+
+        `force` is the amplitude a full-velocity hit reaches, `hammerMs` its
+        contact time, and `spread` the standard deviation — per axis, in plate
+        coordinates — of the random offset applied to each hit, so 0 always
+        strikes exactly on the point. `send` and `pan` are this point's share
+        of the plugin input: `pan` is an L/R balance of the incoming stereo
+        pair, -1 taking the left channel alone and 0 their mean, which is the
+        mono sum the single injection point used to receive.
+
+        `note` is the MIDI note that triggers it, or -1 for none. */
+    struct Source
+    {
+        float x = 0.5f, y = 0.47f;
+        float hammerMs = 3.0f;
+        float force = 1.0f;
+        float spread = 0.0f;
+        float send = 0.0f;
+        float pan = 0.0f;
+        int   note = -1;
         bool  on = false;
     };
 
@@ -207,6 +236,7 @@ public:
         float cascDeplete   = 0.07f;   // source-band energy loss while pumping
 
         Pickup pickups[fem::maxPickups];
+        Source sources[fem::maxSources];
         int   numModes  = 32;       // active modes (<= model modes, <= fem::maxModes)
     };
 
@@ -226,9 +256,21 @@ public:
     void update (const ModalModel* model, const Params& params);
 
     /** Audio thread: hit the plate at (x, y) (plate coordinates) with
-        normalised velocity 0..1 (scaled by the force parameter). Also moves
-        the external-input injection point there. */
+        normalised velocity 0..1, using the global Hammer and Force settings.
+        This is the hit a click on bare plate produces. Also moves the point
+        the cascade ladder injects at. */
     void strike (float x, float y, float velocity);
+
+    /** Audio thread: fire source `s` (0..fem::maxSources-1) at normalised
+        velocity 0..1, which scales that source's own Force. The hit lands on
+        the source's point, displaced by a random offset when its Spread is
+        non-zero. Does nothing for a source that is off or out of range. */
+    void strikeSource (int s, float velocity) noexcept;
+
+    /** Audio thread: sources whose MIDI note is `note` and which are on, in
+        index order. Returns how many fired, so the caller can decide what an
+        unmapped note should do. */
+    int strikeSourcesForNote (int note, float velocity) noexcept;
 
     /** Audio thread: a MIDI note strikes the plate at the last hit point with
         `velocity` (0..1, i.e. MIDI velocity / 127, which the Force parameter
@@ -289,7 +331,16 @@ private:
     void retuneBank();                // coefficients/amps at tension + T_dyn(gamma)
     void computeOutputWeights();      // phi_k at each pickup -> phiPickup
     void updatePickupMix() noexcept;  // phiPickup + levels/pans -> outAmpL/R
-    void computeInputWeights (float x, float y);
+    /** The one place a hammer slot is filled: position, contact time and
+        amplitude, whether the hit came from a click, a source or a note. */
+    void fireHammer (float x, float y, float velocity,
+                     float hammerMs, float force) noexcept;
+    void computeHitWeights (float x, float y);   // phi_k(last hit) -> hitWeights
+    void computeSourceShapes();                  // phi_k at each source -> phiSource
+    void updateSourceMix() noexcept;             // phiSource + sends/pans -> inWL/R
+    /** A hit position for source `s`: its point, or a random draw around it
+        that is still inside the plate. */
+    void randomSourcePoint (int s, float& x, float& y) noexcept;
     void updateCascadeWeights() noexcept;    // injection weights of the target modes
     void updateCascadeEnvelopes();           // attack/release coefficients from params
     void updateDynamicTension() noexcept;    // decimated Berger feedback step
@@ -331,12 +382,21 @@ private:
     // Mode shapes sampled at each pickup, and the two vectors they collapse
     // into once levels and pans are applied. The per-sample loop only ever
     // touches the collapsed pair.
+    fxme::Random rng { 0x5eed1234u };    // hit-position jitter; audio thread only
+
     float phiPickup[fem::maxPickups][fem::maxModes] {};
     float pickupGainL[fem::maxPickups] {};
     float pickupGainR[fem::maxPickups] {};
     float outAmpL[fem::maxModes] {};
     float outAmpR[fem::maxModes] {};
-    float inWeights[fem::maxModes] {};   // phi_k(last hit) for the external input
+    float hitWeights[fem::maxModes] {};  // phi_k(last hit), drives the cascade
+
+    // Mode shapes at each source, and the two vectors the input sends
+    // collapse into. As with the pickups, the per-sample loop only ever
+    // touches the collapsed pair.
+    float phiSource[fem::maxSources][fem::maxModes] {};
+    float inWL[fem::maxModes] {};
+    float inWR[fem::maxModes] {};
     float compensation[fem::maxModes] {};// output gain per mode (zetaRef / zeta)
     float cascInjW[fem::maxModes] {};    // cascade injection gain per mode
     float nlWeight[fem::maxModes] {};    // g_k q_k^2 per unit y_k^2 (Berger driver)

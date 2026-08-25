@@ -45,6 +45,19 @@ namespace fem::id
     inline constexpr const char* pickupLevel[] = { "pickup1level", "pickup2level", "pickup3level", "pickup4level" };
     inline constexpr const char* pickupPan[]   = { "pickup1pan",   "pickup2pan",   "pickup3pan",   "pickup4pan"   };
     inline constexpr const char* pickupOn[]    = { "pickup1on",    "pickup2on",    "pickup3on",    "pickup4on"    };
+
+    // Sources. Up to eight striking/injection points, labelled a..h in the
+    // interface and indexed 0..7 here. Each carries its own hammer, its own
+    // MIDI note, and its own send of the plugin input.
+    inline constexpr const char* sourceX[]    = { "sourceax", "sourcebx", "sourcecx", "sourcedx", "sourceex", "sourcefx", "sourcegx", "sourcehx" };
+    inline constexpr const char* sourceY[]    = { "sourceay", "sourceby", "sourcecy", "sourcedy", "sourceey", "sourcefy", "sourcegy", "sourcehy" };
+    inline constexpr const char* sourceHammer[] = { "sourceahammer", "sourcebhammer", "sourcechammer", "sourcedhammer", "sourceehammer", "sourcefhammer", "sourceghammer", "sourcehhammer" };
+    inline constexpr const char* sourceForce[] = { "sourceaforce", "sourcebforce", "sourcecforce", "sourcedforce", "sourceeforce", "sourcefforce", "sourcegforce", "sourcehforce" };
+    inline constexpr const char* sourceNote[] = { "sourceanote", "sourcebnote", "sourcecnote", "sourcednote", "sourceenote", "sourcefnote", "sourcegnote", "sourcehnote" };
+    inline constexpr const char* sourceSpread[] = { "sourceaspread", "sourcebspread", "sourcecspread", "sourcedspread", "sourceespread", "sourcefspread", "sourcegspread", "sourcehspread" };
+    inline constexpr const char* sourceSend[] = { "sourceasend", "sourcebsend", "sourcecsend", "sourcedsend", "sourceesend", "sourcefsend", "sourcegsend", "sourcehsend" };
+    inline constexpr const char* sourcePan[]  = { "sourceapan", "sourcebpan", "sourcecpan", "sourcedpan", "sourceepan", "sourcefpan", "sourcegpan", "sourcehpan" };
+    inline constexpr const char* sourceOn[]   = { "sourceaon", "sourcebon", "sourcecon", "sourcedon", "sourceeon", "sourcefon", "sourcegon", "sourcehon" };
     inline constexpr const char* inGain    = "ingain";    // external-signal drive (effect mode)
     inline constexpr const char* outGain   = "outgain";   // output level (dB)
 }
@@ -58,6 +71,17 @@ namespace fem
     // is a plate you can place across the image; more would be knobs without
     // a use.
     inline constexpr int maxPickups = 4;
+
+    // Striking and injection points. Eight, for the same reason as four
+    // pickups: the input sends collapse into two per-mode vectors whatever
+    // the count, so the audio loop does not care. What does scale with the
+    // count is the mode-shape evaluation when a source moves, and the number
+    // of hammers that can be in flight at once (maxStrikes).
+    inline constexpr int maxSources = 8;
+
+    /** Interface label of source `i`: 'a'..'h'. The one place the letters
+        are defined, so nothing else has to know the convention. */
+    inline constexpr char sourceLabel (int i) noexcept { return (char) ('a' + i); }
 
     // Synthesis bank capacity: FEM-computed modes plus the statistical
     // (Berry random-wave) tail appended above them — see ModalModel.h.

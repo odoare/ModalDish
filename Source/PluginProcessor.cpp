@@ -121,6 +121,18 @@ FemPlateAudioProcessor::FemPlateAudioProcessor()
         pPickupPan[i]   = apvts.getRawParameterValue (fem::id::pickupPan[i]);
         pPickupOn[i]    = apvts.getRawParameterValue (fem::id::pickupOn[i]);
     }
+    for (int i = 0; i < fem::maxSources; ++i)
+    {
+        pSourceX[i]      = apvts.getRawParameterValue (fem::id::sourceX[i]);
+        pSourceY[i]      = apvts.getRawParameterValue (fem::id::sourceY[i]);
+        pSourceHammer[i] = apvts.getRawParameterValue (fem::id::sourceHammer[i]);
+        pSourceForce[i]  = apvts.getRawParameterValue (fem::id::sourceForce[i]);
+        pSourceNote[i]   = apvts.getRawParameterValue (fem::id::sourceNote[i]);
+        pSourceSpread[i] = apvts.getRawParameterValue (fem::id::sourceSpread[i]);
+        pSourceSend[i]   = apvts.getRawParameterValue (fem::id::sourceSend[i]);
+        pSourcePan[i]    = apvts.getRawParameterValue (fem::id::sourcePan[i]);
+        pSourceOn[i]     = apvts.getRawParameterValue (fem::id::sourceOn[i]);
+    }
     pInGain   = apvts.getRawParameterValue (fem::id::inGain);
     pOutGain  = apvts.getRawParameterValue (fem::id::outGain);
 
@@ -264,6 +276,61 @@ juce::AudioProcessorValueTreeState::ParameterLayout FemPlateAudioProcessor::crea
         }
     }
 
+    // Sources. Only 'a' is on, centred, at full send — which is exactly the
+    // single injection point the external input used to have, so effect mode
+    // behaves as before until more are switched on. Notes start unmapped
+    // (-1), so MIDI keeps its pre-source behaviour until a source claims a
+    // note.
+    {
+        for (int i = 0; i < fem::maxSources; ++i)
+        {
+            // Upper case in the host's parameter list, lower case on the
+            // plate (fem::sourceLabel) — same source, read in two places.
+            const auto prefix = "Source "
+                              + juce::String::charToString ((juce::juce_wchar) ('A' + i))
+                              + " ";
+            const bool first = (i == 0);
+
+            p.push_back (std::make_unique<FloatParam> (
+                juce::ParameterID (fem::id::sourceX[i], 1), prefix + "X",
+                juce::NormalisableRange<float> (0.0f, 1.0f, 1.0e-3f), 0.5f));
+            p.push_back (std::make_unique<FloatParam> (
+                juce::ParameterID (fem::id::sourceY[i], 1), prefix + "Y",
+                juce::NormalisableRange<float> (0.0f, 1.0f, 1.0e-3f), 0.47f));
+            p.push_back (std::make_unique<FloatParam> (
+                juce::ParameterID (fem::id::sourceHammer[i], 1), prefix + "Hammer",
+                logRange (0.1f, 50.0f), 3.0f,
+                juce::AudioParameterFloatAttributes().withLabel ("ms")));
+            p.push_back (std::make_unique<FloatParam> (
+                juce::ParameterID (fem::id::sourceForce[i], 1), prefix + "Force",
+                juce::NormalisableRange<float> (0.0f, 20.0f, 0.0f, 0.4f), 1.0f));
+            // -1 reads as "off" rather than as a note: a source with no note
+            // is the default, and a host automation lane should say so.
+            p.push_back (std::make_unique<juce::AudioParameterInt> (
+                juce::ParameterID (fem::id::sourceNote[i], 1), prefix + "Note",
+                -1, 127, -1, juce::AudioParameterIntAttributes()
+                    .withStringFromValueFunction ([] (int v, int)
+                    {
+                        return v < 0 ? juce::String ("Off")
+                                     : juce::MidiMessage::getMidiNoteName (v, true, true, 4);
+                    })));
+            // Standard deviation per axis, in plate coordinates. A quarter of
+            // the plate is already a wild scatter, so the range stops there.
+            p.push_back (std::make_unique<FloatParam> (
+                juce::ParameterID (fem::id::sourceSpread[i], 1), prefix + "Spread",
+                juce::NormalisableRange<float> (0.0f, 0.25f, 1.0e-3f, 0.6f), 0.0f));
+            p.push_back (std::make_unique<FloatParam> (
+                juce::ParameterID (fem::id::sourceSend[i], 1), prefix + "Send",
+                juce::NormalisableRange<float> (0.0f, 2.0f, 1.0e-3f, 0.5f),
+                first ? 1.0f : 0.0f));
+            p.push_back (std::make_unique<FloatParam> (
+                juce::ParameterID (fem::id::sourcePan[i], 1), prefix + "In Bal",
+                juce::NormalisableRange<float> (-1.0f, 1.0f, 1.0e-2f), 0.0f));
+            p.push_back (std::make_unique<juce::AudioParameterBool> (
+                juce::ParameterID (fem::id::sourceOn[i], 1), prefix + "On", first));
+        }
+    }
+
     p.push_back (std::make_unique<FloatParam> (
         juce::ParameterID (fem::id::inGain, 1), "In Gain",
         juce::NormalisableRange<float> (0.0f, 2.0f, 1.0e-3f, 0.5f), 0.0f));
@@ -350,6 +417,19 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         pk.pan   = pPickupPan[i]->load();
         pk.on    = pPickupOn[i]->load() > 0.5f;
     }
+    for (int i = 0; i < fem::maxSources; ++i)
+    {
+        auto& src = params.sources[i];
+        src.x        = pSourceX[i]->load();
+        src.y        = pSourceY[i]->load();
+        src.hammerMs = pSourceHammer[i]->load();
+        src.force    = pSourceForce[i]->load();
+        src.note     = (int) pSourceNote[i]->load();
+        src.spread   = pSourceSpread[i]->load();
+        src.send     = pSourceSend[i]->load();
+        src.pan      = pSourcePan[i]->load();
+        src.on       = pSourceOn[i]->load() > 0.5f;
+    }
     params.numModes = (int) pNumModes->load();
     synth.update (model, params);
 
@@ -388,10 +468,15 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             const auto msg = (*midiEvent).getMessage();
             if (msg.isNoteOn())
             {
-                // The note number is ignored for now: a note triggers, it no
-                // longer tunes. Per-source note mapping arrives with the
-                // sources, and it is the note number's only future job.
-                synth.noteOn (msg.getFloatVelocity());
+                // Sources claim notes; a note nothing claims falls back to
+                // the old behaviour, a hit at the last struck point with the
+                // global Hammer and Force. That keeps the plugin playable
+                // from a keyboard before any source has been mapped, which
+                // is how it ships.
+                const int note = msg.getNoteNumber();
+                const float velocity = msg.getFloatVelocity();
+                if (synth.strikeSourcesForNote (note, velocity) == 0)
+                    synth.noteOn (velocity);
                 midiStrikeCounter.fetch_add (1, std::memory_order_release);
             }
         }

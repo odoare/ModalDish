@@ -42,6 +42,21 @@ against analytic plates in `Tests/FemTests.cpp`.
   default, which is the single mono listening point this replaced. Pan is
   equal-power with the centre at unity, so a centred pickup at 0 dB is exactly
   what the mono output used to be.
+
+* **Sources** (up to eight, labelled a–h) are where the plate gets hit and
+  where the input goes in. Each has a position, its own **Hammer** time and
+  **Force**, a **Spread** (the standard deviation per axis of a random offset
+  applied to every hit, so no two strikes land in quite the same place), a
+  **Note** it answers to, and a **Send** with an **In Bal** — its share of the
+  plugin input and which side of the incoming stereo pair it takes. Only
+  source *a* is on out of the box, centred at full send, which is the single
+  injection point the input used to have. A MIDI note fires every enabled
+  source mapped to it, with velocity scaling that source's Force from zero;
+  a note no source claims falls back to a hit at the last struck point with
+  the global Hammer and Force knobs.
+
+  Both are linear mixes, so the audio loop costs the same whether one pickup
+  and one source are on or four and eight.
 * **In** injects the external audio input at the last hit point — the
   effect mode.
 
