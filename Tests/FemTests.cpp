@@ -24,6 +24,7 @@
 #include <FxmeTools/acoustics/FemMesh.h>
 #include <FxmeTools/acoustics/PlateModes.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -375,6 +376,92 @@ static void testStorageEquivalence()
            && rd.storageUsed == MatrixStorage::dense, "result reports the storage used");
 }
 
+// ---------------------------------------------------------------------------
+// 6. Boundary parameter vs polygon winding
+// ---------------------------------------------------------------------------
+// Boundary conditions are carried as arc-length fractions along the outline,
+// so whatever attaches them has to measure that fraction the way generateMesh
+// does. It reverses a clockwise polygon before parameterising it, which flips
+// the direction *and* moves the origin — attach a condition at t = 0.25 on a
+// clockwise outline and it lands at the far end of the plate. This pins the
+// precondition down so it cannot be rediscovered the hard way.
+static void testBoundaryParamWinding()
+{
+    std::printf ("\n== Boundary parameter follows a counter-clockwise outline ==\n");
+
+    std::vector<Point2> ccw;
+    for (int i = 0; i < 48; ++i)
+    {
+        const double a = 2.0 * M_PI * i / 48;
+        ccw.push_back ({ 0.5 + 0.40 * std::cos (a), 0.5 + 0.30 * std::sin (a) });
+    }
+    check (polygonArea (ccw) > 0.0, "the reference outline is counter-clockwise");
+
+    // Where the polygon itself puts a parameter, walking it as given.
+    const auto polygonPointAt = [] (const std::vector<Point2>& o, double t)
+    {
+        const size_t n = o.size();
+        std::vector<double> cum (n + 1, 0.0);
+        for (size_t i = 0; i < n; ++i)
+            cum[i + 1] = cum[i] + std::hypot (o[(i + 1) % n].x - o[i].x,
+                                              o[(i + 1) % n].y - o[i].y);
+        const double s = (t - std::floor (t)) * cum[n];
+        size_t seg = 0;
+        while (seg + 1 < n && cum[seg + 1] < s)
+            ++seg;
+        const double len = cum[seg + 1] - cum[seg];
+        const double u = len > 0.0 ? (s - cum[seg]) / len : 0.0;
+        const auto& p = o[seg];
+        const auto& q = o[(seg + 1) % n];
+        return Point2 { p.x + u * (q.x - p.x), p.y + u * (q.y - p.y) };
+    };
+
+    // ...and where the mesh puts it.
+    const auto meshPointAt = [] (const FemMesh& m, double t)
+    {
+        double bx = 0.0, by = 0.0;
+        int n = 0;
+        for (int v = 0; v < m.numVertices(); ++v)
+        {
+            const double vt = m.vertexParam[(size_t) v];
+            if (vt >= 0.0 && std::abs (vt - t) < 0.03)
+            {
+                bx += m.vertices[(size_t) v].x;
+                by += m.vertices[(size_t) v].y;
+                ++n;
+            }
+        }
+        return Point2 { n > 0 ? bx / n : 0.0, n > 0 ? by / n : 0.0 };
+    };
+
+    const auto mesh = generateMesh (ccw, 1.0 / 14.0);
+    double worst = 0.0;
+    for (const double t : { 0.0, 0.25, 0.5, 0.75 })
+    {
+        const auto a = polygonPointAt (ccw, t);
+        const auto b = meshPointAt (mesh, t);
+        worst = std::max (worst, std::hypot (a.x - b.x, a.y - b.y));
+    }
+    std::printf ("  worst gap between outline and mesh parameter: %.3f\n", worst);
+    // A boundary sample sits within about half an element of the outline, so
+    // the tolerance is the element size rather than machine precision.
+    check (worst < 1.0 / 14.0, "mesh parameter follows the outline as given");
+
+    // The same shape wound the other way disagrees, which is the trap.
+    auto cw = ccw;
+    std::reverse (cw.begin(), cw.end());
+    const auto cwMesh = generateMesh (cw, 1.0 / 14.0);
+    double cwWorst = 0.0;
+    for (const double t : { 0.25, 0.75 })
+    {
+        const auto a = polygonPointAt (cw, t);
+        const auto b = meshPointAt (cwMesh, t);
+        cwWorst = std::max (cwWorst, std::hypot (a.x - b.x, a.y - b.y));
+    }
+    std::printf ("  same shape wound clockwise: %.3f\n", cwWorst);
+    check (cwWorst > 0.3, "a clockwise outline does NOT agree - callers must normalise");
+}
+
 int main()
 {
     std::printf ("fxme::acoustics plate FEM validation\n");
@@ -383,6 +470,7 @@ int main()
     testMixedBoundary();
     testTensionAndMesh();
     testStorageEquivalence();
+    testBoundaryParamWinding();
 
     std::printf ("\n%s (%d failure%s)\n",
                  failures == 0 ? "ALL TESTS PASSED" : "TESTS FAILED",

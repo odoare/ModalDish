@@ -148,7 +148,7 @@ private:
     std::vector<float> modalBuf, fieldBuf;   // scratch for the live field
     float fieldRef = 0.0f;                   // held amplitude reference
 
-    juce::Rectangle<int> designPanel, dynPanel, excitePanel, cascPanel, ioPanel, legendArea;
+    juce::Rectangle<int> designPanel, dynPanel, excitePanel, cascPanel, ioPanel;
     juce::Rectangle<int> meterArea;
 
     // "Advanced" toggle, in the Dynamics panel next to what it extends:

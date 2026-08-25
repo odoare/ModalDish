@@ -39,6 +39,7 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     addChildComponent (plateView);   // hidden until a mesh exists
 
     canvas.bcColour = [] (int bc) { return fem::theme::bcColour (bc); };
+    canvas.bcName   = [] (int bc) { return juce::String (fem::theme::bcName (bc)); };
     canvas.setShape (processor.shape().outline,
                      processor.shape().segStarts,
                      processor.shape().segBcs);
@@ -314,7 +315,7 @@ void FemPlateAudioProcessorEditor::updateWindowSize()
     // The cascade column only exists in Perform with Advanced up, so the
     // window must not stay wide when design mode hides it. It is narrower
     // than the main column because it is a single stack of number boxes.
-    setSize ((advancedVisible && ! designMode) ? 1302 : 1142, 730);
+    setSize ((advancedVisible && ! designMode) ? 1142 : 1022, 730);
 }
 
 void FemPlateAudioProcessorEditor::syncShapeToProcessor (bool geometryChanged)
@@ -833,23 +834,6 @@ void FemPlateAudioProcessorEditor::paint (juce::Graphics& g)
         }
     }
 
-    // Boundary-condition legend.
-    if (! legendArea.isEmpty())
-    {
-        auto r = legendArea;
-        const int itemW = r.getWidth() / 4;
-        g.setFont (juce::Font (juce::FontOptions (11.0f)));
-        for (int bc = 0; bc < 4; ++bc)
-        {
-            auto cell = r.removeFromLeft (itemW);
-            const auto swatch = cell.removeFromLeft (14).withSizeKeepingCentre (10, 10);
-            g.setColour (fem::theme::bcColour (bc));
-            g.fillRect (swatch);
-            g.setColour (fem::theme::dimText);
-            g.drawText (fem::theme::bcName (bc), cell.reduced (3, 0),
-                        juce::Justification::centredLeft);
-        }
-    }
 }
 
 void FemPlateAudioProcessorEditor::resized()
@@ -892,14 +876,14 @@ void FemPlateAudioProcessorEditor::resized()
     juce::Rectangle<int> colB;
     if (advancedVisible && ! designMode)
     {
-        colB = area.removeFromRight (150);
+        colB = area.removeFromRight (110);
         area.removeFromRight (10);
     }
-    auto colA = area.removeFromRight (270);
+    auto colA = area.removeFromRight (150);
     area.removeFromRight (10);
 
     designPanel = dynPanel = excitePanel = ioPanel = cascPanel = {};
-    legendArea = meterArea = {};
+    meterArea = {};
 
     if (designMode)
     {
@@ -984,15 +968,9 @@ void FemPlateAudioProcessorEditor::resized()
     strip.removeFromLeft (8);
     statusLabel.setBounds (strip);
 
-    if (designMode)
-    {
-        area.removeFromBottom (4);
-        legendArea = area.removeFromBottom (18);
-        // Held to a readable width instead of stretched across the whole
-        // sketch: four swatches spread over 800 px read as four unrelated
-        // labels rather than as one key.
-        legendArea = legendArea.withWidth (juce::jmin (legendArea.getWidth(), 420));
-    }
+    // The boundary-condition key is drawn by the sketch itself, in its own
+    // bottom-right corner (ShapeCanvas::paint) — a child component paints
+    // after its parent, so anything the editor drew there would be covered.
 
     canvas.setBounds (area);
     plateView.setBounds (area);

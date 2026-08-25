@@ -27,11 +27,18 @@ namespace
                                            juce::Colour (0xffe0784a), juce::Colour (0xff9ac93c) };
         return c[juce::jlimit (0, 3, bc)];
     }
+
+    juce::String defaultBcName (int bc)
+    {
+        static const char* n[4] = { "Free", "Support", "Clamp", "Slide" };
+        return n[juce::jlimit (0, 3, bc)];
+    }
 }
 
 ShapeCanvas::ShapeCanvas()
 {
     bcColour = defaultBcColour;
+    bcName = defaultBcName;
     makeStandardShape (false);   // sensible default until the host sets a shape
 }
 
@@ -182,6 +189,19 @@ void ShapeCanvas::setShape (std::vector<Point2> newOutline,
 //==============================================================================
 void ShapeCanvas::rebuildArcTable()
 {
+    // Keep the outline counter-clockwise, because generateMesh does.
+    //
+    // The boundary conditions are carried as arc-length fractions along the
+    // outline, and both sides have to measure that fraction the same way.
+    // generateMesh reverses a clockwise polygon before parameterising it, so
+    // that its boundary parameter always walks counter-clockwise — which for
+    // a clockwise outline made the mesh's t run backwards from the sketch's,
+    // and put every boundary condition somewhere else on the plate than where
+    // it was drawn. Normalising here, at the one place the outline is ever
+    // re-tabulated, means the two agree by construction.
+    if (outlinePts.size() >= 3 && fxme::acoustics::polygonArea (outlinePts) < 0.0)
+        std::reverse (outlinePts.begin(), outlinePts.end());
+
     const size_t n = outlinePts.size();
     arcCum.assign (n + 1, 0.0);
     for (size_t i = 0; i < n; ++i)
@@ -602,6 +622,41 @@ void ShapeCanvas::paint (juce::Graphics& g)
     }
     g.drawText (hint, getLocalBounds().reduced (8).removeFromBottom (16),
                 juce::Justification::centredLeft);
+    // Boundary-condition key, inside the plot at the bottom right: it belongs
+    // next to the colours it explains rather than on the far side of the
+    // window, and drawing it here rather than in the editor is what puts it
+    // *over* the sketch instead of under a child component that paints last.
+    if (bcColour != nullptr && bcName != nullptr)
+    {
+        // Fixed text column rather than a measured one: the four names are
+        // short and known, and measuring would pull in a Font API that has
+        // moved twice.
+        constexpr int itemH = 14, swatch = 9, padX = 8, padY = 6, textW = 54;
+        g.setFont (juce::Font (juce::FontOptions (11.0f)));
+
+        const int boxW = swatch + 6 + textW + 2 * padX;
+        const int boxH = 4 * itemH + 2 * padY;
+        auto box = juce::Rectangle<int> (getWidth() - boxW - 10,
+                                         getHeight() - boxH - 10, boxW, boxH);
+
+        g.setColour (juce::Colour (0xff1d2430).withAlpha (0.82f));
+        g.fillRoundedRectangle (box.toFloat(), 5.0f);
+        g.setColour (juce::Colour (0xff35415a));
+        g.drawRoundedRectangle (box.toFloat().reduced (0.5f), 5.0f, 1.0f);
+
+        auto r = box.reduced (padX, padY);
+        for (int bc = 0; bc < 4; ++bc)
+        {
+            auto line = r.removeFromTop (itemH);
+            const auto sw = line.removeFromLeft (swatch)
+                                .withSizeKeepingCentre (swatch, swatch);
+            g.setColour (bcColour (bc));
+            g.fillRect (sw);
+            g.setColour (juce::Colour (0xff97a1b4));
+            g.drawText (bcName (bc), line.reduced (6, 0), juce::Justification::centredLeft);
+        }
+    }
 }
+
 
 } // namespace fem

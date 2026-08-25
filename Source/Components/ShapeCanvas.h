@@ -72,6 +72,11 @@ public:
         fxme::acoustics::BoundaryCondition), shared with legends. */
     std::function<juce::Colour (int)> bcColour;
 
+    /** Short name of a boundary condition, for the legend the canvas draws in
+        its own bottom-right corner. Supplied by the host for the same reason
+        bcColour is: the canvas draws the key, the application owns the words. */
+    std::function<juce::String (int)> bcName;
+
     std::function<void()> onShapeChanged;     // outline geometry changed
     std::function<void()> onBoundaryChanged;  // segment points / conditions changed
 
