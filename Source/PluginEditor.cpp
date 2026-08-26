@@ -48,6 +48,25 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
 
     plateView.setColours (fem::theme::plateBg, fem::theme::plateGrid,
                           fem::theme::fieldNeg, fem::theme::fieldPos);
+
+    addChildComponent (plateView3D);
+    // Black ground and a white mesh, rather than the flat view's palette: the
+    // 3D picture is read as a lit surface, and the higher contrast is what
+    // makes the wireframe describe the relief instead of tinting it.
+    plateView3D.setColours (juce::Colours::black, juce::Colours::white,
+                            fem::theme::fieldNeg, fem::theme::fieldPos);
+    plateView3D.paintOverlay = [this] (juce::Graphics& g,
+                                       fxme::acoustics::FemView3DComponent& v)
+    {
+        // Only the status hint: the markers and the hit flashes are tied to
+        // plate positions, and a screen point in the deformed view is not one.
+        juce::ignoreUnused (v);
+        g.setColour (fem::theme::dimText);
+        g.setFont (juce::Font (juce::FontOptions (11.0f)));
+        g.drawText ("drag to rotate - wheel to zoom",
+                    getLocalBounds().reduced (8).removeFromBottom (16),
+                    juce::Justification::centredLeft);
+    };
     plateView.onPlateClick = [this] (double x, double y, const juce::MouseEvent& e)
     {
         // A marker under the cursor claims the click: alt turns it off, a
@@ -121,6 +140,10 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     viewBox.addItem ("Modes", 1);
     viewBox.addItem ("Displacement", 2);
     viewBox.addItem ("Velocity", 3);
+    // Ids 4 and 5 are the same two quantities as a deformed surface, so the
+    // odd ids stay "velocity" and selectedQuantity() needs no special case.
+    viewBox.addItem ("Displacement 3D", 4);
+    viewBox.addItem ("Velocity 3D", 5);
     viewBox.setSelectedId (1, juce::dontSendNotification);
     viewBox.onChange = [this]
     {
@@ -128,6 +151,7 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
         // view is showing the plate's live motion.
         modeViewKnob.setEnabled (! showingLiveField());
         fieldRef = 0.0f;
+        updatePlateViewVisibility();
         refreshField();
         refreshStatus();
     };
@@ -276,7 +300,7 @@ void FemPlateAudioProcessorEditor::setDesignMode (bool design)
 {
     designMode = design;
     canvas.setVisible (design);
-    plateView.setVisible (! design);
+    updatePlateViewVisibility();
     designButton.setToggleState (design, juce::dontSendNotification);
     performButton.setToggleState (! design, juce::dontSendNotification);
 
@@ -340,8 +364,12 @@ void FemPlateAudioProcessorEditor::syncShapeToProcessor (bool geometryChanged)
 
 void FemPlateAudioProcessorEditor::refreshMeshAndField()
 {
+    // Every view of the mesh gets it here, and this is the only place any of
+    // them does: a view left holding a null mesh draws nothing at all, with
+    // no other symptom to go on.
     const auto mesh = processor.getDisplayMesh();
     plateView.setMesh (mesh);
+    plateView3D.setMesh (mesh);
     // The shape editor draws the same mesh, in its own coordinates, so the
     // grid is visible while it is being designed.
     canvas.setMesh (mesh);
@@ -355,8 +383,26 @@ bool FemPlateAudioProcessorEditor::showingLiveField() const
 
 fem::PlateSynth::Field FemPlateAudioProcessorEditor::selectedQuantity() const
 {
-    return viewBox.getSelectedId() == 3 ? fem::PlateSynth::Field::velocity
-                                        : fem::PlateSynth::Field::displacement;
+    const int id = viewBox.getSelectedId();
+    return (id == 3 || id == 5) ? fem::PlateSynth::Field::velocity
+                                : fem::PlateSynth::Field::displacement;
+}
+
+bool FemPlateAudioProcessorEditor::showing3D() const
+{
+    return viewBox.getSelectedId() >= 4;
+}
+
+juce::Component& FemPlateAudioProcessorEditor::activePlateView()
+{
+    return showing3D() ? (juce::Component&) plateView3D : (juce::Component&) plateView;
+}
+
+void FemPlateAudioProcessorEditor::updatePlateViewVisibility()
+{
+    const bool perform = ! designMode;
+    plateView.setVisible (perform && ! showing3D());
+    plateView3D.setVisible (perform && showing3D());
 }
 
 void FemPlateAudioProcessorEditor::refreshField()
@@ -370,14 +416,21 @@ void FemPlateAudioProcessorEditor::refreshField()
     // A mode shape is a still picture with no natural scale: let the view
     // normalise it on its own maximum.
     plateView.setFieldScale (0.0f);
+    plateView3D.setFieldScale (0.0f);
 
     const auto* model = processor.getCurrentModel();
     const int k = (int) modeViewKnob.getValue();
     // Only FEM modes have a mesh shape; tail modes show the bare grid.
     if (model != nullptr && k >= 1 && k <= model->numFemModes())
+    {
         plateView.setField (model->modes.shapes[(size_t) (k - 1)]);
+        plateView3D.setField (model->modes.shapes[(size_t) (k - 1)]);
+    }
     else
+    {
         plateView.setField ({});
+        plateView3D.setField ({});
+    }
 }
 
 void FemPlateAudioProcessorEditor::refreshLiveField()
@@ -391,6 +444,7 @@ void FemPlateAudioProcessorEditor::refreshLiveField()
     if (numFem < 1)
     {
         plateView.setField ({});
+        plateView3D.setField ({});
         return;
     }
 
@@ -437,8 +491,16 @@ void FemPlateAudioProcessorEditor::refreshLiveField()
     // 0.02 is about a third of that reference hit, so a normal strike starts
     // above it and everything quieter than it fades out proportionally.
     fieldRef = juce::jmax (juce::jmax (peak, 0.02f), fieldRef * 0.995f);
-    plateView.setFieldScale (fieldRef);
-    plateView.setField (fieldBuf);
+    if (showing3D())
+    {
+        plateView3D.setFieldScale (fieldRef);
+        plateView3D.setField (fieldBuf);
+    }
+    else
+    {
+        plateView.setFieldScale (fieldRef);
+        plateView.setField (fieldBuf);
+    }
 }
 
 void FemPlateAudioProcessorEditor::refreshStatus()
@@ -471,9 +533,13 @@ void FemPlateAudioProcessorEditor::refreshStatus()
             text << " - " << model->numModes() << " modes";
             const int k = showingLiveField() ? 0 : (int) modeViewKnob.getValue();
             if (showingLiveField())
+            {
                 text << (selectedQuantity() == fem::PlateSynth::Field::velocity
                             ? " - showing plate velocity"
                             : " - showing plate displacement");
+                if (showing3D())
+                    text << " in 3D (drag to rotate, wheel to zoom)";
+            }
             else if (k >= 1 && k <= model->numModes())
             {
                 // f_k = f1 * sqrt(omega_k^2 / omega_1^2) at the current tension.
@@ -736,7 +802,7 @@ void FemPlateAudioProcessorEditor::timerCallback()
         progressValue = (double) juce::jmax (0.0f, processor.getComputeProgress());
         refreshStatus();
     }
-    if (showingLiveField() && plateView.isVisible())
+    if (showingLiveField() && activePlateView().isVisible())
         refreshLiveField();
 
     for (int ch = 0; ch < 2; ++ch)
@@ -780,8 +846,8 @@ void FemPlateAudioProcessorEditor::timerCallback()
         };
         hitFlashes.erase (std::remove_if (hitFlashes.begin(), hitFlashes.end(), expired),
                           hitFlashes.end());
-        if (plateView.isVisible())
-            plateView.repaint();
+        if (activePlateView().isVisible())
+            activePlateView().repaint();
     }
 }
 
@@ -974,6 +1040,7 @@ void FemPlateAudioProcessorEditor::resized()
 
     canvas.setBounds (area);
     plateView.setBounds (area);
+    plateView3D.setBounds (area);
 }
 
 

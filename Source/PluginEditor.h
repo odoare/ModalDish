@@ -61,6 +61,13 @@ private:
     void refreshField();
     void refreshLiveField();             // live plate field, from the timer
     bool showingLiveField() const;
+    /** True when the view selector is on one of the three-dimensional
+        entries, in which case plateView3D is on screen instead of plateView. */
+    bool showing3D() const;
+    /** Whichever plate view the selector currently calls for. */
+    juce::Component& activePlateView();
+    /** Shows whichever plate view the mode and selector call for. */
+    void updatePlateViewVisibility();
     fem::PlateSynth::Field selectedQuantity() const;
     void refreshStatus();
     void setOutputPosition (double x, double y);
@@ -110,6 +117,10 @@ private:
     // Left: the two stacked views + the action strip.
     fem::ShapeCanvas canvas;
     fxme::acoustics::FemViewComponent plateView;
+    // The same mesh and field as a deformed surface. A separate component
+    // rather than a mode of the flat one: they share no drawing at all, and
+    // only one is ever on screen.
+    fxme::acoustics::FemView3DComponent plateView3D;
     juce::TextButton designButton { "Modal design" }, performButton { "Perform" };
     juce::TextButton computeButton { "Compute" };
     double progressValue = 0.0;
