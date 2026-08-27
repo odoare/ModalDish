@@ -12,6 +12,7 @@
       5. Sources: MIDI note dispatch.
       6. Published hit positions.
       7. Stereo spread of the statistical tail.
+      8. Notes: pitch, glide, and that striking and tuning stay separate.
 
     Both features are linear mixes that collapse into two per-mode vectors
     (PlateSynth::updatePickupMix / updateSourceMix), which is what keeps the
@@ -489,6 +490,80 @@ int main()
         // shimmer off centre, which is what a delay would have done.
         check (std::abs (mean) < pair,
                "the tail is scattered across the image, not shifted to one side");
+    }
+
+    // --- 8. Notes: pitch, glide, and the separation of the two -------------
+    // A note does two independent things, and the processor routes them by
+    // MIDI channel, so the synth has to offer them as two calls that do not
+    // imply each other: glideToNote must not strike, noteOn must not retune.
+    std::printf ("\n== Notes, pitch and glide ==\n");
+    {
+        // Runs the synth for `ms` and returns where the pitch got to.
+        auto advance = [&] (fem::PlateSynth& s, double ms, double rate)
+        {
+            const int n = (int) (ms * 1.0e-3 * rate);
+            for (int i = 0; i < n; ++i)
+            {
+                float l = 0.0f, r = 0.0f;
+                s.processSample (0.0f, 0.0f, l, r);
+            }
+            return (double) s.getBaseFrequency();
+        };
+
+        auto p = basePatch();
+        p.glideMs = 50.0f;
+
+        fem::PlateSynth s; s.prepare (fs); s.update (&model, p);
+        s.glideToNote (69);                       // A4
+        std::printf ("  first note (69): %.1f Hz\n", (double) s.getBaseFrequency());
+        check (std::abs (s.getBaseFrequency() - 440.0f) < 1.0f,
+               "a note tunes mode 1 to its pitch");
+
+        // The first note lands directly: there is nothing to glide from.
+        check (std::abs (advance (s, 1.0, fs) - 440.0) < 1.0,
+               "the first note of the session does not glide");
+
+        // The second does. Halfway through it must be on the way, not there.
+        s.glideToNote (81);                       // A5, an octave up
+        const double at5 = advance (s, 5.0, fs);
+        const double at60 = advance (s, 55.0, fs);
+        std::printf ("  glide 50 ms to note 81: 5 ms -> %.1f Hz, 60 ms -> %.1f Hz\n", at5, at60);
+        check (at5 > 445.0 && at5 < 860.0, "a second note glides rather than jumping");
+        check (std::abs (at60 - 880.0) < 1.0, "and arrives within the glide time");
+
+        // Same glide, twice the sample rate, same wall-clock time. A step
+        // picked per decimated update rather than per second would halve here.
+        auto glidePosition = [&] (double rate)
+        {
+            auto q = basePatch();
+            q.glideMs = 50.0f;
+            fem::PlateSynth t; t.prepare (rate); t.update (&model, q);
+            t.glideToNote (69);
+            advance (t, 1.0, rate);
+            t.glideToNote (81);
+            return advance (t, 25.0, rate);       // half way through
+        };
+        const double half48 = glidePosition (48000.0);
+        const double half96 = glidePosition (96000.0);
+        std::printf ("  half way: 48 kHz %.1f Hz, 96 kHz %.1f Hz\n", half48, half96);
+        check (std::abs (12.0 * std::log2 (half96 / half48)) < 0.2,
+               "the glide takes the same time at any sample rate");
+
+        // Tuning does not strike.
+        fem::PlateSynth quiet; quiet.prepare (fs); quiet.update (&model, p);
+        quiet.glideToNote (69);
+        double pk = 0.0, d = 0.0;
+        render (quiet, 0.5, [] (int, float&, float&) {}, pk, d);
+        std::printf ("  peak after glideToNote alone: %.3e\n", pk);
+        check (pk < 1e-9, "tuning the plate does not strike it");
+
+        // ...and striking does not tune.
+        fem::PlateSynth hit; hit.prepare (fs); hit.update (&model, p);
+        hit.glideToNote (69);
+        const float before = hit.getBaseFrequency();
+        hit.noteOn (1.0f);
+        check (std::abs (hit.getBaseFrequency() - before) < 1e-6f,
+               "striking the plate does not move its pitch");
     }
 
     std::printf("\n%s (%d failure%s)\n", failures==0?"ALL TESTS PASSED":"TESTS FAILED",

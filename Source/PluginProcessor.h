@@ -188,6 +188,9 @@ private:
     std::atomic<float>* pForce = nullptr;
     std::atomic<float>* pGlide = nullptr;
     std::atomic<float>* pNonlin = nullptr;
+    std::atomic<float>* pSrcChannel { nullptr };
+    std::atomic<float>* pFreqChannel { nullptr };
+    std::atomic<float>* pUnmappedHit { nullptr };
     std::atomic<float>* pCascade { nullptr };
     std::atomic<float>* pCascDrive = nullptr;
     std::atomic<float>* pCascAttack = nullptr;

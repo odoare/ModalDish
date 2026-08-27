@@ -103,6 +103,9 @@ FemPlateAudioProcessor::FemPlateAudioProcessor()
     pHammer   = apvts.getRawParameterValue (fem::id::hammerMs);
     pForce    = apvts.getRawParameterValue (fem::id::force);
     pGlide    = apvts.getRawParameterValue (fem::id::glide);
+    pSrcChannel  = apvts.getRawParameterValue (fem::id::srcChannel);
+    pFreqChannel = apvts.getRawParameterValue (fem::id::freqChannel);
+    pUnmappedHit = apvts.getRawParameterValue (fem::id::unmappedHit);
     pNonlin   = apvts.getRawParameterValue (fem::id::nonlin);
     pCascade     = apvts.getRawParameterValue (fem::id::cascade);
     pCascDrive   = apvts.getRawParameterValue (fem::id::cascDrive);
@@ -201,9 +204,27 @@ juce::AudioProcessorValueTreeState::ParameterLayout FemPlateAudioProcessor::crea
     // PlateSynth is intact, so this comes back as a one-line change if notes
     // are ever given the tuning again.
     p.push_back (std::make_unique<FloatParam> (
-        juce::ParameterID (fem::id::glide, 1), "Glide",
-        juce::NormalisableRange<float> (0.0f, 2000.0f, 0.0f, 0.35f), 0.0f,
+        juce::ParameterID (fem::id::glide, 1), "Glide", logRange (0.1f, 100.0f), 0.1f,
         juce::AudioParameterFloatAttributes().withLabel ("ms")));
+
+    // Which MIDI channel does what. A note triggers sources and a note sets
+    // the pitch, and these decide whether the same note does both: leave them
+    // equal (or Sources omni) to play the plate from one keyboard, or split
+    // them to tune from a second controller without striking.
+    //
+    // Frequency ships Off, which is the behaviour that has been in place while
+    // notes were per-source triggers. Set it to a channel to have the plate
+    // follow the keyboard again.
+    p.push_back (std::make_unique<juce::AudioParameterInt> (
+        juce::ParameterID (fem::id::srcChannel, 1), "Src Chan", 0, 16, 0,
+        juce::AudioParameterIntAttributes().withStringFromValueFunction (
+            [] (int v, int) { return v == 0 ? juce::String ("Omni") : juce::String (v); })));
+    p.push_back (std::make_unique<juce::AudioParameterInt> (
+        juce::ParameterID (fem::id::freqChannel, 1), "Freq Chan", 0, 16, 0,
+        juce::AudioParameterIntAttributes().withStringFromValueFunction (
+            [] (int v, int) { return v == 0 ? juce::String ("Off") : juce::String (v); })));
+    p.push_back (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID (fem::id::unmappedHit, 1), "Unmapped Hit", true));
 
     // Geometric nonlinearity (see PlateSynth.h): Berger dynamic tension and
     // cubic mode-cascade feedback, both 0 = linear model.
@@ -462,6 +483,13 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     const float inGain = pInGain->load();
     const float outGain = juce::Decibels::decibelsToGain (pOutGain->load());
 
+    // Read once per block rather than per note: a channel assignment that
+    // changed between two notes of the same buffer would be a distinction
+    // nobody could play deliberately.
+    const int srcChannel  = (int) pSrcChannel->load();
+    const int freqChannel = (int) pFreqChannel->load();
+    const bool unmappedHit = pUnmappedHit->load() > 0.5f;
+
     const int numSamples = buffer.getNumSamples();
     const int numIns = getTotalNumInputChannels();
     const int numOuts = getTotalNumOutputChannels();
@@ -494,6 +522,7 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 // is how it ships.
                 const int note = msg.getNoteNumber();
                 const float velocity = msg.getFloatVelocity();
+                const int channel = msg.getChannel();
 
                 const int armed = midiLearnArmed.load (std::memory_order_acquire);
                 if (armed >= 0)
@@ -501,14 +530,33 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     // Learning: capture and swallow. Firing the source as well
                     // would make every mapping start with a hit nobody asked
                     // for, which is exactly the note being used to teach.
+                    // Channel is not part of the mapping, so any channel can
+                    // teach; routing is what the channel controls decide.
                     midiLearnSource.store (armed, std::memory_order_relaxed);
                     midiLearnNote.store (note, std::memory_order_release);
                     midiLearnArmed.store (-1, std::memory_order_release);
                 }
                 else
                 {
-                    if (synth.strikeSourcesForNote (note, velocity) == 0)
-                        synth.noteOn (velocity);
+                    // Pitch and trigger are separate and both are gated by
+                    // their own channel, so a note can do either, both or
+                    // neither. Pitch first: a note that also strikes should
+                    // strike the plate it is about to become, not the one it
+                    // was.
+                    if (freqChannel > 0 && channel == freqChannel)
+                        synth.glideToNote (note);
+
+                    if (srcChannel == 0 || channel == srcChannel)
+                    {
+                        // A note no source claims falls back to a hit at the
+                        // last touched point, unless that is switched off:
+                        // once every note is mapped, a stray one landing on
+                        // wherever the mouse was last is a surprise, not a
+                        // feature.
+                        if (synth.strikeSourcesForNote (note, velocity) == 0
+                            && unmappedHit)
+                            synth.noteOn (velocity);
+                    }
                 }
             }
         }

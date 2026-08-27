@@ -141,13 +141,20 @@
 
     Played notes
     ------------
-    noteOn() aims the base frequency f1 at the note (mode 1 lands on it, the
-    rest of the spectrum follows the ratios of the plate) and strikes at the
-    last hit point with velocity/127 scaled by Force. The pitch travels in
-    log2, so a glide takes the Glide time whatever the interval, and it is
-    stepped on the same 32-sample grid as the Berger tension, sharing its
-    ~2-cent retune throttle. The Freq knob is not glided: it sets the pitch
-    directly, and so does the first note of the session.
+    A note does two things, and they are two calls, not one. glideToNote()
+    aims the base frequency f1 at the note (mode 1 lands on it, the rest of
+    the spectrum follows the ratios of the plate); noteOn() strikes at the
+    last hit point with velocity/127 scaled by Force. The processor gates
+    each on its own MIDI channel, so a note can tune, strike, do both, or do
+    neither — and eight sources mapped to their own notes never end up
+    fighting over the tuning.
+
+    The pitch travels in log2, so a glide takes the Glide time whatever the
+    interval, and it is stepped on the same 32-sample grid as the Berger
+    tension, sharing its ~2-cent retune throttle. The step is sized from the
+    Glide time, the sample rate and the update period together, so the glide
+    lasts the same wall-clock time at any rate. The Freq knob is not glided:
+    it sets the pitch directly, and so does the first note of the session.
 
     Everything here runs on the audio thread and is allocation-free; the
     model pointer is published by the processor (see PluginProcessor).
@@ -228,7 +235,7 @@ public:
         float force     = 1.0f;     // hammer force amplitude
         float nonlin    = 0.0f;
         float cascade   = 0.0f;     // 0..1 upward-cascade amount, 0 = off     // 0..1 dynamic-tension (Berger) amount
-        float glideMs   = 0.0f;     // portamento; inert while notes only trigger
+        float glideMs   = 0.1f;     // portamento time between played notes (ms)
 
         // Cascade tuning set (see the class comment; defaults = voiced values).
         float cascDrive     = 8.0f;    // tanh knee B
@@ -277,16 +284,25 @@ public:
 
     /** Audio thread: a MIDI note strikes the plate at the last hit point with
         `velocity` (0..1, i.e. MIDI velocity / 127, which the Force parameter
-        then scales).
+        then scales). Pitch is not involved: see glideToNote.
 
-        A note no longer sets the pitch. It used to retune the plate so mode 1
-        landed on the note, gliding there over the Glide time; notes are
-        becoming per-source triggers instead, and a trigger that also moved
-        the whole plate's tuning would make eight independently mapped sources
-        fight over it. The glide machinery below is left in place and still
-        governs Freq knob moves, so restoring the behaviour is a one-line
-        change rather than a rewrite. */
+        Striking and tuning are deliberately two calls rather than one. Eight
+        sources can each be mapped to their own note, and a trigger that also
+        moved the whole plate's tuning would make them fight over it; keeping
+        them apart is what lets the processor route notes by channel, so one
+        channel can play the plate and another can tune it. */
     void noteOn (float velocity) noexcept;
+
+    /** Audio thread: aim the base frequency at `note` (mode 1 lands on it and
+        the rest of the spectrum follows the plate's own ratios), gliding
+        there over the Glide time. Does not strike.
+
+        The travel is in log2, so a glide takes the Glide time whatever the
+        interval, and it is stepped on the same decimated grid as the Berger
+        tension, sharing its ~2-cent retune throttle. The first note of the
+        session lands directly, as the Freq knob does: there is nothing to
+        glide from. */
+    void glideToNote (int note) noexcept;
 
     //==========================================================================
     // Where the plate was actually struck, published for display.
@@ -455,10 +471,9 @@ private:
 
     // Base-frequency glide. The bank is tuned at exp2(f1Log); played notes
     // move f1Log towards f1LogTarget by glideStep per decimated update.
-    // Never assigned: the glide is inert (the parameter is kept, its control
-    // is not). Whoever wires it up must derive the step from the glide time
-    // and fs, not pick a step per update, or it becomes another duration that
-    // depends on the sample rate.
+    // glideToNote sizes the step from the Glide time, the sample rate and the
+    // update period together, so the glide lasts the same wall-clock time at
+    // any rate — a step picked per update would not (see depleteTauSec).
     // (log2 domain, so a glide takes the same time whatever the interval),
     // and the bank is rewritten when it has drifted ~2 cents from the pitch
     // it currently sounds at — the same throttle the Berger glide uses.

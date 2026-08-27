@@ -24,6 +24,23 @@ namespace fem::id
     inline constexpr const char* hammerMs  = "hammer";    // half-sine shock duration (ms)
     inline constexpr const char* force     = "force";     // hammer force amplitude
     inline constexpr const char* glide     = "glide";     // portamento time between notes (ms)
+
+    // MIDI channel routing. Notes do two independent things -- they trigger
+    // sources and they set the plate's pitch -- and these say which channel
+    // does which, so the two can be split across a keyboard split or a second
+    // controller rather than fighting over the same notes.
+    //   sources:   0 = omni (any channel), 1..16 = that channel only
+    //   frequency: 0 = off (pitch does not follow MIDI), 1..16 = that channel
+    inline constexpr const char* srcChannel  = "srcchannel";
+    inline constexpr const char* freqChannel = "freqchannel";
+
+    // What a note on the sources channel does when no source claims it:
+    // strike the last touched point, or nothing at all. On is how the plugin
+    // has always behaved and is what makes it playable from a keyboard before
+    // any source is mapped; off is what you want once every note is mapped
+    // and a stray one should stay silent rather than hit the last place you
+    // happened to click.
+    inline constexpr const char* unmappedHit = "unmappedhit";
     inline constexpr const char* nonlin    = "nonlin";    // Berger tension feedback amount
 
     // Cascade. Two controls, not three: the amount scales the whole ladder

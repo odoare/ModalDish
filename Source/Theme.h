@@ -52,6 +52,21 @@ namespace fem::theme
     inline const juce::Colour pickupAccent { 0xffd96cd0 };  // orchid, = ioAccent
     inline const juce::Colour sourceAccent { 0xff5ad1a5 };  // teal
 
+    // Control-group accents. The right column is organised into groups and
+    // these name them. Kept separate from the semantic accents above because
+    // a group colour says where a control *sits*, not what it does — the same
+    // knob would keep its meaning in a differently coloured panel.
+    //
+    // Red and green are deliberately not the coral and lime of bcColour
+    // below: those two are drawn on the plate itself a few hundred pixels
+    // away, and two reds that nearly match read as a mistake. Cyan does
+    // coincide with SimplySupported, which is the one collision left.
+    inline const juce::Colour dynGroup    { 0xff4cc9f0 };   // cyan
+    inline const juce::Colour freqGroup   { 0xffe8c341 };   // yellow
+    inline const juce::Colour hammerGroup { 0xffe04a5a };   // red
+    inline const juce::Colour ioGroup     { 0xff4fc98a };   // green
+    inline const juce::Colour transGroup  { 0xff8fb8e8 };   // light blue
+
     // Plate display: canvas background and the diverging contour map ends.
     inline const juce::Colour plateBg   { 0xff141a24 };
     inline const juce::Colour plateGrid { 0xff4a5670 };

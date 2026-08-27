@@ -136,9 +136,11 @@ private:
 
     // Right column — dynamics.
     fxme::FxmeNumberBox f1Knob, tensionKnob, hammerKnob, forceKnob,
-                        nonlinKnob, cascadeKnob, viscKnob, matKnob, deplKnob;
+                        nonlinKnob, cascadeKnob, viscKnob, matKnob, deplKnob,
+                        glideKnob, srcChanKnob, freqChanKnob;
     std::unique_ptr<SliderAttachment> f1Att, tensionAtt, hammerAtt,
                                       forceAtt, nonlinAtt, cascadeAtt, viscAtt,
+                                      glideAtt, srcChanAtt, freqChanAtt,
                                       matAtt, deplAtt;
 
     // Right column — cascade tuning (Advanced). Deplete moved out to the
@@ -171,13 +173,18 @@ private:
     std::vector<float> modalBuf, fieldBuf;   // scratch for the live field
     float fieldRef = 0.0f;                   // held amplitude reference
 
-    juce::Rectangle<int> designPanel, dynPanel, excitePanel, cascPanel, ioPanel;
-    juce::Rectangle<int> pointsPanel;
+    juce::Rectangle<int> designPanel, dynPanel, freqPanel, excitePanel,
+                         cascPanel, ioPanel, pointsPanel;
+
+    /** Whether an unmapped note on the sources channel hits the last touched
+        point. A parameter-bound toggle rather than a knob, in the group whose
+        channel controls decide which notes reach it at all. */
+    std::unique_ptr<fxme::FxmeButton> unmappedHitButton;
     juce::Rectangle<int> meterArea;
 
     // "Advanced" toggle, in the Dynamics panel next to what it extends:
     // shows the cascade tuning column and widens the window.
-    juce::TextButton advancedButton { "Advanced" };
+    juce::TextButton advancedButton { "A >" };
     bool advancedVisible = false;
     bool designMode = true;
 

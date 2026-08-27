@@ -877,12 +877,44 @@ void PlateSynth::noteOn (float velocity) noexcept
     if (model == nullptr || activeModes < 1)
         return;
 
-    // A note is a trigger and nothing else. It used to retune the plate to
-    // the note's pitch, gliding there; that is switched off while notes
-    // become per-source triggers, because eight sources each mapped to their
-    // own note cannot all own the tuning. The glide state still follows the
-    // Freq knob, so the machinery is intact.
+    // A note is a trigger here and nothing else; glideToNote does the pitch.
+    // Two calls, because the processor routes them by MIDI channel: one
+    // channel can play the plate while another tunes it, and eight sources
+    // mapped to their own notes never fight over the tuning.
     strike (lastHitX, lastHitY, velocity);
+}
+
+void PlateSynth::glideToNote (int note) noexcept
+{
+    if (model == nullptr || activeModes < 1)
+        return;
+
+    const double hz = 440.0 * std::exp2 ((double) (note - 69) / 12.0);
+    f1LogTarget = std::log2 (juce::jmax (1.0, hz));
+
+    // The first note of the session lands directly: there is nothing to glide
+    // from, and starting from whatever the Freq knob happened to be would put
+    // a swoop on a note nobody asked to bend.
+    const double distance = f1LogTarget - f1Log;
+    const double ticksPerGlide = (double) current.glideMs * 1.0e-3 * fs
+                                 / (double) nlUpdatePeriod;
+
+    if (! notePlayed || ticksPerGlide < 1.0 || distance == 0.0)
+    {
+        f1Log = f1LogTarget;
+        gliding = false;
+        notePlayed = true;
+        retuneBank();               // land in tune immediately
+        return;
+    }
+
+    // Step per decimated tick, sized from the glide time, the sample rate and
+    // the update period together. Distance is in log2, so the glide takes the
+    // Glide time whatever the interval, and it takes the same wall-clock time
+    // at any sample rate.
+    glideStep = distance / ticksPerGlide;
+    gliding = true;
+    notePlayed = true;
 }
 
 void PlateSynth::updateGlide() noexcept

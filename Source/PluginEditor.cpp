@@ -28,7 +28,7 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     // Advanced toggle: shows the cascade tuning column, widening the window.
     // The Advanced toggle sits in the Dynamics panel, in the slot next to the
     // controls it extends, rather than in the top bar away from them.
-    fem::theme::styleButton (advancedButton, fem::theme::cascAccent);
+    fem::theme::styleButton (advancedButton, fem::theme::dynGroup);
     advancedButton.setClickingTogglesState (true);
     advancedButton.setMouseClickGrabsKeyboardFocus (false);
     advancedButton.onClick = [this] { setAdvancedVisible (advancedButton.getToggleState()); };
@@ -205,24 +205,48 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     };
     addAndMakeVisible (densityKnob);
 
-    // --- right: modal parameters -----------------------------------------------
+    // --- right: the control groups ---------------------------------------------
+    // Every box takes the colour of the group it sits in, so the panel it
+    // belongs to is readable without reading its label.
     auto& apvts = processor.apvts;
-    auto addModal = [&] (fxme::FxmeNumberBox& s, const char* text, const char* id,
-                         std::unique_ptr<SliderAttachment>& att)
+    auto addBox = [&] (fxme::FxmeNumberBox& s, const char* text, const char* id,
+                       std::unique_ptr<SliderAttachment>& att, juce::Colour accent)
     {
-        fem::theme::styleBox (s, text, fem::theme::modesAccent);
+        fem::theme::styleBox (s, text, accent);
         addAndMakeVisible (s);
         att = std::make_unique<SliderAttachment> (apvts, id, s);
     };
-    addModal (f1Knob, "Freq", fem::id::f1, f1Att);
-    addModal (tensionKnob, "Tension", fem::id::tension, tensionAtt);
-    addModal (hammerKnob, "Hammer", fem::id::hammerMs, hammerAtt);
-    addModal (forceKnob, "Force", fem::id::force, forceAtt);
-    addModal (nonlinKnob, "Nonlinear", fem::id::nonlin, nonlinAtt);
-    addModal (viscKnob, "Viscous", fem::id::viscDamp, viscAtt);
-    addModal (matKnob, "Material", fem::id::matDamp, matAtt);
-    addModal (cascadeKnob, "Cascade", fem::id::cascade, cascadeAtt);
-    addModal (deplKnob, "Deplete", fem::id::cascDeplete, deplAtt);
+
+    // Group 1, Dynamics.
+    addBox (tensionKnob, "Tension", fem::id::tension, tensionAtt, fem::theme::dynGroup);
+    addBox (nonlinKnob, "Nonlinear", fem::id::nonlin, nonlinAtt, fem::theme::dynGroup);
+    addBox (viscKnob, "Viscous", fem::id::viscDamp, viscAtt, fem::theme::dynGroup);
+    addBox (matKnob, "Material", fem::id::matDamp, matAtt, fem::theme::dynGroup);
+    addBox (cascadeKnob, "Cascade", fem::id::cascade, cascadeAtt, fem::theme::dynGroup);
+    addBox (deplKnob, "Deplete", fem::id::cascDeplete, deplAtt, fem::theme::dynGroup);
+
+    // Group 2, Frequency control. Integer boxes rather than combos for the
+    // channels so the row matches the rest of the panel; the zero of each
+    // reads as a word, because "0" means two different things here and
+    // neither of them is a channel number.
+    addBox (f1Knob, "Frequency", fem::id::f1, f1Att, fem::theme::freqGroup);
+    addBox (glideKnob, "Glide", fem::id::glide, glideAtt, fem::theme::freqGroup);
+    addBox (srcChanKnob, "Src Chan", fem::id::srcChannel, srcChanAtt, fem::theme::freqGroup);
+    addBox (freqChanKnob, "Freq Chan", fem::id::freqChannel, freqChanAtt, fem::theme::freqGroup);
+    srcChanKnob.textFromValueFunction = [] (double v)
+        { return v < 0.5 ? juce::String ("Omni") : juce::String ((int) v); };
+    freqChanKnob.textFromValueFunction = [] (double v)
+        { return v < 0.5 ? juce::String ("Off") : juce::String ((int) v); };
+    srcChanKnob.updateText();
+    freqChanKnob.updateText();
+
+    unmappedHitButton = std::make_unique<fxme::FxmeButton> (
+        apvts, fem::id::unmappedHit, "Unmapped note hits", fem::theme::freqGroup);
+    addAndMakeVisible (*unmappedHitButton);
+
+    // Group 3, Hammer control.
+    addBox (hammerKnob, "Duration", fem::id::hammerMs, hammerAtt, fem::theme::hammerGroup);
+    addBox (forceKnob, "Force", fem::id::force, forceAtt, fem::theme::hammerGroup);
 
     // Modes belongs with the design, not the performance: it reallocates and
     // retunes the whole bank, and raising it while the plate is ringing can
@@ -235,7 +259,7 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     auto addCasc = [&] (fxme::FxmeNumberBox& s, const char* text, const char* id,
                         std::unique_ptr<SliderAttachment>& att)
     {
-        fem::theme::styleBox (s, text, fem::theme::cascAccent);
+        fem::theme::styleBox (s, text, fem::theme::dynGroup);
         addAndMakeVisible (s);
         att = std::make_unique<SliderAttachment> (apvts, id, s);
     };
@@ -249,7 +273,7 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     auto addIo = [&] (fxme::FxmeNumberBox& s, const char* text, const char* id,
                       std::unique_ptr<SliderAttachment>& att)
     {
-        fem::theme::styleBox (s, text, fem::theme::ioAccent);
+        fem::theme::styleBox (s, text, fem::theme::ioGroup);
         addAndMakeVisible (s);
         att = std::make_unique<SliderAttachment> (apvts, id, s);
     };
@@ -263,7 +287,7 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
         m.setRange (-60.0f, 6.0f);
         m.setZeroLevel (0.0f);
         m.setHorizontal (true);
-        m.setMeterColor (fem::theme::ioAccent);
+        m.setMeterColor (fem::theme::ioGroup);
         addAndMakeVisible (m);
     }
 
@@ -311,6 +335,9 @@ void FemPlateAudioProcessorEditor::setAdvancedVisible (bool shouldShow)
 {
     advancedVisible = shouldShow;
     advancedButton.setToggleState (shouldShow, juce::dontSendNotification);
+    // The arrow points the way the column will move, which is the only part
+    // of a disclosure control anyone reads.
+    advancedButton.setButtonText (shouldShow ? "A <" : "A >");
     for (auto* k : { &cascDriveKnob, &cascWinKnob, &cascAttKnob,
                      &cascRelKnob, &cascOverKnob })
         k->setVisible (shouldShow && ! designMode);
@@ -342,6 +369,7 @@ void FemPlateAudioProcessorEditor::setDesignMode (bool design)
     juce::Component* const performOnly[] = {
         &f1Knob, &tensionKnob, &hammerKnob, &forceKnob, &nonlinKnob, &cascadeKnob,
         &viscKnob, &matKnob, &deplKnob, &advancedButton, &inGainKnob, &outGainKnob,
+        &glideKnob, &srcChanKnob, &freqChanKnob, unmappedHitButton.get(),
         &outMeter[0], &outMeter[1], &viewBox, &modeViewKnob
     };
     for (auto* c : performOnly)
@@ -366,7 +394,7 @@ void FemPlateAudioProcessorEditor::updateWindowSize()
     // The cascade column only exists in Perform with Advanced up, so the
     // window must not stay wide when design mode hides it. It is narrower
     // than the main column because it is a single stack of number boxes.
-    setSize ((advancedVisible && ! designMode) ? 1142 : 1022, 730);
+    setSize ((advancedVisible && ! designMode) ? 1142 : 1022, 760);
 }
 
 void FemPlateAudioProcessorEditor::syncShapeToProcessor (bool geometryChanged)
@@ -892,7 +920,12 @@ void FemPlateAudioProcessorEditor::paint (juce::Graphics& g)
 {
     fem::theme::paintBackground (g, getLocalBounds().toFloat());
 
-    auto drawPanel = [&g] (juce::Rectangle<int> r, const juce::String& title, juce::Colour accent)
+    // reserveRight leaves room for a button sharing the title row (Advanced,
+    // in Dynamics). Fitted rather than plain text: "FREQUENCY CONTROL" is
+    // within a few pixels of the column width, and a title that silently
+    // loses its last letters is worse than one a point smaller.
+    auto drawPanel = [&g] (juce::Rectangle<int> r, const juce::String& title,
+                           juce::Colour accent, int reserveRight = 0)
     {
         if (r.isEmpty())
             return;
@@ -902,16 +935,18 @@ void FemPlateAudioProcessorEditor::paint (juce::Graphics& g)
         g.drawRoundedRectangle (r.toFloat().reduced (0.5f), 6.0f, 1.0f);
         g.setColour (accent);
         g.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::bold)));
-        g.drawText (title, r.removeFromTop (22).reduced (10, 2),
-                    juce::Justification::centredLeft);
+        g.drawFittedText (title,
+                          r.removeFromTop (22).reduced (10, 2).withTrimmedRight (reserveRight),
+                          juce::Justification::centredLeft, 1);
     };
 
     drawPanel (designPanel, "MODAL DESIGN", fem::theme::geomAccent);
-    drawPanel (dynPanel, "DYNAMICS", fem::theme::modesAccent);
-    drawPanel (excitePanel, "HAMMER", fem::theme::modesAccent);
-    drawPanel (cascPanel, "CASCADE", fem::theme::cascAccent);
-    drawPanel (pointsPanel, "PLATE POINTS", fem::theme::accent);
-    drawPanel (ioPanel, "OUTPUT", fem::theme::ioAccent);
+    drawPanel (dynPanel, "DYNAMICS", fem::theme::dynGroup, 42);
+    drawPanel (cascPanel, "CASCADE", fem::theme::dynGroup);
+    drawPanel (freqPanel, "FREQUENCY CONTROL", fem::theme::freqGroup);
+    drawPanel (excitePanel, "HAMMER CONTROL", fem::theme::hammerGroup);
+    drawPanel (ioPanel, "IO", fem::theme::ioGroup);
+    drawPanel (pointsPanel, "TRANSDUCERS", fem::theme::transGroup);
 
     // Scale under the output meters, so a reading means something.
     if (! meterArea.isEmpty())
@@ -976,7 +1011,7 @@ void FemPlateAudioProcessorEditor::resized()
     auto colA = area.removeFromRight (150);
     area.removeFromRight (10);
 
-    designPanel = dynPanel = excitePanel = ioPanel = cascPanel = {};
+    designPanel = dynPanel = freqPanel = excitePanel = ioPanel = cascPanel = {};
     pointsPanel = {};
     meterArea = {};
 
@@ -991,16 +1026,33 @@ void FemPlateAudioProcessorEditor::resized()
     }
     else
     {
-        dynPanel = colA.removeFromTop (2 * padding + titleH + 4 * boxH + 3 * gap);
+        // Group 1: Dynamics. Advanced sits in the title row rather than in a
+        // cell of its own: it opens a whole column, which is a different kind
+        // of act from turning a knob, and a cell would have said otherwise.
+        dynPanel = colA.removeFromTop (2 * padding + titleH + 3 * boxH + 2 * gap);
         {
             auto r = dynPanel.reduced (padding);
-            r.removeFromTop (titleH);
-            twoColumns (r, { &f1Knob,      &advancedButton,
-                             &tensionKnob, &nonlinKnob,
-                             &viscKnob,    &matKnob,
-                             &cascadeKnob, &deplKnob });
+            auto header = r.removeFromTop (titleH);
+            advancedButton.setBounds (header.removeFromRight (38).reduced (0, 2));
+            twoColumns (r, { &tensionKnob,  &nonlinKnob,
+                             &viscKnob,     &matKnob,
+                             &cascadeKnob,  &deplKnob });
         }
 
+        // Group 2: Frequency control.
+        colA.removeFromTop (10);
+        const int toggleH = 26;
+        freqPanel = colA.removeFromTop (2 * padding + titleH + 2 * boxH + 2 * gap + toggleH);
+        {
+            auto r = freqPanel.reduced (padding);
+            r.removeFromTop (titleH);
+            twoColumns (r, { &f1Knob,      &glideKnob,
+                             &srcChanKnob, &freqChanKnob });
+            r.removeFromTop (2 * boxH + 2 * gap);
+            unmappedHitButton->setBounds (r.removeFromTop (toggleH).reduced (2, 0));
+        }
+
+        // Group 3: Hammer control.
         colA.removeFromTop (10);
         excitePanel = colA.removeFromTop (2 * padding + titleH + boxH);
         {
@@ -1009,6 +1061,27 @@ void FemPlateAudioProcessorEditor::resized()
             twoColumns (r, { &hammerKnob, &forceKnob });
         }
 
+        // Group 4: IO.
+        colA.removeFromTop (10);
+        const int meterH = 14, scaleH = 12;
+        ioPanel = colA.removeFromTop (2 * padding + titleH + boxH + gap
+                                      + 2 * meterH + 4 + scaleH);
+        {
+            auto r = ioPanel.reduced (padding);
+            r.removeFromTop (titleH);
+            twoColumns (r, { &inGainKnob, &outGainKnob });
+            r.removeFromTop (boxH + gap);
+
+            // Horizontal bars across the panel's full width, with the dB
+            // scale drawn under them in paint().
+            meterArea = r;
+            outMeter[0].setBounds (r.removeFromTop (meterH).reduced (2, 1));
+            r.removeFromTop (4);
+            outMeter[1].setBounds (r.removeFromTop (meterH).reduced (2, 1));
+        }
+
+        // Group 5: Transducers. Every point on the plate as a switch, drawn
+        // as the marker it controls (see PointToggle).
         colA.removeFromTop (10);
         const int rowH = 22;
         pointsPanel = colA.removeFromTop (2 * padding + titleH + 2 * rowH + gap);
@@ -1032,24 +1105,6 @@ void FemPlateAudioProcessorEditor::resized()
             layoutRow (r.removeFromTop (rowH), pickupToggle, fem::maxPickups);
             r.removeFromTop (gap);
             layoutRow (r.removeFromTop (rowH), sourceToggle, fem::maxSources);
-        }
-
-        colA.removeFromTop (10);
-        const int meterH = 14, scaleH = 12;
-        ioPanel = colA.removeFromTop (2 * padding + titleH + boxH + gap
-                                      + 2 * meterH + 4 + scaleH);
-        {
-            auto r = ioPanel.reduced (padding);
-            r.removeFromTop (titleH);
-            twoColumns (r, { &inGainKnob, &outGainKnob });
-            r.removeFromTop (boxH + gap);
-
-            // Horizontal bars across the panel's full width, with the dB
-            // scale drawn under them in paint().
-            meterArea = r;
-            outMeter[0].setBounds (r.removeFromTop (meterH).reduced (2, 1));
-            r.removeFromTop (4);
-            outMeter[1].setBounds (r.removeFromTop (meterH).reduced (2, 1));
         }
     }
 

@@ -60,7 +60,7 @@ against analytic plates in `Tests/FemTests.cpp`.
 
   On the plate, pickups are orchid circles labelled 1–8 and sources teal
   circles labelled a–h; a disabled one is a faint ring rather than gone, so it
-  can still be found. The **PLATE POINTS** panel repeats those sixteen markers
+  can still be found. The **TRANSDUCERS** panel repeats those sixteen markers
   as two rows of switches, pickups above and sources below, drawn as the very
   markers they control so the rows read as a picture of what is currently on.
   They are the same parameters as the **On** button in a marker's own panel and
@@ -112,8 +112,8 @@ nonlinearity (both 0 = exactly the linear model):
   the ones above it, its own filter states receive an extra dissipation
   proportional to the transfer activity, so the lows audibly hand their
   energy to the shimmer instead of ringing on beneath it. All cascade
-  internals live in the CASCADE panel, revealed by the **Advanced**
-  button in the top bar (the window widens). The ladder is driven by the
+  internals live in the CASCADE panel, revealed by the **A >** button in
+  the DYNAMICS title row (the window widens). The ladder is driven by the
   plate's *motion* over the whole plate (a band-mean modal velocity), and
   deliberately not by its audible output: the output models plate
   acceleration, so it carries a frequency tilt ω_k the motion does not,
@@ -254,18 +254,38 @@ belong to the mode you are in.
 
 ## Playing it from MIDI
 
-A note-on tunes the plate so that **mode 1 lands on the note** (the rest of
-the spectrum follows the ratios the geometry and boundary conditions give it)
-and strikes it at the last point you clicked, with a hammer amplitude of
-`velocity / 127 × Force`. Note-offs are ignored: a struck plate rings out on
-its own, so the decay is the damping, not the key.
+A note does two independent things: it **triggers** and it **tunes**. Which
+of them a given note does is decided by the two channel controls, so the same
+keyboard can do both or two controllers can split the job.
 
-The **Glide** knob (next to *Freq*) is the portamento time between played
-notes, 0 to 2 s. It is a time rather than a rate, so a glide takes the same
-Glide setting whatever the interval. Two deliberate exceptions never glide:
-the *Freq* knob, which sets the pitch outright, and the first note after
-loading, which lands in tune instead of swooping up from wherever *Freq*
-happened to sit.
+**Src Chan** (default *Omni*) is the channel that triggers. A note on it
+fires every enabled source mapped to that note; a note no source claims falls
+back to a hit at the last struck point with the global Hammer and Force.
+Note-offs are ignored: a struck plate rings out on its own, so the decay is
+the damping, not the key.
+
+**Unmapped note hits** (in the same panel) says what a note on the sources
+channel does when no source claims it: strike the last touched point, or
+nothing. On is how the plugin has always behaved and is what makes it
+playable from a keyboard before any source is mapped; switch it off once
+every note is mapped, so a stray one stays silent rather than hitting
+wherever the mouse last was.
+
+**Freq Chan** (default *Off*) is the channel that tunes. A note on it moves
+the plate so **mode 1 lands on the note**, the rest of the spectrum following
+the ratios the geometry and boundary conditions give it. It ships Off, so
+notes only trigger until you assign it; set both controls to the same channel
+(or leave Src Chan on Omni) to play the plate as one instrument, or give them
+different channels to retune it from a second controller without striking.
+
+The **Glide** knob (next to *Freq*) is the portamento time between tuned
+notes, 0.1 to 100 ms. It is a time rather than a rate, and the travel is in
+log₂, so a glide takes the same Glide setting whatever the interval — half
+way through an octave you are at the geometric mean, not the arithmetic one.
+It is also a time in seconds rather than in samples, so it lasts as long at
+96 kHz as at 48. Two deliberate exceptions never glide: the *Freq* knob,
+which sets the pitch outright, and the first note after loading, which lands
+in tune instead of swooping up from wherever *Freq* happened to sit.
 
 Hosts differ on whether an audio effect can receive MIDI at all:
 
