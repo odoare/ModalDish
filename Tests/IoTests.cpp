@@ -10,6 +10,8 @@
       3. Sources: position spread, and that a scattered hit stays on the plate.
       4. Sources: input send and left/right balance.
       5. Sources: MIDI note dispatch.
+      6. Published hit positions.
+      7. Stereo spread of the statistical tail.
 
     Both features are linear mixes that collapse into two per-mode vectors
     (PlateSynth::updatePickupMix / updateSourceMix), which is what keeps the
@@ -30,7 +32,9 @@
 #include <ModalModel.h>
 #include <PlateSynth.h>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <vector>
 using namespace fxme::acoustics;
 static constexpr double fs = 48000.0;
 static int failures = 0;
@@ -49,9 +53,74 @@ static fem::ModalModel buildModel()
     return m;
 }
 
+/** The plugin's statistical tail in miniature: plane-wave "shapes" bolted on
+    above the last computed mode, at constant modal density. updateTailSpread
+    acts only up there, so the FEM-only model above would not exercise it. */
+static void appendTail (fem::ModalModel& m, int total)
+{
+    auto& lam = m.modes.lambda;
+    auto& g = m.modes.tensionG;
+    double omega = std::sqrt (lam.back());
+    const double dOmega = omega / (double) m.numFemModes();
+    std::uint32_t seed = 12345u;
+    auto rnd = [&seed] { seed = seed * 1664525u + 1013904223u;
+                         return (double) seed / 4294967296.0; };
+    while ((int) lam.size() < total)
+    {
+        omega += dOmega;
+        lam.push_back (omega * omega);
+        g.push_back (omega);
+        fem::ModalModel::TailWave w;
+        const double kappa = std::sqrt (omega), th = 2.0 * M_PI * rnd();
+        w.kx = (float) (kappa * std::cos (th));
+        w.ky = (float) (kappa * std::sin (th));
+        w.phase = (float) (2.0 * M_PI * rnd());
+        w.amp = 1.5f;
+        m.tailWaves.push_back (w);
+    }
+}
+
+/** One band of a steep (three-section) band-pass, as an interchannel level
+    difference in dB. Three sections because a single biquad's skirts let the
+    louder bands below leak in and wash the difference out. */
+static double bandIldDb (const std::vector<float>& L, const std::vector<float>& R,
+                         double centre, double width)
+{
+    struct Bq
+    {
+        double b0=0,b1=0,b2=0,a1=0,a2=0,z1=0,z2=0;
+        void set (double f, double q)
+        {
+            const double w = 2.0*M_PI*f/fs, al = std::sin(w)/(2.0*q), c = std::cos(w);
+            const double a0 = 1.0+al;
+            b0 = al/a0; b1 = 0.0; b2 = -al/a0; a1 = (-2.0*c)/a0; a2 = (1.0-al)/a0;
+        }
+        double run (double x){ const double y=b0*x+z1; z1=b1*x-a1*y+z2; z2=b2*x-a2*y; return y; }
+    };
+    Bq bl[3], br[3];
+    for (int i = 0; i < 3; ++i)
+    {
+        bl[i].set (centre, 0.5098 * centre / width);   // 0.5098 restores the
+        br[i].set (centre, 0.5098 * centre / width);   // width after cascading
+    }
+    double sll = 0.0, srr = 0.0;
+    const size_t skip = (size_t) (0.02 * fs);
+    for (size_t i = 0; i < L.size(); ++i)
+    {
+        double a = L[i], b = R[i];
+        for (int j = 0; j < 3; ++j) { a = bl[j].run (a); b = br[j].run (b); }
+        if (i < skip) continue;
+        sll += a*a; srr += b*b;
+    }
+    return 10.0 * std::log10 (std::max (sll, 1e-30) / std::max (srr, 1e-30));
+}
+
 static fem::PlateSynth::Params basePatch()
 {
     fem::PlateSynth::Params p;
+    // Cascade off: these tests are about the linear input/output topology,
+    // and a running ladder would put its own energy into every level they
+    // measure (and widen the target modes through the Overlap floor).
     p.f1 = 110.0f; p.numModes = 128; p.cascade = 0.0f; p.nonlin = 0.0f;
     p.pickups[0].on = true;
     return p;
@@ -347,6 +416,79 @@ int main()
             t.strikeSource (0, 1.0f);
         check (t.getHitCount() == n0 + 3 * fem::PlateSynth::hitRingSize,
                "the hit count keeps counting past the ring size");
+    }
+
+    // --- 7. Stereo spread of the statistical tail -------------------------
+    // Above the last FEM mode the shimmer is spread over hundreds of modes at
+    // once, and each channel's gain on it tends to sum_k phi_k^2, which
+    // converges to the same spatial average wherever the pickup sits. Left
+    // alone, every part of that spectrum lands in the middle. updateTailSpread
+    // takes a level difference per band from the *signed* sum of the readout
+    // weights instead, which is a random walk and so never converges.
+    //
+    // Measured one auditory filter at a time, because that is the resolution
+    // the listener has: bands much narrower than an ERB get summed back
+    // together by the ear, and a coarser analysis than this averages the
+    // scatter away and reports a success as a failure.
+    std::printf ("\n== Tail stereo spread ==\n");
+    {
+        auto model2 = buildModel();
+        appendTail (model2, 384);
+        const auto& lam = model2.modes.lambda;
+        const int nFem = model2.numFemModes();
+        const double base = std::sqrt (lam[0]);
+
+        double mean = 0.0;
+        auto rmsIld = [&] (const fem::PlateSynth::Params& p, const char* what)
+        {
+            fem::PlateSynth s; s.prepare (fs); s.update (&model2, p);
+            s.strike (0.42f, 0.45f, 1.0f);
+            const int n = (int) (1.5 * fs);
+            std::vector<float> L ((size_t) n), R ((size_t) n);
+            for (int i = 0; i < n; ++i)
+            {
+                float l = 0.0f, r = 0.0f;
+                s.processSample (0.0f, 0.0f, l, r);
+                L[(size_t) i] = l; R[(size_t) i] = r;
+            }
+            double s2 = 0.0, s1 = 0.0; int cnt = 0;
+            for (int b = 1; b < 16; b += 2)   // spread across the tail range
+            {
+                const int k = nFem + (int) ((384 - nFem) * (double) b / 16.0);
+                const double f = 110.0 * std::sqrt (lam[(size_t) k]) / base;
+                if (f > 0.35 * fs) break;
+                const double erb = 24.7 * (4.37 * f / 1000.0 + 1.0);
+                const double ild = bandIldDb (L, R, f, erb);
+                s2 += ild * ild; s1 += ild; ++cnt;
+            }
+            const double rms = cnt > 0 ? std::sqrt (s2 / cnt) : 0.0;
+            mean = cnt > 0 ? s1 / cnt : 0.0;
+            std::printf ("  %-28s rms ILD %.2f dB, mean %+.2f dB, over %d auditory filters\n",
+                         what, rms, mean, cnt);
+            return rms;
+        };
+
+        auto one = basePatch();
+        one.numModes = 384;
+        one.cascade = 1.0f;          // the ladder running, so the tail is fed
+        one.pickups[0].x = 0.5f; one.pickups[0].y = 0.47f; one.pickups[0].pan = 0.0f;
+        const double single = rmsIld (one, "one centred pickup:");
+
+        auto two = one;
+        two.pickups[0].x = 0.24f; two.pickups[0].y = 0.47f; two.pickups[0].pan = -1.0f;
+        two.pickups[1].x = 0.63f; two.pickups[1].y = 0.33f; two.pickups[1].pan = +1.0f;
+        two.pickups[1].on = true;
+        const double pair = rmsIld (two, "two pickups, opposite pans:");
+
+        check (single < 0.5,
+               "one pickup cannot manufacture a stereo image out of the tail");
+        check (pair > 3.0,
+               "two separated pickups scatter the tail across the image");
+        // Scatter, not shift: bands have to land on both sides of centre. A
+        // spread that pushed every band the same way would only move the
+        // shimmer off centre, which is what a delay would have done.
+        check (std::abs (mean) < pair,
+               "the tail is scattered across the image, not shifted to one side");
     }
 
     std::printf("\n%s (%d failure%s)\n", failures==0?"ALL TESTS PASSED":"TESTS FAILED",

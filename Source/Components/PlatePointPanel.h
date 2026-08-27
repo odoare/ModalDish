@@ -38,7 +38,7 @@ class PlatePointPanel : public juce::Component,
                         private juce::Timer
 {
 public:
-    /** `index` is the pickup (0..3) or source (0..7) this panel edits. */
+    /** `index` is the pickup or source (both 0..7) this panel edits. */
     PlatePointPanel (FemPlateAudioProcessor& p, bool pickup, int index)
         : processor (p), isPickup (pickup), pointIndex (index),
           accent (pickup ? fem::theme::pickupAccent : fem::theme::sourceAccent)

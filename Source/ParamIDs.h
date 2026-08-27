@@ -25,10 +25,14 @@ namespace fem::id
     inline constexpr const char* force     = "force";     // hammer force amplitude
     inline constexpr const char* glide     = "glide";     // portamento time between notes (ms)
     inline constexpr const char* nonlin    = "nonlin";    // Berger tension feedback amount
-    inline constexpr const char* cascade   = "cascade";   // cubic feedback (mode cascade) amount
 
-    // Cascade tuning set (exposed at least while voicing the effect).
-    inline constexpr const char* cascAmp     = "cascamp";   // injection gain
+    // Cascade. Two controls, not three: the amount scales the whole ladder
+    // (and is what switches it off, including the Overlap bandwidth floor,
+    // which is scaled by it), while Drive sets how far into the tanh the
+    // carrier is pushed and so what the shimmer is made of. The separate
+    // injection gain that used to sit between them is pinned -- see
+    // cascadeInjectionAmp in PlateSynth.cpp.
+    inline constexpr const char* cascade   = "cascade";   // cubic feedback (mode cascade) amount
     inline constexpr const char* cascDrive   = "cascdrive"; // tanh knee (B)
     inline constexpr const char* cascAttack  = "cascatt";   // gate attack, ms per band rung
     inline constexpr const char* cascRelease = "cascrel";   // gate release, ms
@@ -36,15 +40,16 @@ namespace fem::id
     inline constexpr const char* cascWindow  = "cascwin";   // source window, bands
     inline constexpr const char* cascDeplete = "cascdepl";  // source-band energy loss
     inline constexpr const char* numModes  = "nmodes";    // active modes
-    // Pickups. Up to four listening points, each with its own level and pan;
-    // the plate sums into a stereo pair through them. Indexed 0..3 for
-    // pickups labelled 1..4 in the interface, which is the only place the
-    // one-based labels appear.
-    inline constexpr const char* pickupX[]     = { "pickup1x",     "pickup2x",     "pickup3x",     "pickup4x"     };
-    inline constexpr const char* pickupY[]     = { "pickup1y",     "pickup2y",     "pickup3y",     "pickup4y"     };
-    inline constexpr const char* pickupLevel[] = { "pickup1level", "pickup2level", "pickup3level", "pickup4level" };
-    inline constexpr const char* pickupPan[]   = { "pickup1pan",   "pickup2pan",   "pickup3pan",   "pickup4pan"   };
-    inline constexpr const char* pickupOn[]    = { "pickup1on",    "pickup2on",    "pickup3on",    "pickup4on"    };
+    // Pickups. Up to eight listening points, each with its own level and pan;
+    // the plate sums into a stereo pair through them. Indexed 0..7 for
+    // pickups labelled 1..8 in the interface, which is the only place the
+    // one-based labels appear. Ids 1..4 predate the widening to eight and are
+    // spelled exactly as they were, so a session saved before it still loads.
+    inline constexpr const char* pickupX[]     = { "pickup1x",     "pickup2x",     "pickup3x",     "pickup4x",     "pickup5x",     "pickup6x",     "pickup7x",     "pickup8x"     };
+    inline constexpr const char* pickupY[]     = { "pickup1y",     "pickup2y",     "pickup3y",     "pickup4y",     "pickup5y",     "pickup6y",     "pickup7y",     "pickup8y"     };
+    inline constexpr const char* pickupLevel[] = { "pickup1level", "pickup2level", "pickup3level", "pickup4level", "pickup5level", "pickup6level", "pickup7level", "pickup8level" };
+    inline constexpr const char* pickupPan[]   = { "pickup1pan",   "pickup2pan",   "pickup3pan",   "pickup4pan",   "pickup5pan",   "pickup6pan",   "pickup7pan",   "pickup8pan"   };
+    inline constexpr const char* pickupOn[]    = { "pickup1on",    "pickup2on",    "pickup3on",    "pickup4on",    "pickup5on",    "pickup6on",    "pickup7on",    "pickup8on"    };
 
     // Sources. Up to eight striking/injection points, labelled a..h in the
     // interface and indexed 0..7 here. Each carries its own hammer, its own
@@ -64,19 +69,20 @@ namespace fem::id
 
 namespace fem
 {
-    // Listening points on the plate. Four is a deliberate cap rather than a
-    // technical one: the mix into the stereo pair is linear, so any number of
-    // pickups collapses into two per-mode weight vectors and costs the audio
-    // loop exactly the same (see PlateSynth::updatePickupMix). What four buys
-    // is a plate you can place across the image; more would be knobs without
-    // a use.
-    inline constexpr int maxPickups = 4;
+    // Listening points on the plate. The cap is a matter of how many points
+    // are worth putting on a plate, not of cost: the mix into the stereo pair
+    // is linear, so any number of pickups collapses into two per-mode weight
+    // vectors and costs the audio loop exactly the same (see
+    // PlateSynth::updatePickupMix). Eight matches the sources, which keeps
+    // the two halves of the plate's topology symmetric — one keyboard row of
+    // digits for the pickups, one of letters for the sources.
+    inline constexpr int maxPickups = 8;
 
-    // Striking and injection points. Eight, for the same reason as four
-    // pickups: the input sends collapse into two per-mode vectors whatever
-    // the count, so the audio loop does not care. What does scale with the
-    // count is the mode-shape evaluation when a source moves, and the number
-    // of hammers that can be in flight at once (maxStrikes).
+    // Striking and injection points. Eight, for the same reason: the input
+    // sends collapse into two per-mode vectors whatever the count, so the
+    // audio loop does not care. What does scale with the count is the
+    // mode-shape evaluation when a source moves, and the number of hammers
+    // that can be in flight at once (maxStrikes).
     inline constexpr int maxSources = 8;
 
     /** Interface label of source `i`: 'a'..'h'. The one place the letters
@@ -85,7 +91,25 @@ namespace fem
 
     // Synthesis bank capacity: FEM-computed modes plus the statistical
     // (Berry random-wave) tail appended above them — see ModalModel.h.
-    inline constexpr int maxModes = 512;
+    //
+    // The tail continues at the plate's own Weyl spacing, so this buys
+    // *range*, not density: doubling it moves the top of the bank up, it does
+    // not put more modes between the ones already there. Whether that is worth
+    // anything depends entirely on Base Freq, because the audible range is
+    // what it is and a mode above Nyquist is muted:
+    //
+    //     Base Freq |  live modes at 512 / 1024  |  bank tops out at
+    //        20 Hz  |      512   /   1024        |   4.9 kHz / 9.5 kHz
+    //        55 Hz  |      512   /    877        |  13.4 kHz / Nyquist
+    //       110 Hz  |      425   /    425        |  Nyquist  (bank to spare)
+    //       440 Hz  |       90   /     90        |  Nyquist  (bank to spare)
+    //
+    // So 512 was already more than the default 110 Hz plate can use, and the
+    // shortfall was all at the bottom of the Base Freq range, where the plate
+    // used to run out of spectrum at 5 kHz. 1024 covers down to about 55 Hz.
+    // It costs 106 kB and no audio-loop time at all: modes above Nyquist never
+    // enter the per-sample loop, which stops at liveModes.
+    inline constexpr int maxModes = 1024;
     // Modes actually solved by the finite-element eigensolver. This is now the
     // binding limit rather than the Grid knob: the solver's working set and
     // its Rayleigh-Ritz projections both grow with the mode count, and only

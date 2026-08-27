@@ -25,6 +25,7 @@
 #include "Theme.h"
 #include "Components/ShapeCanvas.h"
 #include "Components/PlatePointPanel.h"
+#include "Components/PointToggle.h"
 
 //==============================================================================
 class FemPlateAudioProcessorEditor : public juce::AudioProcessorEditor,
@@ -40,6 +41,7 @@ public:
 
 private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
+    using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
 
     void timerCallback() override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
@@ -141,16 +143,26 @@ private:
 
     // Right column — cascade tuning (Advanced). Deplete moved out to the
     // Dynamics panel: it is a voicing control, not a tuning constant.
-    fxme::FxmeNumberBox cascAmpKnob, cascDriveKnob, cascAttKnob, cascRelKnob,
+    fxme::FxmeNumberBox cascDriveKnob, cascAttKnob, cascRelKnob,
                         cascOverKnob, cascWinKnob;
-    std::unique_ptr<SliderAttachment> cascAmpAtt, cascDriveAtt, cascAttAtt,
-                                      cascRelAtt, cascOverAtt, cascWinAtt;
+    std::unique_ptr<SliderAttachment> cascDriveAtt, cascAttAtt, cascRelAtt,
+                                      cascOverAtt, cascWinAtt;
 
     // Right column — output. The pickup positions used to live here; they are
     // on the plate now, where they belong, and the room went to metering.
     fxme::FxmeNumberBox inGainKnob, outGainKnob;
     std::unique_ptr<SliderAttachment> inGainAtt, outGainAtt;
     fxme::VuMeterComponent outMeter[2];
+
+    // Right column — every point on the plate as an on/off switch: pickups
+    // 1..8 on the upper row, sources a..h on the lower, labelled and coloured
+    // to match the markers themselves. Attached to the same parameters as the
+    // On button in a marker's own panel, so the two agree without either
+    // knowing the other exists, and so do alt-click on the plate and the host.
+    std::unique_ptr<PointToggle> pickupToggle[fem::maxPickups];
+    std::unique_ptr<PointToggle> sourceToggle[fem::maxSources];
+    std::unique_ptr<ButtonAttachment> pickupToggleAtt[fem::maxPickups];
+    std::unique_ptr<ButtonAttachment> sourceToggleAtt[fem::maxSources];
 
     // Plate view contents: mode shapes (picked by the knob, 0 = bare grid)
     // or the live field, displacement or velocity.
@@ -160,6 +172,7 @@ private:
     float fieldRef = 0.0f;                   // held amplitude reference
 
     juce::Rectangle<int> designPanel, dynPanel, excitePanel, cascPanel, ioPanel;
+    juce::Rectangle<int> pointsPanel;
     juce::Rectangle<int> meterArea;
 
     // "Advanced" toggle, in the Dynamics panel next to what it extends:

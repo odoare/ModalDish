@@ -219,9 +219,9 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     addModal (hammerKnob, "Hammer", fem::id::hammerMs, hammerAtt);
     addModal (forceKnob, "Force", fem::id::force, forceAtt);
     addModal (nonlinKnob, "Nonlinear", fem::id::nonlin, nonlinAtt);
-    addModal (cascadeKnob, "Cascade", fem::id::cascade, cascadeAtt);
     addModal (viscKnob, "Viscous", fem::id::viscDamp, viscAtt);
     addModal (matKnob, "Material", fem::id::matDamp, matAtt);
+    addModal (cascadeKnob, "Cascade", fem::id::cascade, cascadeAtt);
     addModal (deplKnob, "Deplete", fem::id::cascDeplete, deplAtt);
 
     // Modes belongs with the design, not the performance: it reallocates and
@@ -239,7 +239,6 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
         addAndMakeVisible (s);
         att = std::make_unique<SliderAttachment> (apvts, id, s);
     };
-    addCasc (cascAmpKnob, "Amp", fem::id::cascAmp, cascAmpAtt);
     addCasc (cascDriveKnob, "Drive", fem::id::cascDrive, cascDriveAtt);
     addCasc (cascWinKnob, "Window", fem::id::cascWindow, cascWinAtt);
     addCasc (cascAttKnob, "Attack", fem::id::cascAttack, cascAttAtt);
@@ -268,6 +267,29 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
         addAndMakeVisible (m);
     }
 
+    // --- right: the plate's points, as two rows of switches ----------------
+    // The same digits and letters that label the markers on the plate and
+    // that place them from the keyboard, so a row reads as a picture of what
+    // is currently on. Nothing here knows about the marker panels: both ends
+    // are attachments on one parameter, which is what keeps them in step.
+    const auto addPointToggle = [this] (std::unique_ptr<PointToggle>& b,
+                                        std::unique_ptr<ButtonAttachment>& att,
+                                        const juce::String& label, const char* id,
+                                        juce::Colour accent)
+    {
+        b = std::make_unique<PointToggle> (label, accent);
+        addAndMakeVisible (*b);
+        att = std::make_unique<ButtonAttachment> (processor.apvts, id, *b);
+    };
+
+    for (int i = 0; i < fem::maxPickups; ++i)
+        addPointToggle (pickupToggle[i], pickupToggleAtt[i], juce::String (i + 1),
+                        fem::id::pickupOn[i], fem::theme::pickupAccent);
+    for (int i = 0; i < fem::maxSources; ++i)
+        addPointToggle (sourceToggle[i], sourceToggleAtt[i],
+                        juce::String::charToString ((juce::juce_wchar) fem::sourceLabel (i)),
+                        fem::id::sourceOn[i], fem::theme::sourceAccent);
+
     processor.addChangeListener (this);
     refreshMeshAndField();
     refreshStatus();
@@ -289,8 +311,8 @@ void FemPlateAudioProcessorEditor::setAdvancedVisible (bool shouldShow)
 {
     advancedVisible = shouldShow;
     advancedButton.setToggleState (shouldShow, juce::dontSendNotification);
-    for (auto* k : { &cascAmpKnob, &cascDriveKnob, &cascWinKnob,
-                     &cascAttKnob, &cascRelKnob, &cascOverKnob })
+    for (auto* k : { &cascDriveKnob, &cascWinKnob, &cascAttKnob,
+                     &cascRelKnob, &cascOverKnob })
         k->setVisible (shouldShow && ! designMode);
     updateWindowSize();
     repaint();
@@ -325,9 +347,14 @@ void FemPlateAudioProcessorEditor::setDesignMode (bool design)
     for (auto* c : performOnly)
         c->setVisible (! design);
 
-    for (auto* k : { &cascAmpKnob, &cascDriveKnob, &cascWinKnob,
-                     &cascAttKnob, &cascRelKnob, &cascOverKnob })
+    for (auto* k : { &cascDriveKnob, &cascWinKnob, &cascAttKnob,
+                     &cascRelKnob, &cascOverKnob })
         k->setVisible (advancedVisible && ! design);
+
+    // The switches follow the plate: in modal design there are no markers on
+    // screen for them to refer to.
+    for (auto& b : pickupToggle) b->setVisible (! design);
+    for (auto& b : sourceToggle) b->setVisible (! design);
 
     updateWindowSize();
     resized();
@@ -883,6 +910,7 @@ void FemPlateAudioProcessorEditor::paint (juce::Graphics& g)
     drawPanel (dynPanel, "DYNAMICS", fem::theme::modesAccent);
     drawPanel (excitePanel, "HAMMER", fem::theme::modesAccent);
     drawPanel (cascPanel, "CASCADE", fem::theme::cascAccent);
+    drawPanel (pointsPanel, "PLATE POINTS", fem::theme::accent);
     drawPanel (ioPanel, "OUTPUT", fem::theme::ioAccent);
 
     // Scale under the output meters, so a reading means something.
@@ -949,6 +977,7 @@ void FemPlateAudioProcessorEditor::resized()
     area.removeFromRight (10);
 
     designPanel = dynPanel = excitePanel = ioPanel = cascPanel = {};
+    pointsPanel = {};
     meterArea = {};
 
     if (designMode)
@@ -981,6 +1010,31 @@ void FemPlateAudioProcessorEditor::resized()
         }
 
         colA.removeFromTop (10);
+        const int rowH = 22;
+        pointsPanel = colA.removeFromTop (2 * padding + titleH + 2 * rowH + gap);
+        {
+            auto r = pointsPanel.reduced (padding);
+            r.removeFromTop (titleH);
+
+            // Cut at exact fractions of the row rather than by a fixed button
+            // width, so eight switches always fill it with no leftover pixels
+            // collecting at one end.
+            const auto layoutRow = [] (juce::Rectangle<int> row,
+                                       std::unique_ptr<PointToggle>* buttons, int count)
+            {
+                for (int i = 0; i < count; ++i)
+                {
+                    const int x0 = row.getX() + row.getWidth() * i / count;
+                    const int x1 = row.getX() + row.getWidth() * (i + 1) / count;
+                    buttons[i]->setBounds (x0, row.getY(), x1 - x0, row.getHeight());
+                }
+            };
+            layoutRow (r.removeFromTop (rowH), pickupToggle, fem::maxPickups);
+            r.removeFromTop (gap);
+            layoutRow (r.removeFromTop (rowH), sourceToggle, fem::maxSources);
+        }
+
+        colA.removeFromTop (10);
         const int meterH = 14, scaleH = 12;
         ioPanel = colA.removeFromTop (2 * padding + titleH + boxH + gap
                                       + 2 * meterH + 4 + scaleH);
@@ -1001,11 +1055,11 @@ void FemPlateAudioProcessorEditor::resized()
 
     if (advancedVisible && ! designMode)
     {
-        cascPanel = colB.removeFromTop (2 * padding + titleH + 6 * boxH + 5 * gap);
+        cascPanel = colB.removeFromTop (2 * padding + titleH + 5 * boxH + 4 * gap);
         auto r = cascPanel.reduced (padding);
         r.removeFromTop (titleH);
-        for (auto* k : { &cascAmpKnob, &cascDriveKnob, &cascWinKnob,
-                         &cascAttKnob, &cascRelKnob, &cascOverKnob })
+        for (auto* k : { &cascDriveKnob, &cascWinKnob, &cascAttKnob,
+                         &cascRelKnob, &cascOverKnob })
         {
             k->setBounds (r.removeFromTop (boxH));
             r.removeFromTop (gap);

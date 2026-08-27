@@ -490,7 +490,7 @@ FemPlate realises each oscillator as a second-order IIR resonator, exactly
 as in the MechanOdd modal resonators: one constant-peak-gain band-pass
 biquad per mode (RBJ ``cookbook'' coefficients \cite{rbj}) with
 $Q_k = 1/(2\zeta_k)$, excited by $\varphi_k(\bm{x}_h) F$ and weighted on
-output by $\varphi_k(\bm{x}_o)$. Up to 512 modes are active --- though the
+output by $\varphi_k(\bm{x}_o)$. Up to 1024 modes are active --- though the
 bank stops at the highest one still below $0.47 f_s$, which at a high $f_1$
 is a small fraction of them; the rest would cost a resonator each and
 return silence. The bank is
@@ -799,6 +799,7 @@ control, at an adjustable fraction (\emph{Overlap}, default $0.1$) of the
   \zeta_l \;\ge\; \mathrm{cascade} \times \mathrm{Overlap} \times
       \frac{\tfrac12 (f_{l+1} - f_{l-1})}{2 f_l},
   \qquad l \notin \mathcal{B}_0,
+  \label{eq:overlap}
 \end{equation}
 %
 turning the receiving comb into a quasi-continuum when the cascade is
@@ -862,9 +863,27 @@ Output point, five positions (drive, measured on the modes) & $0.00$ \\
 %
 The few dB left on the damping rows are not drive: the targets ring for
 longer or shorter with the damping, and the middle rungs are sources for
-the upper ones. Meanwhile the Cascade knob spans $18$\,dB over its travel
-and a force-$10$ hit shimmers $45$\,dB more than a force-$1$ one --- the
+the upper ones. Meanwhile the Cascade knob spans $35$\,dB over its travel
+and a force-$10$ hit shimmers $75$\,dB more than a force-$1$ one --- the
 effect stays amplitude-gated, which is the part that \emph{is} physical.
+
+The ladder has two controls. The injection gain $A$ is pinned at $10$: a
+gain and an amount in series are one control between them, so the Cascade
+amount now spans that range on its own. What is left beside it is Drive,
+which moves the $\tanh$ knee and so changes the \emph{shape} of the
+carrier rather than its size --- the one of the three that was not a
+duplicate. Two consequences are worth stating. Pinning $A$ high puts the
+ladder on the steep part of $\tanh^3$, which makes the shimmer more
+sensitive to anything altering the source level: the residual spread across
+the Material knob, $25$\,dB before, is $57$\,dB now. It also made the
+amount knob well behaved, the run above rising monotonically where it
+previously turned back on itself near the top.
+
+The amount multiplies the bandwidth floor of \eqref{eq:overlap} as well as
+the injection. That is not tidiness: a floor that ignored the amount would
+widen --- and so damp --- every target mode of a plate whose cascade was
+switched off, making a control that was doing nothing else audibly shorten
+the top of the spectrum.
 
 \paragraph{Depletion (low-frequency loss).}
 The transfer \eqref{eq:cascade} is additive: it copies energy upward but
@@ -912,7 +931,7 @@ Even a 256-mode FEM bank remains a sparse comb at the top of the
 spectrum, and solving for many hundreds of accurate FEM modes is
 prohibitive (\S\ref{sec:eig}) --- while a convincing crash needs a dense
 receiving continuum up to Nyquist. FemPlate therefore fills the bank
-(to 512 modes in all) with \emph{synthetic} modes above the FEM set,
+(to 1024 modes in all) with \emph{synthetic} modes above the FEM set,
 built from asymptotics instead of the discrete operator:
 %
 \begin{itemize}
@@ -945,6 +964,88 @@ the quasi-continuum the cascade ladder needs --- the reasoning is that of
 statistical energy analysis \cite{lyon}: above a few dozen mode indices,
 individual eigenfrequencies are perceptually interchangeable and only
 their density and statistics matter.
+
+% ============================================================================
+\subsection{Stereo placement of the tail}
+\label{sec:tailspread}
+
+The random-wave shapes that make the tail convincing also make it
+\emph{mono}. A pickup at $\bm{x}_p$ reads mode $k$ with gain
+$\varphi_k(\bm{x}_p)$, so the power it collects from a group of $N$
+modes is
+%
+\begin{equation}
+  P(\bm{x}_p) \;=\; \sum_{k} \varphi_k(\bm{x}_p)^2
+  \;\xrightarrow[\;N \to \infty\;]{}\; \frac{N}{A},
+  \label{eq:tailpower}
+\end{equation}
+%
+independently of $\bm{x}_p$, since mass normalisation fixes
+$\overline{\varphi^2} = 1/A$ at every interior point
+(\S\ref{sec:tail}). Every term is positive, so the sum concentrates:
+measured on the default plate, two pickups differ by $2.1$~dB over the
+first four modes and by $0.29$~dB over all 512. The cascade regenerates
+its shimmer across hundreds of tail modes at once, so
+\eqref{eq:tailpower} applies in full and the whole of it arrives at
+both channels at the same level. The low modes, being few, keep the
+strong per-mode differences ($\approx 15$~dB rms between two points,
+more near a nodal line) that give the bottom of the spectrum its width.
+
+No amount of decorrelation repairs this, because nothing is correlated:
+the interchannel correlation of the fine structure above $2$~kHz is
+already only $-0.2$ to $-0.35$. What matches is the \emph{envelope}
+($0.96$ to $0.98$), and it matches at every lag within $\pm 1$~ms, so a
+delay --- including the physically motivated one, the bending-wave
+travel time between pickups, which is $200$ to $560\,\mu$s here and
+squarely in the interaural range --- can only translate the correlation
+peak, never lower it. It would move the shimmer off centre, not widen
+it.
+
+What does not concentrate is the \emph{signed} sum over a band,
+%
+\begin{equation}
+  S_b(\bm{x}_p) \;=\; \sum_{k \in b} \varphi_k(\bm{x}_p),
+  \qquad
+  \mathbb{E}[S_b] = 0, \quad \mathrm{Var}[S_b] = \frac{N_b}{A},
+  \label{eq:signedsum}
+\end{equation}
+%
+a random walk whose terms carry Berry's random phases and so cancel
+rather than accumulate. $|S_b|$ stays of order $\sqrt{N_b/A}$ for any
+$N_b$, and the ratio $|S_b(\bm{x}_1)|/|S_b(\bm{x}_2)|$ between two
+pickups therefore keeps a broad distribution however many modes the band
+holds. FemPlate uses it as the band's stereo placement,
+%
+\begin{equation}
+  p_b \;=\; \frac{|S_b^R| - |S_b^L|}{|S_b^R| + |S_b^L|} \;-\; \bar{p},
+  \label{eq:tailpan}
+\end{equation}
+%
+clamped to $|p_b| \le 0.8$ and fed to the same equal-power law as the
+pickup pan, then folded into the per-mode output weights so that the
+audio loop is untouched and the whole construction costs nothing per
+sample. Subtracting the mean $\bar{p}$ keeps \eqref{eq:tailpower},
+which is a real property of the plate: the two channels genuinely do
+receive the same total, and only the placement of one band relative to
+its neighbours is the random walk's to decide. Without it the tail
+acquires a lateral shift of several dB, which is the one thing a delay
+could already have done.
+
+Bands are spaced geometrically, about three to the octave. The bound
+that matters is perceptual rather than numerical: bands much narrower
+than an auditory filter are summed back together by the listener, which
+re-centres them, and a third of an octave stays comfortably wider than
+an ERB across the tail's range. Measured one auditory filter at a time
+on the default plate, with two pickups hard panned at different points,
+the rms interchannel level difference across the tail rises from
+$1.1$--$1.8$~dB to $5.1$--$7.9$~dB depending on mode count, with the
+mono sum unchanged to $0.001$~dB and a single centred pickup left
+untouched.
+
+Only the tail is treated this way. Below the last FEM mode the shapes
+are computed eigenvectors carrying a genuine position dependence, and
+replacing them with a band statistic would discard the very thing
+\S\ref{sec:eig} went to the trouble of solving for.
 
 % ============================================================================
 \subsection{Relation to other nonlinear plate synthesis}

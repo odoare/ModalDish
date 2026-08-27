@@ -77,12 +77,13 @@ namespace
     // proportional to 1/zeta. The ladder's rung-to-rung gain therefore
     // carries a 1/zeta whatever weight is used, and the cubic then cubes
     // whatever is left of it. Weighting the injection by sqrt(zeta) cancels
-    // half of that, which is the calibration the Cascade knob and its Amp,
-    // Drive and gate settings were all tuned against.
+    // half of that, which is the calibration the Drive and gate settings were
+    // all tuned against.
     //
-    // Measured, sweeping the exponent of zeta in this weight:
+    // Measured, sweeping the exponent of zeta in this weight (with the
+    // cascade amount that then existed swept over its range):
     //
-    //     exponent   Material spread   Cascade knob over its range
+    //     exponent   Material spread   shimmer over that range
     //       0.5        24.8 dB           -71 -> -60 dB  (works)
     //       0.75       11.9 dB           -71 -> -74 dB  (inverted)
     //       1.0         9.3 dB           -71 -> -77 dB  (inverted)
@@ -90,9 +91,9 @@ namespace
     // Cancelling the ladder's 1/zeta outright does flatten the shimmer
     // against the damping knobs, and starves the ladder doing it: past about
     // 0.5 the injection falls faster than the cubic can make up, so turning
-    // Cascade up makes the plate quieter at the top. 0.5 is the calibration
-    // the Cascade knob, its Amp and Drive settings and the gate thresholds
-    // were all tuned against, and it stays.
+    // the cascade up made the plate quieter at the top. 0.5 is the
+    // calibration the Drive setting and the gate thresholds were tuned
+    // against, and it stays.
     //
     // How flat the shimmer should be against damping is a playability
     // question, not a physical one — a real plate cascades far more freely
@@ -118,6 +119,20 @@ namespace
     // tuning knob.
     constexpr float zetaRef = 0.01f;
 
+    /** Equal-power pan normalised so that a centred position is unity in both
+        channels rather than the usual -3 dB. Shared by the pickup pan and by
+        the tail spread, which needs the same "centre changes nothing" property
+        for a different reason: see updateTailSpread. */
+    inline void equalPowerPan (float pan, float level, float& gainL, float& gainR) noexcept
+    {
+        constexpr float centreUnity = 1.41421356f;   // sqrt(2)
+        const float theta = 0.25f * juce::MathConstants<float>::pi
+                            * (juce::jlimit (-1.0f, 1.0f, pan) + 1.0f);
+        const float g = centreUnity * level;
+        gainL = g * std::cos (theta);
+        gainR = g * std::sin (theta);
+    }
+
     // Hammer forces are impulsive and benefit from a little headroom. Note
     // that a velocity-1, force-1 hit peaks well below unity (~0.012 on the
     // default plate): a short pulse only deposits a little energy in each
@@ -141,7 +156,7 @@ namespace
     constexpr double gammaCap = 4.0;
 
     // Windowed cascade ladder: band b is driven by
-    // fb_b = cascade * cascAmp * gate_b * tanh(cascDrive * src_b)^3, with
+    // fb_b = cascade * cascadeInjectionAmp * gate_b * tanh(cascDrive*src_b)^3,
     // src_b the output of the cascWindow bands directly below b (a wide
     // source window lets the loud strike band drive the top bands almost
     // directly and the whole spectrum lights up at once). A cubic only
@@ -165,13 +180,35 @@ namespace
     // settings therefore keep their meaning.
     constexpr float cascadeSourceGain = 3.0f;
 
+    // Injection gain of the ladder, formerly the Casc Amp parameter. It is
+    // pinned because a gain and an amount in series are one control between
+    // them: the cascade amount now spans this whole range on its own, so
+    // amount 1 is what Amp 10 used to be and amount 0.11 what its voiced 1.1
+    // was. Drive keeps its own knob because it changes the *shape* of the
+    // carrier rather than only its size.
+    constexpr float cascadeInjectionAmp = 10.0f;
+
     // Depletion couples the two ends of the ladder: a source band's filter
-    // states decay by an extra factor (1 - deplete * cascade * depleteRate
-    // * activity) per sample, activity being the mean gate level of the
-    // bands it feeds. At full depletion/activity the extra decay time is
-    // 1/(depleteRate * fs) ~ 70 ms at 48 kHz: the lows audibly hand their
-    // energy to the shimmer instead of ringing on untouched.
-    constexpr float depleteRate = 3.0e-4f;
+    // states decay by an extra factor (1 - deplete * cascade * depletePerSample
+    // * activity) per sample, activity being the mean gate level of the bands
+    // it feeds. At full depletion/activity the extra decay time is this tau:
+    // the lows audibly hand their energy to the shimmer instead of ringing on
+    // untouched.
+    //
+    // Stated in seconds, not per sample. It used to be a bare per-sample
+    // constant of 3e-4, which made the time it stood for halve every time the
+    // sample rate doubled - a control calibrated by ear at 48 kHz decayed
+    // twice as fast at 96 kHz. The value below is exactly what that constant
+    // meant at 48 kHz, so the change is a no-op there and a fix everywhere
+    // else. PlateSynth::prepare turns it into the per-sample factor.
+    constexpr double depleteTauSec = 1.0 / (3.0e-4 * 48000.0);   // 69.4 ms
+
+    // Slew of the Berger stiffening towards its target, as a time constant
+    // rather than a fixed step per decimated update - same reason: the update
+    // period is a fixed number of *samples*, so a fixed step per update was a
+    // slew whose duration depended on the sample rate. This value reproduces
+    // the old 0.2 per update exactly at 48 kHz.
+    constexpr double gammaSlewTauSec = 0.002987613;              // 2.99 ms
 
     // All of these are exposed as plugin parameters (CASCADE panel) while
     // the effect is being voiced; Params holds the defaults.
@@ -183,6 +220,13 @@ void PlateSynth::prepare (double sampleRate)
     // ~20 ms energy follower: fast enough for the attack glide, slow enough
     // not to track individual cycles of the low modes.
     envCoef = 1.0f - std::exp ((float) (-1.0 / (0.02 * fs)));
+
+    // Everything below is a duration, so every one of them is turned into a
+    // per-step coefficient here, where the sample rate is known. Nothing in
+    // the per-sample path may hold a bare rate constant: see depleteTauSec.
+    depletePerSample = (float) (1.0 - std::exp (-1.0 / (depleteTauSec * fs)));
+    gammaSlew = 1.0 - std::exp (-(double) nlUpdatePeriod / (gammaSlewTauSec * fs));
+
     updateCascadeEnvelopes();
     reset();
     dirty = true;
@@ -242,8 +286,8 @@ void PlateSynth::update (const ModalModel* newModel, const Params& params)
            ! juce::approximatelyEqual (params.tension,  current.tension)
         || ! juce::approximatelyEqual (params.viscDamp, current.viscDamp)
         || ! juce::approximatelyEqual (params.matDamp,  current.matDamp)
-        || ! juce::approximatelyEqual (params.cascade,  current.cascade)      // overlap floor
         || ! juce::approximatelyEqual (params.cascOverlap, current.cascOverlap)
+        || ! juce::approximatelyEqual (params.cascade,  current.cascade)  // overlap floor
         || params.numModes != current.numModes;
 
     // Pickups are split in two, because moving one is not the same kind of
@@ -285,7 +329,6 @@ void PlateSynth::update (const ModalModel* newModel, const Params& params)
         || ! juce::approximatelyEqual (params.cascReleaseMs, current.cascReleaseMs);
 
     current = params;
-    cascEff = current.cascade;
     if (envChanged)
         updateCascadeEnvelopes();
 
@@ -332,6 +375,7 @@ void PlateSynth::retune()
         bandStart[b] = juce::jmin (activeModes,
                                    juce::jmax (b, activeModes * b / numCascadeBands));
     cascadeSplit = juce::jmax (1, bandStart[1]);
+    cascEff = current.cascade;
 
     // Mass-normalised shapes satisfy int phi^2 dA = 1, so a typical value of
     // phi_k is 1/sqrt(A): that is the constant the cascade source uses in
@@ -419,9 +463,11 @@ void PlateSynth::retuneBank()
                                           + (double) current.matDamp * nu[k]));
 
         // Cascade targets: floor the bandwidth (2 zeta f) at cascOverlap
-        // times the local mode spacing, scaled by the damping-compensated
-        // cascade amount, so the receiving comb overlaps into a
-        // quasi-continuum when driven.
+        // times the local mode spacing, scaled by the cascade amount, so the
+        // receiving comb overlaps into a quasi-continuum when driven -- and
+        // only when driven. The amount has to be in here: without it a plate
+        // with the cascade at zero would still have every target mode widened
+        // (and so damped) by a control that is doing nothing else.
         if (k >= cascadeSplit && cascEff > 0.0f)
         {
             const double spAbove = k + 1 < activeModes ? freq[k + 1] - freq[k]
@@ -512,7 +558,6 @@ void PlateSynth::updatePickupMix() noexcept
     // replaces, for no reason the player would recognise; the sqrt(2) puts
     // the centre back at unity and hard-panned at +3 dB in its own channel,
     // which is the same total power either way.
-    constexpr float centreUnity = 1.41421356f;   // sqrt(2)
     for (int p = 0; p < fem::maxPickups; ++p)
     {
         const auto& pk = current.pickups[p];
@@ -521,10 +566,7 @@ void PlateSynth::updatePickupMix() noexcept
             pickupGainL[p] = pickupGainR[p] = 0.0f;
             continue;
         }
-        const float theta = 0.25f * juce::MathConstants<float>::pi
-                            * (juce::jlimit (-1.0f, 1.0f, pk.pan) + 1.0f);
-        pickupGainL[p] = centreUnity * pk.level * std::cos (theta);
-        pickupGainR[p] = centreUnity * pk.level * std::sin (theta);
+        equalPowerPan (pk.pan, pk.level, pickupGainL[p], pickupGainR[p]);
     }
 
     // The collapse: however many pickups are on, the audio loop sees two
@@ -540,6 +582,117 @@ void PlateSynth::updatePickupMix() noexcept
         }
         outAmpL[k] = compensation[k] * l;
         outAmpR[k] = compensation[k] * r;
+    }
+
+    updateTailSpread();
+}
+
+void PlateSynth::updateTailSpread() noexcept
+{
+    // Why the tail needs help, and only the tail.
+    //
+    // A pickup's gain on one mode is phi_k at its position, which differs
+    // wildly from pickup to pickup: a single mode read at two points differs
+    // by ~15 dB rms, and more if one of them sits near a node. That is what
+    // makes the low end wide - each partial gets its own place in the image.
+    //
+    // Sum over many modes, though, and the law of large numbers erases it.
+    // Each channel's gain tends to sum_k phi_k^2, which converges to the same
+    // spatial average wherever the pickup is: measured on the default plate,
+    // two pickups differ by 2.1 dB over the first four modes and by 0.29 dB
+    // over all 512. So everything the cascade regenerates - hundreds of modes
+    // at once - lands in the same place, the middle. Neither a decorrelator
+    // nor a delay can move it: the fine structure up there is already diffuse
+    // (interchannel correlation about -0.3), and the two channels' envelopes
+    // match at 0.96 to 0.98 for *every* lag within +/-1 ms, so a delay could
+    // only shift the shimmer off centre, never widen it. The levels are equal
+    // and the envelopes are equal, and that is the whole of it.
+    //
+    // The cure is to restore a level difference that does not average away.
+    // Take it per band from the *signed* sum of the readout weights rather
+    // than their sum of squares: squares all carry the same sign and so
+    // converge, while the signed sum is a random walk that keeps a magnitude
+    // and a sign specific to where the pickups actually are. Fold the result
+    // straight into outAmpL/R, so the audio loop is untouched and this costs
+    // nothing per sample.
+    //
+    // Only above the last FEM mode, where the mode "shapes" are the synthetic
+    // plane waves of the statistical tail. Below that they are computed
+    // eigenvectors that already carry a real position dependence, and band
+    // resolution would be throwing away physics we went to the trouble of
+    // solving for.
+    if (model == nullptr)
+        return;
+
+    const int tailStart = juce::jlimit (0, liveModes, model->numFemModes());
+    if (tailStart < 1 || liveModes - tailStart < 8)
+        return;   // too few tail modes to make a band sum mean anything
+
+    // Band edges geometric in mode index, which for a plate is geometric in
+    // frequency too (constant modal density; the cascade bands rely on
+    // the same fact). Roughly three bands to the octave, because the width
+    // has to survive the ear as well as the arithmetic: bands much narrower
+    // than an auditory filter get summed back together by the listener, which
+    // re-centres them and undoes the whole exercise. A third of an octave is
+    // comfortably wider than an ERB everywhere the tail lives.
+    const double span = (double) liveModes / (double) tailStart;
+    const int numBands = juce::jlimit (2, numTailBands,
+                                       (int) std::lround (3.0 * std::log2 (span)));
+
+    int edge[numTailBands + 1] {};
+    for (int b = 0; b <= numBands; ++b)
+    {
+        const double f = std::pow (span, (double) b / (double) numBands);
+        edge[b] = juce::jlimit (tailStart, liveModes,
+                                (int) std::lround ((double) tailStart * f));
+        if (b > 0)
+            edge[b] = juce::jmax (edge[b], juce::jmin (liveModes, edge[b - 1] + 1));
+    }
+    edge[numBands] = liveModes;
+
+    float pan[numTailBands] {};
+    float mean = 0.0f;
+    for (int b = 0; b < numBands; ++b)
+    {
+        float sumL = 0.0f, sumR = 0.0f;
+        for (int k = edge[b]; k < edge[b + 1]; ++k)
+        {
+            sumL += outAmpL[k];
+            sumR += outAmpR[k];
+        }
+
+        // Magnitudes only: the sign of a random walk says nothing about which
+        // side the band belongs on, its size does.
+        const float aL = std::abs (sumL), aR = std::abs (sumR);
+        const float total = aL + aR;
+        pan[b] = total > 1.0e-12f
+                   ? juce::jlimit (-tailPanLimit, tailPanLimit, (aR - aL) / total)
+                   : 0.0f;
+        mean += pan[b];
+    }
+    mean /= (float) numBands;
+
+    for (int b = 0; b < numBands; ++b)
+    {
+        // Scatter without shifting. Summed over enough modes the two channels
+        // really do receive the same total, whatever the pickup positions
+        // (0.29 dB apart over 512 modes on the default plate), so the tail's
+        // overall balance is not the random walk's to set: only the placement
+        // of one band relative to the others is. Taking the mean out keeps the
+        // measured fact and restores the scatter the averaging destroyed.
+        const float centred = juce::jlimit (-tailPanLimit, tailPanLimit, pan[b] - mean);
+
+        // Equal power, and unity both sides when a band has no preference.
+        // One centred pickup weights both channels alike, so every band lands
+        // there and a single pickup still cannot manufacture a stereo image
+        // out of nothing (to within the last bit of cos and sin).
+        float gainL = 1.0f, gainR = 1.0f;
+        equalPowerPan (centred, 1.0f, gainL, gainR);
+        for (int k = edge[b]; k < edge[b + 1]; ++k)
+        {
+            outAmpL[k] *= gainL;
+            outAmpR[k] *= gainR;
+        }
     }
 }
 
@@ -761,8 +914,9 @@ void PlateSynth::updateDynamicTension() noexcept
     const double target = juce::jlimit (0.0, gammaCap,
                                         nlGain * (double) current.nonlin * (double) envStretch);
 
-    // Slew over a few updates (~ a couple of ms) so the glide is smooth.
-    gamma += 0.2 * (target - gamma);
+    // Slew over gammaSlewTauSec so the glide is smooth. The coefficient
+    // carries nlUpdatePeriod, because this runs on the decimated tick.
+    gamma += gammaSlew * (target - gamma);
 
     // Retune only when mode 1 moved by more than ~2 cents:
     // d(omega)/omega = 0.5 * d(gamma) / (1 + gamma).
@@ -808,7 +962,7 @@ void PlateSynth::processSample (float inL, float inR, float& outL, float& outR) 
             gateEnv[b] += (target > gateEnv[b] ? attackCoef[b] : releaseCoef)
                           * (target - gateEnv[b]);
 
-            cascadeFb[b] = cascEff * current.cascAmp * gateEnv[b] * carrier;
+            cascadeFb[b] = cascEff * cascadeInjectionAmp * gateEnv[b] * carrier;
         }
     }
     else
@@ -857,7 +1011,7 @@ void PlateSynth::processSample (float inL, float inR, float& outL, float& outR) 
             }
             if (n > 0)
                 bandDecay[b] = 1.0f - current.cascDeplete * cascEff
-                                      * depleteRate * (act / (float) n);
+                                      * depletePerSample * (act / (float) n);
         }
     }
 

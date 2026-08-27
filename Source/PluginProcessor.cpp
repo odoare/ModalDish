@@ -104,8 +104,7 @@ FemPlateAudioProcessor::FemPlateAudioProcessor()
     pForce    = apvts.getRawParameterValue (fem::id::force);
     pGlide    = apvts.getRawParameterValue (fem::id::glide);
     pNonlin   = apvts.getRawParameterValue (fem::id::nonlin);
-    pCascade  = apvts.getRawParameterValue (fem::id::cascade);
-    pCascAmp     = apvts.getRawParameterValue (fem::id::cascAmp);
+    pCascade     = apvts.getRawParameterValue (fem::id::cascade);
     pCascDrive   = apvts.getRawParameterValue (fem::id::cascDrive);
     pCascAttack  = apvts.getRawParameterValue (fem::id::cascAttack);
     pCascRelease = apvts.getRawParameterValue (fem::id::cascRelease);
@@ -211,20 +210,32 @@ juce::AudioProcessorValueTreeState::ParameterLayout FemPlateAudioProcessor::crea
     p.push_back (std::make_unique<FloatParam> (
         juce::ParameterID (fem::id::nonlin, 1), "Nonlinear",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.0f, 0.5f), 0.0f));
+
+    // The cascade amount, on the main panel: it scales the whole ladder and
+    // it is the off switch, which matters beyond the shimmer itself because
+    // the Overlap bandwidth floor is scaled by it too. At 0 the target modes
+    // keep the plate's own damping; without an amount in that expression,
+    // Overlap would widen them while nothing was being pumped.
+    //
+    // Now that the separate injection gain is pinned at 10, this knob spans
+    // that whole range on its own: 1 is what Amp 10 was, 0.11 what its voiced
+    // 1.1 was.
     p.push_back (std::make_unique<FloatParam> (
         juce::ParameterID (fem::id::cascade, 1), "Cascade",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.0f, 0.5f), 0.0f));
 
     // Cascade tuning set (see PlateSynth.h); defaults are the voiced values.
-    // Amp is deliberately capped at 1.5: higher injection gains combined
-    // with a hot Drive get loud enough to be unpleasant.
+    //
+    // Drive shapes the carrier rather than sizing it, which is why it lives
+    // here with the tuning constants and the amount lives on the main panel.
+    // 8 with the amount at 1 reproduces what Amp 1.1 / Drive 16 used to give
+    // at the shipped Force of 1; the equivalence moves with how hard the
+    // plate is played, because the tanh knee does (Force 2 wants 7.7, Force 6
+    // wants 6.0, Force 15 wants 4.0 against that same reference).
     p.push_back (std::make_unique<FloatParam> (
-        juce::ParameterID (fem::id::cascAmp, 1), "Casc Amp",
-        juce::NormalisableRange<float> (0.0f, 2.5f, 0.0f, 0.7f), 1.1f));
+        juce::ParameterID (fem::id::cascDrive, 1), "Casc Drive", logRange (0.1f, 30.0f), 8.0f));
     p.push_back (std::make_unique<FloatParam> (
-        juce::ParameterID (fem::id::cascDrive, 1), "Casc Drive", logRange (0.25f, 20.0f), 16.0f));
-    p.push_back (std::make_unique<FloatParam> (
-        juce::ParameterID (fem::id::cascAttack, 1), "Casc Att", logRange (1.0f, 200.0f), 30.0f,
+        juce::ParameterID (fem::id::cascAttack, 1), "Casc Att", logRange (1.0f, 1000.0f), 30.0f,
         juce::AudioParameterFloatAttributes().withLabel ("ms/band")));
     p.push_back (std::make_unique<FloatParam> (
         juce::ParameterID (fem::id::cascRelease, 1), "Casc Rel", logRange (20.0f, 4000.0f), 2000.0f,
@@ -255,6 +266,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout FemPlateAudioProcessor::crea
             { 0.30f, 0.50f, -0.7f, false },
             { 0.70f, 0.50f,  0.7f, false },
             { 0.50f, 0.72f,  0.0f, false },
+            { 0.35f, 0.30f, -0.4f, false },
+            { 0.65f, 0.30f,  0.4f, false },
+            { 0.22f, 0.62f, -1.0f, false },
+            { 0.78f, 0.62f,  1.0f, false },
         };
 
         for (int i = 0; i < fem::maxPickups; ++i)
@@ -405,8 +420,7 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     params.force    = pForce->load();
     params.glideMs  = pGlide->load();
     params.nonlin   = pNonlin->load();
-    params.cascade  = pCascade->load();
-    params.cascAmp       = pCascAmp->load();
+    params.cascade       = pCascade->load();
     params.cascDrive     = pCascDrive->load();
     params.cascAttackMs  = pCascAttack->load();
     params.cascReleaseMs = pCascRelease->load();

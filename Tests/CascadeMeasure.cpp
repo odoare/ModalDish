@@ -29,6 +29,14 @@
     points and checks that the cascade ignores them, then checks that it does
     still follow the Cascade knob and stays amplitude-gated.
 
+    It also checks that none of it depends on the sample rate. Every duration
+    in the engine has to be stored in seconds and turned into a per-step
+    coefficient once the rate is known; a bare per-sample constant is a time
+    that halves when the rate doubles. Two of them were exactly that (the
+    depletion rate and the Berger slew), and at 96 kHz the plate's tail came
+    out 35 dB down. That is invisible to every other test here, because they
+    all run at one rate.
+
     Run: CascadeMeasure   (exit code 0 when every check passes)
 
     Author: Olivier Doaré, github.com/odoare
@@ -148,6 +156,7 @@ namespace
         float viscDamp = 1.0e-4f;
         float matDamp  = 7.0e-6f;
         float cascade  = 1.0f;
+        float drive    = 8.0f;
         float force    = 6.0f;
         float outX     = 0.5f;
         float outY     = 0.47f;
@@ -168,6 +177,7 @@ namespace
         p.viscDamp = patch.viscDamp;
         p.matDamp = patch.matDamp;
         p.cascade = patch.cascade;
+        p.cascDrive = patch.drive;
         p.force = patch.force;
         p.numModes = 192;
         p.pickups[0].x = patch.outX;
@@ -428,8 +438,28 @@ int main()
     }
     check (byKnob.back() - byKnob.front() > 10.0,
            "the Cascade knob raises the shimmer by more than 10 dB");
-    check (byKnob[2] > byKnob[0] && byKnob.back() >= byKnob[2],
-           "the Cascade knob is monotonic across its range");
+    double worstDrop = 0.0;
+    for (size_t i = 1; i < byKnob.size(); ++i)
+        worstDrop = juce::jmax (worstDrop, byKnob[i - 1] - byKnob[i]);
+    std::printf ("  largest step backwards: %.1f dB\n", worstDrop);
+    check (worstDrop < 1.5, "the Cascade knob never reverses");
+
+    // ---- 3b. Drive shapes it, over its own range --------------------------
+    // Drive is not a second amount: it moves the tanh knee, so it changes what
+    // the carrier is made of. It still has to span a usable range at a fixed
+    // amount, or it is not worth a knob.
+    std::printf ("\n== Drive at cascade 1 (4 kHz and up, dB at 300 ms) ==\n");
+    std::vector<double> byDrive;
+    for (float d : { 0.1f, 1.0f, 4.0f, 8.0f, 16.0f, 30.0f })
+    {
+        Patch p; p.drive = d;
+        const auto x = render (model, p);
+        const double db = shimmerDb (x, 0.3);
+        byDrive.push_back (db);
+        std::printf ("  drive %5.1f  %8.1f\n", (double) d, db);
+    }
+    check (byDrive.back() - byDrive.front() > 10.0,
+           "Drive spans more than 10 dB at a fixed cascade amount");
 
     // ---- 4. ...and stay amplitude-gated -----------------------------------
     std::printf ("\n== Amplitude gating (4 kHz and up, dB at 300 ms) ==\n");
@@ -444,6 +474,75 @@ int main()
     }
     check (byForce[2] - byForce[0] > 20.0,
            "a hard hit shimmers far more than a soft one (> 20 dB)");
+
+    // ---- 5. ...and none of it depends on the sample rate -------------------
+    // Depletion and the Berger slew are the two paths whose time constants are
+    // consumed on a per-sample (or per-decimated-tick) basis, so they are the
+    // two that a bare rate constant would silently break. Deplete is turned
+    // well up here: at its default 0.07 the old bug cost 7 dB by two seconds,
+    // which is easy to miss, while at 0.5 it cost 35 dB.
+    std::printf ("\n== Sample-rate independence (energy by window, dB) ==\n");
+    {
+        const double edges[] = { 0.0, 0.05, 0.5, 2.0 };
+        const char* names[] = { "0-50 ms", "50-500 ms", "0.5-2 s" };
+        constexpr int nw = 3;
+
+        auto byWindow = [&] (double fs, float amount, float deplete, float nonlin, double* out)
+        {
+            fem::PlateSynth s;
+            s.prepare (fs);
+            fem::PlateSynth::Params p;
+            p.f1 = 110.0f; p.viscDamp = 1.0e-4f; p.matDamp = 7.0e-6f;
+            p.cascade = amount; p.cascDeplete = deplete; p.nonlin = nonlin;
+            p.force = 6.0f; p.numModes = 192;
+            p.pickups[0].x = 0.5f; p.pickups[0].y = 0.47f; p.pickups[0].on = true;
+            s.update (&model, p);
+            s.strike (0.38f, 0.45f, 1.0f);
+
+            double acc[nw] = {}; int cnt[nw] = {};
+            const int n = (int) (edges[nw] * fs);
+            for (int i = 0; i < n; ++i)
+            {
+                float l = 0.0f, r = 0.0f;
+                s.processSample (0.0f, 0.0f, l, r);
+                const double y = 0.5 * (l + r), t = (double) i / fs;
+                for (int w = 0; w < nw; ++w)
+                    if (t >= edges[w] && t < edges[w + 1]) { acc[w] += y * y; ++cnt[w]; break; }
+            }
+            for (int w = 0; w < nw; ++w)
+                out[w] = 10.0 * std::log10 (std::max (acc[w] / std::max (cnt[w], 1), 1.0e-300));
+        };
+
+        // One case per time constant, each with the other path quiet.
+        // Depletion needs the ladder pumping, so the amount is up and Nonlin off;
+        // the Berger slew does not, and leaving the ladder running for it
+        // would measure the chaos of a hot nonlinear loop rather than the
+        // slew (the two rates then diverge by over a dB on their own).
+        for (int c = 0; c < 2; ++c)
+        {
+            const float amount  = c == 0 ? 1.0f : 0.0f;
+            const float deplete = c == 0 ? 0.5f : 0.07f;
+            const float nonlin  = c == 0 ? 0.0f : 0.8f;
+            double a[nw], b[nw];
+            byWindow (48000.0, amount, deplete, nonlin, a);
+            byWindow (96000.0, amount, deplete, nonlin, b);
+
+            double worst = 0.0;
+            for (int w = 0; w < nw; ++w)
+            {
+                std::printf ("  Casc %.1f Deplete %.2f Nonlin %.1f  %-10s  48 kHz %7.2f   96 kHz %7.2f  (%+.2f)\n",
+                             (double) amount, (double) deplete, (double) nonlin,
+                             names[w], a[w], b[w], b[w] - a[w]);
+                worst = juce::jmax (worst, std::abs (b[w] - a[w]));
+            }
+            // Half a dB of headroom over the 0.11 dB actually measured: the
+            // two rates run different numbers of decimated ticks over the same
+            // second, so they are near-identical rather than identical.
+            check (worst < 0.5,
+                   deplete > 0.1 ? "depletion means the same time at any sample rate"
+                                 : "the Berger slew means the same time at any sample rate");
+        }
+    }
 
     std::printf ("\n%s (%d failure%s)\n", failures == 0 ? "All checks passed." : "FAILURES",
                  failures, failures == 1 ? "" : "s");

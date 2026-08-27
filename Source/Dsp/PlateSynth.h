@@ -68,7 +68,8 @@
       omega_k, so zeta_k cancels in nlWeight_k y_k^2 and only the *decay*
       of the glide follows the damping knobs.
 
-    * Mode cascade ("cascade" knob): a windowed multi-band ladder with
+    * Mode cascade ("cascade" amount, shaped by "Casc Drive"): a windowed
+      multi-band ladder with
       transfer inertia. The bank is split into numCascadeBands frequency
       bands; band b is pumped by a tanh-bounded cubic of the output of the
       *cascWindow bands directly below it only* — summing all lower bands
@@ -86,13 +87,16 @@
       bound that renders it inaudible). Each target mode's injection is
       weighted by sqrt(zeta_k / zetaRef) — the ladder's own calibration,
       deliberately not the output gain rule, see cascadeInjectionGain in
-      the .cpp — and target bandwidths are floored —
-      proportionally to the cascade knob and the Overlap parameter — at a
-      fraction of the local mode spacing: enough overlap for the receiving
-      comb to catch the broadband products, low enough that the pumped
-      modes keep a natural ring once the pumping stops.
+      the .cpp — and target bandwidths are floored — proportionally to the
+      cascade amount and the Overlap parameter — at a fraction of the local
+      mode spacing: enough overlap for the receiving comb to catch the
+      broadband products, low enough that the pumped modes keep a natural
+      ring once the pumping stops. The amount scaling that floor is not a
+      detail: it is what makes a cascade of zero leave the plate's own
+      damping alone, rather than quietly widening every target mode while
+      nothing is being pumped.
 
-      The knob acts directly: the drive below carries no damping term, so
+      The amount acts directly: the drive below carries no damping term, so
       there is nothing for a damping compensation to correct.
 
       The source signal is the plate's *motion* over the whole plate, and
@@ -222,13 +226,12 @@ public:
         float matDamp   = 7.0e-6f;  // zeta of mode 1, material term
         float hammerMs  = 3.0f;     // half-sine shock duration
         float force     = 1.0f;     // hammer force amplitude
-        float nonlin    = 0.0f;     // 0..1 dynamic-tension (Berger) amount
-        float cascade   = 0.0f;     // 0..1 upward-cascade amount
+        float nonlin    = 0.0f;
+        float cascade   = 0.0f;     // 0..1 upward-cascade amount, 0 = off     // 0..1 dynamic-tension (Berger) amount
         float glideMs   = 0.0f;     // portamento; inert while notes only trigger
 
         // Cascade tuning set (see the class comment; defaults = voiced values).
-        float cascAmp       = 1.1f;    // injection gain A
-        float cascDrive     = 16.0f;   // tanh knee B
+        float cascDrive     = 8.0f;    // tanh knee B
         float cascAttackMs  = 30.0f;   // gate attack per band rung
         float cascReleaseMs = 2000.0f; // gate release
         float cascOverlap   = 0.1f;    // target bandwidth floor, x local spacing
@@ -364,6 +367,7 @@ private:
     void retuneBank();                // coefficients/amps at tension + T_dyn(gamma)
     void computeOutputWeights();      // phi_k at each pickup -> phiPickup
     void updatePickupMix() noexcept;  // phiPickup + levels/pans -> outAmpL/R
+    void updateTailSpread() noexcept; // band-resolution stereo spread of the tail
     /** The one place a hammer slot is filled: position, contact time and
         amplitude, whether the hit came from a click, a source or a note. */
     void fireHammer (float x, float y, float velocity,
@@ -450,7 +454,11 @@ private:
     int nextHammer = 0;
 
     // Base-frequency glide. The bank is tuned at exp2(f1Log); played notes
-    // move f1Log towards f1LogTarget by glideStep per decimated update
+    // move f1Log towards f1LogTarget by glideStep per decimated update.
+    // Never assigned: the glide is inert (the parameter is kept, its control
+    // is not). Whoever wires it up must derive the step from the glide time
+    // and fs, not pick a step per update, or it becomes another duration that
+    // depends on the sample rate.
     // (log2 domain, so a glide takes the same time whatever the interval),
     // and the bank is rewritten when it has drifted ~2 cents from the pitch
     // it currently sounds at — the same throttle the Berger glide uses.
@@ -468,13 +476,25 @@ private:
     // Nonlinear state (Berger dynamic tension + windowed cubic cascade).
     static constexpr int nlUpdatePeriod = 32;   // samples between gamma steps
     static constexpr int numCascadeBands = 8;
+
+    // Stereo spread of the statistical tail (see updateTailSpread). Sixteen
+    // bands over however many tail modes the mode count leaves above the FEM
+    // ones, and a pan clamp that stops a band whose signed sums happen to
+    // nearly cancel in one channel from snapping hard to the other.
+    static constexpr int numTailBands = 16;
+    static constexpr float tailPanLimit = 0.8f;
     float envCoef = 0.001f;              // stretching follower coefficient
+    // Per-step coefficients derived from durations in prepare(). They are not
+    // constants because a constant here would be a time that changed with the
+    // sample rate; see depleteTauSec and gammaSlewTauSec in the .cpp.
+    float depletePerSample = 3.0e-4f;    // extra decay of a depleted source band
+    double gammaSlew = 0.2;              // Berger stiffening slew, per decimated tick
     float envStretch = 0.0f;             // smoothed sum_k nlWeight_k y_k^2
     double gamma = 0.0;                  // slewed relative stiffening of mode 1
     double appliedGamma = 0.0;           // value the bank is currently tuned at
     int nlCountdown = nlUpdatePeriod;
     int cascadeSplit = 0;                // first mode of band 1 (targets start here)
-    float cascEff = 0.0f;                // cascade knob x material-damping scale
+    float cascEff = 0.0f;                // the cascade amount, as the DSP sees it
     int bandStart[numCascadeBands + 1] {};        // mode-index range of each band
     float cascadeW[fem::maxModes] {};    // injection weights (bands >= 1 only)
     float prevBandOut[numCascadeBands] {};        // per-band output, last sample

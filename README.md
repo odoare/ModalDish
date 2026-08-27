@@ -37,9 +37,9 @@ against analytic plates in `Tests/FemTests.cpp`.
 * **Hammer** is the duration of the half-sine shock of a mouse hit, and
   **Force** its amplitude (past unity it drives the nonlinearities hard).
 * The plate is heard through pickups placed on it (right-click/ctrl-drag
-  moves pickup 1). The plate is heard through up to four pickups, each with its own
-  position, level and pan, summing into a stereo pair; only pickup 1 is on by
-  default, which is the single mono listening point this replaced. Pan is
+  moves pickup 1). There are up to eight, matching the sources, each with its
+  own position, level and pan, summing into a stereo pair; only pickup 1 is on
+  by default, which is the single mono listening point this replaced. Pan is
   equal-power with the centre at unity, so a centred pickup at 0 dB is exactly
   what the mono output used to be.
 
@@ -56,15 +56,19 @@ against analytic plates in `Tests/FemTests.cpp`.
   the global Hammer and Force knobs.
 
   Both are linear mixes, so the audio loop costs the same whether one pickup
-  and one source are on or four and eight.
+  and one source are on or eight and eight.
 
-  On the plate, pickups are orchid circles labelled 1–4 and sources teal
+  On the plate, pickups are orchid circles labelled 1–8 and sources teal
   circles labelled a–h; a disabled one is a faint ring rather than gone, so it
-  can still be found. The gestures:
+  can still be found. The **PLATE POINTS** panel repeats those sixteen markers
+  as two rows of switches, pickups above and sources below, drawn as the very
+  markers they control so the rows read as a picture of what is currently on.
+  They are the same parameters as the **On** button in a marker's own panel and
+  as alt-click on the plate, so all three always agree. The gestures:
 
   | Gesture | Effect |
   | --- | --- |
-  | `1`–`4` / `a`–`h` with the mouse over the plate | put that pickup or source under the cursor, switching it on |
+  | `1`–`8` / `a`–`h` with the mouse over the plate | put that pickup or source under the cursor, switching it on |
   | click a marker | open its panel — every parameter of that one point |
   | alt-click a marker | switch it off |
   | click anywhere else | hit the plate there, with the global Hammer and Force |
@@ -120,13 +124,41 @@ nonlinearity (both 0 = exactly the linear model):
   Moving the pickup still changes what you *hear* of the shimmer, which is
   what a pickup is for, and the hit point still shapes the injection —
   that is the one position the nonlinearity has a physical claim to.
-  `Tests/CascadeMeasure.cpp` measures all of this. The voiced defaults are
-  Amp 1.1 (capped 1.5 — louder gets unpleasant), Drive 16, Window 4,
+  `Tests/CascadeMeasure.cpp` measures all of this.
+
+  There are two controls, not the three there once were. **Cascade** (main
+  panel) is the amount: it scales the whole ladder and it is the off switch.
+  That off position reaches further than the shimmer, because the Overlap
+  bandwidth floor below is scaled by the amount too — at Cascade 0 the target
+  modes keep the plate's own damping, where an ungated floor would quietly
+  widen them while nothing was being pumped. **Casc Drive** (Advanced) is
+  the tanh knee: it changes what the carrier is *made of* rather than how
+  much of it there is, which is why it is the one of the pair worth its own
+  knob. The separate injection gain that used to sit between them is pinned
+  at 10, a gain and an amount in series being one control between them, so
+  Cascade at 1 is what Amp 10 was and 0.11 what its voiced 1.1 was.
+
+  Two things about Drive. It is not gradual: at Cascade 1 and the shipped
+  Force, everything from 0.1 to 4 is silent and 4 to 16 covers 76 dB. And
+  where that window sits depends on how hard you play, because the tanh knee
+  does — 8 matches the old voiced sound at Force 1, 6 at Force 6, 4 at
+  Force 15.
+
+  The voiced defaults are Cascade 0 (off), Drive 8, Window 4,
   Attack 30 ms/band, Release 2 s, Overlap 0.1, Deplete 0.07, with
   Viscous ≈ 10⁻⁴ and Material ≈ 7·10⁻⁶ (Material's ζ ∝ ν law otherwise
   kills the top octave in milliseconds).
+
+  Every one of those durations means the same thing at any sample rate.
+  That is worth stating because it was not always true: the depletion rate
+  and the Berger stiffening slew were stored as per-sample constants, which
+  is a duration that halves each time the sample rate doubles. At 96 kHz
+  with Deplete up, the plate's tail came out 35 dB down. Durations now live
+  in seconds and become per-step coefficients in `prepare()`, where the rate
+  is known; `Tests/CascadeMeasure.cpp` renders the same patch at 48 and
+  96 kHz and holds the two within half a dB.
 * **Statistical mode tail** — above the FEM-computed modes (≤ 256) the
-  bank is filled to 512 with synthetic modes: Weyl-law spacing with
+  bank is filled to 1024 with synthetic modes: Weyl-law spacing with
   jittered gaps, tension sensitivity g = √λ (the exact high-frequency
   asymptote), and Berry random-plane-wave shapes `√(2/A)·cos(κ·x+ψ)`
   with κ = λ^¼ — so hit position still matters and the tail obeys the
@@ -135,9 +167,43 @@ nonlinearity (both 0 = exactly the linear model):
   of FEM modes; raise the **Modes** knob past the FEM count to engage
   it (the status line marks tail modes when displayed). The bank only
   processes modes below Nyquist, so at a high **Freq** the Modes knob
-  costs nothing past the point where the spectrum runs out: 512 modes at
-  f₁ = 110 Hz is 388 live and 7% of a core, at f₁ = 440 Hz it is 80 live
-  and under 2%.
+  costs nothing past the point where the spectrum runs out: at f₁ = 110 Hz
+  425 of them are live, at f₁ = 440 Hz only 90.
+
+  Because the tail continues at the plate's *own* Weyl spacing, bank size
+  buys range and not density — the gaps between modes are what they are, and
+  adding modes puts them above the ones already there rather than between
+  them. What that range is for is the bottom of the **Freq** range, where the
+  plate used to run out of spectrum: at f₁ = 55 Hz the bank stopped at
+  13.4 kHz and now reaches Nyquist (+12.8 dB at 16 kHz, +36.8 dB at 20 kHz),
+  and at f₁ = 20 Hz it reaches 9.5 kHz instead of 4.9 kHz. At f₁ = 110 Hz and
+  above, Nyquist was already the limit and nothing changes at all.
+
+  The tail is also where the shimmer's stereo image is made. A pickup
+  collects `Σ φ_k(x)²` from the modes it hears, and every term of that is
+  positive, so over hundreds of modes it converges to the same value
+  wherever the pickup sits: two pickups differ by 2.1 dB over four modes
+  and by 0.29 dB over all 512. The cascade spreads its shimmer across the
+  whole tail at once, so all of it used to arrive dead centre while the
+  low modes, being few, kept the ±15 dB per-mode differences that make
+  the bottom of the spectrum wide. Decorrelation cannot fix that (the
+  fine structure up there is already uncorrelated, at −0.2 to −0.35) and
+  neither can a delay: the two channels' envelopes match at 0.96–0.98 for
+  *every* lag within ±1 ms, so even the physically correct delay — the
+  200–560 µs it takes a bending wave to reach one pickup rather than the
+  other — could only shift the shimmer sideways. What does not converge
+  is the *signed* sum `Σ φ_k(x)` over a band, a random walk whose terms
+  cancel instead of accumulating, and whose ratio between two pickups
+  stays broadly spread however many modes the band holds. FemPlate takes
+  each band's pan from it, minus the mean so the tail scatters without
+  drifting to one side, over bands about three to the octave (any
+  narrower and the ear sums them back to the centre). Measured one
+  auditory filter at a time, the interchannel level difference across the
+  tail goes from 1.1–1.8 dB to 5.1–7.9 dB, the mono sum is unchanged to
+  0.001 dB, and a single centred pickup is left exactly as it was. It
+  applies only above the last FEM mode, where the shapes are synthetic
+  anyway; below that the computed eigenvectors carry a real position
+  dependence worth keeping. `Tests/IoTests.cpp` measures it.
 
   The **Grid** knob reaches 48, a limit inherited from the dense
   eigensolver that no longer applies. The matrices are sparse (a Morley
