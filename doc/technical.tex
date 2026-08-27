@@ -581,6 +581,24 @@ not even its mode-shape evaluation. The external audio input reaches the
 plate through the sources' sends (\emph{effect mode}), each source taking
 its own balance of the incoming stereo pair.
 
+The collapse is what makes per-pickup metering awkward, since after it no
+individual pickup's signal exists anywhere. A pickup's panel therefore
+carries a third weight vector, $c_k\,\ell_p\,\varphi_k(\bm{x}_p)$: mono,
+with the pickup's level $\ell_p$ but not its pan, so that it reads what the
+point is hearing rather than where that lands in the image. Only the pickup
+whose panel is open is metered --- one extra multiply-add per mode while a
+panel is up, against the eight that metering all of them would cost, which
+is four times the stereo mix itself.
+
+All the meters read peak, held and falling at $20$\,dB/s, rather than RMS.
+The quantity they are read for is clipping headroom, and a struck plate is
+peaky: measured on the default plate its $100$\,ms RMS sits $7.7$ to
+$11.6$\,dB below its sample peak across hammer times and dampings, so an
+RMS bar reads $+3$\,dBFS on an output that is really at $+13$. The hold is
+accumulated per block on the audio thread, so a transient cannot fall
+between two GUI frames; polled at $30$\,Hz it tracks the true peak to
+better than $0.7$\,dB.
+
 \paragraph{Output gain, and why it is exactly $1/\zeta_k$.}
 The RBJ constant-$0$\,dB-peak band-pass has, as an analog prototype,
 %

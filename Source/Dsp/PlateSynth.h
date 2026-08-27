@@ -242,6 +242,12 @@ public:
         float cascade   = 0.0f;     // 0..1 upward-cascade amount, 0 = off     // 0..1 dynamic-tension (Berger) amount
         float glideMs   = 0.1f;     // portamento time between played notes (ms)
 
+        // Which pickup the point panel's meter follows, or -1 for none. Not
+        // a plugin parameter — it follows an open window, not a saved
+        // setting — but it rides in here so that it reaches the audio thread
+        // by the one path everything else uses.
+        int meteredPickup = -1;
+
         // Cascade tuning set (see the class comment; defaults = voiced values).
         float cascDrive     = 8.0f;    // tanh knee B
         float cascAttackMs  = 30.0f;   // gate attack per band rung
@@ -345,6 +351,12 @@ public:
     /** Base frequency the bank is currently sounding at (Hz), for display. */
     float getBaseFrequency() const noexcept { return (float) std::exp2 (f1Log); }
 
+    /** The metered pickup's mono contribution to the last processSample:
+        its own Level applied, its Pan not, so it reads what that point
+        hears rather than where the point sits in the image. Zero unless
+        Params::meteredPickup names a pickup that is switched on. */
+    float getMeteredSample() const noexcept { return meterOut; }
+
     /** Audio thread: one stereo input sample in, one stereo plate sample out.
 
         The output is a stereo pair because the pickups pan; the input is a
@@ -388,6 +400,7 @@ private:
     void retuneBank();                // coefficients/amps at tension + T_dyn(gamma)
     void computeOutputWeights();      // phi_k at each pickup -> phiPickup
     void updatePickupMix() noexcept;  // phiPickup + levels/pans -> outAmpL/R
+    void updateMeterWeights() noexcept;  // phiPickup + level -> meterAmp (mono)
     void updateTailSpread() noexcept; // band-resolution stereo spread of the tail
     /** The one place a hammer slot is filled: position, contact time and
         amplitude, whether the hit came from a click, a source or a note. */
@@ -455,6 +468,12 @@ private:
     float pickupGainR[fem::maxPickups] {};
     float outAmpL[fem::maxModes] {};
     float outAmpR[fem::maxModes] {};
+    // Mono weights of the one pickup being metered: its Level applied, its
+    // Pan not. `metering` hoists the test out of the per-mode loop, and is
+    // false whenever no panel is open or the metered pickup is switched off.
+    float meterAmp[fem::maxModes] {};
+    float meterOut = 0.0f;
+    bool  metering = false;
     float hitWeights[fem::maxModes] {};  // phi_k(last hit), drives the cascade
 
     // Mode shapes at each source, and the two vectors the input sends

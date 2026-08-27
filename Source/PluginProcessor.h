@@ -39,6 +39,9 @@
 
 #include <FxmeTools/dsp/VuMeter.h>
 
+#include <atomic>
+#include <vector>
+
 //==============================================================================
 class FemPlateAudioProcessor : public juce::AudioProcessor,
                                public juce::ChangeBroadcaster,
@@ -136,10 +139,31 @@ public:
         Replaces the old note counter, which could only say that *something*
         had been hit and left the editor to guess where. */
     /** Output level in dBFS, channel 0 = left. Post Out Gain, so what the
-        meter shows is what leaves the plugin. */
-    float getOutputLevelDb (int channel) const noexcept
+        meter shows is what leaves the plugin.
+
+        This is a *peak* reading, held and then falling at `peakFallDbPerSec`.
+        RMS is the wrong quantity for these meters: their job is clipping
+        headroom, and a struck plate's 100 ms RMS sits 8 to 12 dB under its
+        sample peak, so an RMS bar reads +3 while the output is really +13.
+        The hold is computed per block on the audio thread rather than by the
+        editor, so a transient cannot be missed by a GUI frame landing
+        between blocks. */
+    float getOutputPeakDb (int channel) const noexcept
     {
-        return channel == 0 ? outMeterL.getRMS() : outMeterR.getRMS();
+        return (channel == 0 ? peakHoldL : peakHoldR).load (std::memory_order_relaxed);
+    }
+
+    /** Message thread: which pickup the point panel's meter follows, or -1.
+        A panel sets it when it opens and clears it when it closes, so at
+        most one pickup is ever metered. */
+    std::atomic<int> meteredPickup { -1 };
+
+    /** Level in dBFS of the pickup named by `meteredPickup`: mono, its own
+        Level applied and its Pan not, and pre Out Gain. Peak, held and
+        falling, for the same reason as the output meters above. */
+    float getPickupPeakDb() const noexcept
+    {
+        return peakHoldPickup.load (std::memory_order_relaxed);
     }
 
     int getHitCount() const noexcept              { return synth.getHitCount(); }
@@ -178,6 +202,27 @@ private:
 
     fem::PlateSynth synth;
     fxme::VuMeter outMeterL, outMeterR;
+
+    // Peak-hold ballistics, in dBFS. 20 dB/s is slow enough to read a
+    // transient off the bar and fast enough that the bar follows a decaying
+    // plate rather than sitting at the strike.
+    static constexpr float peakFallDbPerSec = 20.0f;
+    std::atomic<float> peakHoldL { -100.0f };
+    std::atomic<float> peakHoldR { -100.0f };
+    std::atomic<float> peakHoldPickup { -100.0f };
+
+    /** Fold one block's peak into a held reading. Both are dBFS, and the
+        floor at -100 keeps a silent hold from falling forever. */
+    static void holdPeak (std::atomic<float>& held, float blockDb, float fallDb) noexcept
+    {
+        const float fallen = held.load (std::memory_order_relaxed) - fallDb;
+        held.store (juce::jmax (blockDb, fallen), std::memory_order_relaxed);
+    }
+
+    // The pickup meter measures a signal that never reaches a bus, so it
+    // needs a block of its own to measure; sized in prepareToPlay.
+    fxme::VuMeter pickupMeter;
+    std::vector<float> pickupMeterScratch;
 
     // Cached raw parameter pointers (APVTS owns the atomics).
     std::atomic<float>* pF1 = nullptr;

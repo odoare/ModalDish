@@ -6,9 +6,10 @@
     is clicked: every parameter of that one point, and nothing else.
 
     One class covers both because they differ only in which parameters they
-    show. A pickup is a listening point (position, level, pan); a source is a
-    striking and injection point (position, hammer, force, spread, send,
-    balance) plus the MIDI note it answers to and a Learn button for it.
+    show. A pickup is a listening point (position, level, pan) with a meter of
+    what it is hearing; a source is a striking and injection point (position,
+    hammer, force, spread, send, balance) plus the MIDI note it answers to and
+    a Learn button for it.
 
     It is meant to live inside a juce::CallOutBox launched from the editor, so
     it sizes itself and expects to be handed to the callout by value of its
@@ -54,6 +55,23 @@ public:
         {
             addKnob ("Level", fem::id::pickupLevel[index]);
             addKnob ("Pan", fem::id::pickupPan[index], 0.0);
+
+            // Mono, and pre-pan on purpose: the question this answers is how
+            // much this point is picking up, which Level scales and Pan does
+            // not. Where that signal lands in the image is what Pan is for,
+            // and the output meters already show the result of it.
+            meter.setRange (-60.0f, 6.0f);
+            meter.setZeroLevel (0.0f);
+            meter.setHorizontal (true);
+            meter.setMeterColor (accent);
+            addAndMakeVisible (meter);
+
+            // Metering costs a multiply-add per mode per sample, so the synth
+            // only ever meters the pickup whose panel is open. Claiming it on
+            // construction and releasing it below keeps that in step with the
+            // window, whatever dismisses it.
+            processor.meteredPickup.store (index, std::memory_order_release);
+            startTimerHz (24);
         }
         else
         {
@@ -85,7 +103,8 @@ public:
         addAndMakeVisible (*onButton);
 
         setSize (4 * knobW + 2 * pad,
-                 headerH + rowH * (isPickup ? 1 : 2) + (isPickup ? 0 : footerH) + 2 * pad);
+                 headerH + rowH * (isPickup ? 1 : 2)
+                   + (isPickup ? meterH + 4 : footerH) + 2 * pad);
     }
 
     ~PlatePointPanel() override
@@ -94,6 +113,12 @@ public:
         // would capture the next note played for no visible reason.
         if (! isPickup && processor.midiLearnArmed.load (std::memory_order_acquire) == pointIndex)
             processor.midiLearnArmed.store (-1, std::memory_order_release);
+
+        // Likewise the meter: stop paying for it once nobody is looking. The
+        // test matters because opening a second panel claims the slot before
+        // this one is destroyed.
+        if (isPickup && processor.meteredPickup.load (std::memory_order_acquire) == pointIndex)
+            processor.meteredPickup.store (-1, std::memory_order_release);
     }
 
     void paint (juce::Graphics& g) override
@@ -117,8 +142,16 @@ public:
         onButton->setBounds (header.removeFromRight (54));
 
         juce::Rectangle<int> footer;
-        if (! isPickup)
+        if (isPickup)
+        {
+            auto bar = r.removeFromBottom (meterH);
+            meter.setBounds (bar.reduced (2, 1));
+            r.removeFromBottom (4);
+        }
+        else
+        {
             footer = r.removeFromBottom (footerH);
+        }
 
         for (int row = 0; row * 4 < (int) knobs.size(); ++row)
         {
@@ -138,6 +171,12 @@ public:
 private:
     void timerCallback() override
     {
+        if (isPickup)
+        {
+            meter.setValue (processor.getPickupPeakDb());
+            return;
+        }
+
         // Polled rather than driven from onClick, so that the button also
         // clears when the audio thread captures a note, and when something
         // else disarms it.
@@ -160,7 +199,8 @@ private:
         knobs.push_back (std::move (s));
     }
 
-    static constexpr int pad = 8, headerH = 22, rowH = 42, footerH = 26, knobW = 62;
+    static constexpr int pad = 8, headerH = 22, rowH = 42, footerH = 26, knobW = 62,
+                         meterH = 14;
 
     FemPlateAudioProcessor& processor;
     const bool isPickup;
@@ -172,6 +212,7 @@ private:
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> attachments;
     std::unique_ptr<fxme::FxmeButton> onButton;
     juce::TextButton learnButton { "MIDI learn" };
+    fxme::VuMeterComponent meter;          // pickups only
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PlatePointPanel)
 };

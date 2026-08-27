@@ -861,7 +861,7 @@ void FemPlateAudioProcessorEditor::timerCallback()
         refreshLiveField();
 
     for (int ch = 0; ch < 2; ++ch)
-        outMeter[ch].setValue (processor.getOutputLevelDb (ch));
+        outMeter[ch].setValue (processor.getOutputPeakDb (ch));
 
     // A MIDI learn capture is applied here rather than on the audio thread,
     // which must not touch a parameter. Consumed with exchange so a note is

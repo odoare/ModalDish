@@ -206,7 +206,110 @@ int main()
         check (std::abs (l4 - r4) < 1e-9, "opposite pans give a symmetric pair");
         check (std::abs (l4 / l0 - 1.41421356) < 0.01,
                "each channel carries one whole pickup");
+
+        // Switching a pickup on *while running*. Every check above builds a
+        // fresh synth, so each one gets a full retune and resamples all the
+        // shapes; that path was never the broken one. A pickup that is off is
+        // deliberately not sampled (its phiPickup row is zeroed), so turning
+        // it on has to resample it — rebuilding the collapsed mix on top of
+        // the zeros it left leaves the new pickup silent.
+        p = basePatch();
+        p.pickups[1].x = 0.30f; p.pickups[1].y = 0.62f;   // placed, still off
+        fem::PlateSynth s6; s6.prepare (fs); s6.update (&model, p);
+        p.pickups[1].on = true;                 // the only change: the switch
+        s6.update (&model, p);                  // second update: no retune
+        s6.strike (0.42f, 0.45f, 1.0f);
+        double l5 = 0.0, r5 = 0.0;
+        render (s6, 2.0, [] (int, float&, float&) {}, l5, r5);
+
+        // The same patch reached by a rebuild, which resamples everything.
+        fem::PlateSynth s7; s7.prepare (fs); s7.update (&model, p);
+        s7.strike (0.42f, 0.45f, 1.0f);
+        double l6 = 0.0, r6 = 0.0;
+        render (s7, 2.0, [] (int, float&, float&) {}, l6, r6);
+        std::printf ("  switched on live: L %.5f   rebuilt: L %.5f\n", l5, l6);
+        check (std::abs (l5 / l6 - 1.0) < 0.01,
+               "a pickup switched on at runtime is sampled, not left at zero");
         (void) d;
+    }
+
+    // --- 0b. The point panel's pickup meter --------------------------------
+    // Mono, pre-pan, post-level. A centred pickup at unity is exactly the
+    // mono output (that is what the sqrt(2) in equalPowerPan buys), so the
+    // meter and the left channel have to agree to the last bit there, and
+    // then panning must move the channel while leaving the meter alone.
+    std::printf ("\n== Pickup meter ==\n");
+    {
+        // peaks of the metered mono tap and of the left channel, same render
+        double outPk = 0.0;
+        auto meterPeak = [&outPk] (fem::PlateSynth& s, double seconds)
+        {
+            double pk = 0.0;
+            outPk = 0.0;
+            const int n = (int) (seconds * fs);
+            for (int i = 0; i < n; ++i)
+            {
+                float l = 0.0f, r = 0.0f;
+                s.processSample (0.0f, 0.0f, l, r);
+                pk = std::max (pk, (double) std::abs (s.getMeteredSample()));
+                outPk = std::max (outPk, (double) std::abs (l));
+            }
+            return pk;
+        };
+
+        auto p = basePatch();
+        p.meteredPickup = 0;
+        fem::PlateSynth m1; m1.prepare (fs); m1.update (&model, p);
+        m1.strike (0.42f, 0.45f, 1.0f);
+        const double centred = meterPeak (m1, 2.0);
+        std::printf ("  centred unity: meter %.5f  L %.5f\n", centred, outPk);
+        check (std::abs (centred / outPk - 1.0) < 1e-6,
+               "a centred unity pickup meters exactly its own output");
+
+        // Pan is the one thing the meter must ignore.
+        p.pickups[0].pan = -1.0f;
+        fem::PlateSynth m2; m2.prepare (fs); m2.update (&model, p);
+        m2.strike (0.42f, 0.45f, 1.0f);
+        const double panned = meterPeak (m2, 2.0);
+        std::printf ("  hard left:     meter %.5f\n", panned);
+        check (std::abs (panned / centred - 1.0) < 1e-6,
+               "panning a pickup does not move its meter");
+
+        // Level is the one thing it must follow.
+        p.pickups[0].pan = 0.0f;
+        p.pickups[0].level = 0.5f;
+        fem::PlateSynth m3; m3.prepare (fs); m3.update (&model, p);
+        m3.strike (0.42f, 0.45f, 1.0f);
+        const double halved = meterPeak (m3, 2.0);
+        check (std::abs (halved / centred - 0.5) < 1e-6,
+               "level scales the meter linearly");
+
+        // No panel open, and a panel on a pickup that is switched off.
+        p = basePatch();
+        p.meteredPickup = -1;
+        fem::PlateSynth m4; m4.prepare (fs); m4.update (&model, p);
+        m4.strike (0.42f, 0.45f, 1.0f);
+        check (meterPeak (m4, 0.5) == 0.0, "no panel open meters nothing");
+
+        p.meteredPickup = 1;                 // pickup 2, which is off
+        fem::PlateSynth m5; m5.prepare (fs); m5.update (&model, p);
+        m5.strike (0.42f, 0.45f, 1.0f);
+        check (meterPeak (m5, 0.5) == 0.0, "a pickup that is off meters silence");
+
+        // Switching the meter between pickups mid-flight, the same live path
+        // the panel uses when one window closes and another opens.
+        p = basePatch();
+        p.pickups[1].x = 0.30f; p.pickups[1].y = 0.62f; p.pickups[1].on = true;
+        p.meteredPickup = 0;
+        fem::PlateSynth m6; m6.prepare (fs); m6.update (&model, p);
+        m6.strike (0.42f, 0.45f, 1.0f);
+        const double first = meterPeak (m6, 1.0);
+        p.meteredPickup = 1;
+        m6.update (&model, p);
+        const double second = meterPeak (m6, 1.0);
+        std::printf ("  pickup 1 %.5f -> pickup 2 %.5f\n", first, second);
+        check (second > 0.0 && std::abs (second / first - 1.0) > 1e-3,
+               "re-pointing the meter follows the other pickup");
     }
 
     // --- 1. A source strike scales with its own Force, not the global -----

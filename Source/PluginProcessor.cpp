@@ -398,12 +398,17 @@ FemPlateAudioProcessor::ShapeData FemPlateAudioProcessor::makeDefaultShape()
 }
 
 //==============================================================================
-void FemPlateAudioProcessor::prepareToPlay (double sampleRate, int)
+void FemPlateAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     juce::FloatVectorOperations::disableDenormalisedNumberSupport();
     synth.prepare (sampleRate);
     outMeterL.prepare (sampleRate);
     outMeterR.prepare (sampleRate);
+
+    // The pickup meter reads a signal that never reaches a bus, so unlike the
+    // output meters it needs somewhere to put a block before measuring it.
+    pickupMeter.prepare (sampleRate);
+    pickupMeterScratch.assign ((size_t) juce::jmax (0, samplesPerBlock), 0.0f);
 }
 
 void FemPlateAudioProcessor::releaseResources()
@@ -440,6 +445,9 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     params.hammerMs = pHammer->load();
     params.force    = pForce->load();
     params.glideMs  = pGlide->load();
+    // Follows whichever point panel is open; -1 when none is (see
+    // PlateSynth::updateMeterWeights for why it is one pickup and not eight).
+    params.meteredPickup = meteredPickup.load (std::memory_order_relaxed);
     params.nonlin   = pNonlin->load();
     params.cascade       = pCascade->load();
     params.cascDrive     = pCascDrive->load();
@@ -501,6 +509,11 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     const float* in1 = numIns > 1 ? buffer.getReadPointer (1) : nullptr;
     float* out0 = numOuts > 0 ? buffer.getWritePointer (0) : nullptr;
     float* out1 = numOuts > 1 ? buffer.getWritePointer (1) : nullptr;
+
+    // Null if the host ever hands us a longer block than prepareToPlay was
+    // promised: skipping a meter update beats allocating on the audio thread.
+    float* const meterScratch = (int) pickupMeterScratch.size() >= numSamples
+                                    ? pickupMeterScratch.data() : nullptr;
 
     // Notes are consumed in step with the render loop, so a note lands on its
     // own sample rather than at the block boundary (audible on short blocks
@@ -566,6 +579,13 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
         float outL = 0.0f, outR = 0.0f;
         synth.processSample (inGain * inL, inGain * inR, outL, outR);
+
+        // Pre Out Gain: the panel's meter is about the pickup, and a master
+        // fader moving every pickup's reading together would say nothing
+        // about the one being looked at.
+        if (meterScratch != nullptr)
+            meterScratch[i] = synth.getMeteredSample();
+
         outL *= outGain;
         outR *= outGain;
 
@@ -588,6 +608,21 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         outMeterL.process (out0, numSamples);
     outMeterR.process (out1 != nullptr ? out1 : (out0 != nullptr ? out0 : nullptr),
                        out0 != nullptr ? numSamples : 0);
+
+    if (meterScratch != nullptr)
+        pickupMeter.process (meterScratch, numSamples);
+
+    // Peak, not RMS: these meters are read for headroom, and a plate's RMS
+    // runs 8 to 12 dB under its peak. Held here rather than in the editor so
+    // that the reading does not depend on which blocks a GUI frame catches.
+    const double meterRate = getSampleRate();
+    const float fallDb = meterRate > 0.0
+                           ? peakFallDbPerSec * (float) numSamples / (float) meterRate
+                           : 0.0f;
+    holdPeak (peakHoldL, outMeterL.getPeak(), fallDb);
+    holdPeak (peakHoldR, outMeterR.getPeak(), fallDb);
+    if (meterScratch != nullptr)
+        holdPeak (peakHoldPickup, pickupMeter.getPeak(), fallDb);
 }
 
 //==============================================================================

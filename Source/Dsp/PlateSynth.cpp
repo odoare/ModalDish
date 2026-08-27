@@ -300,13 +300,22 @@ void PlateSynth::update (const ModalModel* newModel, const Params& params)
     {
         const auto& a = params.pickups[p];
         const auto& b = current.pickups[p];
-        if (! juce::approximatelyEqual (a.x, b.x) || ! juce::approximatelyEqual (a.y, b.y))
+        // The switch counts as a move, as it does for the sources: a pickup
+        // that is off is never sampled, so its phiPickup row is zeros, and
+        // rebuilding the collapsed mix on top of those would switch on a
+        // pickup that stays silent until something else forces a resample.
+        if (! juce::approximatelyEqual (a.x, b.x) || ! juce::approximatelyEqual (a.y, b.y)
+            || a.on != b.on)
             pickupMoved = true;
         if (! juce::approximatelyEqual (a.level, b.level)
-            || ! juce::approximatelyEqual (a.pan, b.pan)
-            || a.on != b.on)
+            || ! juce::approximatelyEqual (a.pan, b.pan))
             pickupMixChanged = true;
     }
+
+    // Which pickup the popup meter follows is not a plugin parameter, but it
+    // changes the weights the mix builds, so it rides in with them.
+    if (params.meteredPickup != current.meteredPickup)
+        pickupMixChanged = true;
 
     // Sources split the same way: a move needs the shapes resampled, a send
     // or balance change only needs the collapsed mix rebuilt. Hammer, force,
@@ -585,6 +594,31 @@ void PlateSynth::updatePickupMix() noexcept
     }
 
     updateTailSpread();
+    updateMeterWeights();
+}
+
+void PlateSynth::updateMeterWeights() noexcept
+{
+    // One pickup at a time, because only one point panel is open at a time.
+    // Metering all eight would cost eight multiply-adds per mode per sample,
+    // four times what the stereo mix itself costs; metering the one being
+    // looked at costs one, and nothing at all when no panel is open.
+    const int p = current.meteredPickup;
+    metering = p >= 0 && p < fem::maxPickups && current.pickups[p].on;
+    if (! metering)
+    {
+        meterOut = 0.0f;
+        return;
+    }
+
+    // Mono, and deliberately so: the panel's meter answers "how much is this
+    // point hearing", which its Level scales and its Pan does not. Pan only
+    // decides where that signal goes in the image. compensation[k] is zero
+    // outside the audible band, which mutes those modes here as it does in
+    // the stereo mix.
+    const float level = current.pickups[p].level;
+    for (int k = 0; k < fem::maxModes; ++k)
+        meterAmp[k] = compensation[k] * level * phiPickup[p][k];
 }
 
 void PlateSynth::updateTailSpread() noexcept
@@ -1048,6 +1082,7 @@ void PlateSynth::processSample (float inL, float inR, float& outL, float& outR) 
     }
 
     float sumL = 0.0f, sumR = 0.0f;
+    float meterSum = 0.0f;
     float stretch = 0.0f;
     float bandOut[numCascadeBands] = {};   // cascade source: band-mean velocity
     int band = 0;
@@ -1074,6 +1109,8 @@ void PlateSynth::processSample (float inL, float inR, float& outL, float& outR) 
         filters[k].z2 *= bandDecay[band];
         sumL += outAmpL[k] * y;
         sumR += outAmpR[k] * y;
+        if (metering)
+            meterSum += meterAmp[k] * y;
         bandOut[band] += cascSrcW[k] * y;
     }
     for (int b = 0; b < numCascadeBands; ++b)
@@ -1084,6 +1121,7 @@ void PlateSynth::processSample (float inL, float inR, float& outL, float& outR) 
     // Global stretching, smoothed: an integral over the plate, so it does
     // not depend on where the pickup sits (see the header).
     envStretch += envCoef * (stretch - envStretch);
+    meterOut = meterSum;
     outL = sumL;
     outR = sumR;
 }

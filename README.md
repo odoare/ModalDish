@@ -43,6 +43,20 @@ against analytic plates in `Tests/FemTests.cpp`.
   equal-power with the centre at unity, so a centred pickup at 0 dB is exactly
   what the mono output used to be.
 
+  A pickup's panel carries a meter of what that point is hearing: mono, with
+  its Level applied and its Pan not, so it answers how much this pickup is
+  picking up rather than where that lands in the image (the IO meters, which
+  read the master pair post Out Gain, answer the second question). Only the
+  pickup whose panel is open is metered, so the reading costs one extra
+  multiply-add per mode while a panel is up and nothing at all otherwise.
+
+  Every meter in the plugin reads **peak**, held and then falling at 20 dB/s.
+  They are there for headroom, and a struck plate is peaky: its 100 ms RMS
+  runs 8 to 12 dB below its sample peak, so an RMS bar would sit at +3 while
+  the output was really at +13. The hold is computed per block alongside the
+  audio, not by the editor, so a transient cannot slip between two GUI
+  frames.
+
 * **Sources** (up to eight, labelled a–h) are where the plate gets hit and
   where the input goes in. Each has a position, its own **Hammer** time and
   **Force**, a **Spread** (the standard deviation per axis of a random offset
