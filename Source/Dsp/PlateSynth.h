@@ -179,10 +179,15 @@ namespace fem
 class PlateSynth
 {
 public:
-    // Hammers that can be in flight at once. Eight sources each mapped to
-    // their own MIDI note can overlap, and so can mouse hits on top of them;
-    // at eight slots a busy passage steals its own tails round-robin. Each
-    // slot carries a full mode-weight vector, so the raise costs 16 KB.
+    // Half-sine force pulses that can be in contact at once. Not voices:
+    // there is one filter bank, and every active pulse is summed into its
+    // drive, so a strike adds to whatever is already ringing rather than
+    // starting a plate of its own. What this sizes is simultaneous contact,
+    // which lasts a hammer time (milliseconds), not sustain — and reuse is
+    // round-robin, so overrunning it truncates a pulse still in contact,
+    // never a tail. Eight sources on their own MIDI notes can overlap, and
+    // mouse hits land on top of them; eight slots was tight for that. Each
+    // slot carries a full mode-weight vector, so the raise costs 32 KB.
     static constexpr int maxStrikes = 16;
 
     /** One listening point. `level` is a linear gain and `pan` runs -1 (left)

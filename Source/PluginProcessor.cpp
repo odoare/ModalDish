@@ -198,11 +198,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout FemPlateAudioProcessor::crea
         juce::ParameterID (fem::id::force, 1), "Force",
         juce::NormalisableRange<float> (0.0f, 20.0f, 0.0f, 0.4f), 1.0f));
 
-    // Portamento between played notes. Currently inert and deliberately kept:
-    // notes stopped setting the pitch when they became per-source triggers,
-    // so nothing reads it and it has no GUI control. The glide machinery in
-    // PlateSynth is intact, so this comes back as a one-line change if notes
-    // are ever given the tuning again.
+    // Portamento between played notes, read by the Freq Chan path (see the
+    // note routing in processBlock and PlateSynth::glideToNote). The step is
+    // sized in log2 from the glide time, the sample rate and the update
+    // period together, so a glide lasts this long whatever the interval and
+    // whatever the sample rate.
     p.push_back (std::make_unique<FloatParam> (
         juce::ParameterID (fem::id::glide, 1), "Glide", logRange (0.1f, 100.0f), 0.1f,
         juce::AudioParameterFloatAttributes().withLabel ("ms")));

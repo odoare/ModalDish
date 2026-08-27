@@ -229,8 +229,13 @@ between two segments the vertex takes the strongest condition
 \subsection{Validation}
 \label{sec:validation}
 
-The console test suite (\code{Tests/FemTests.cpp}) verifies the
-implementation against classical analytical results \cite{leissa}:
+Three console suites are built alongside the plugin:
+\code{Tests/FemTests.cpp} for the finite-element core,
+\code{Tests/IoTests.cpp} for the audio path (pickup mixing, tail stereo
+placement, note handling, sample-rate independence) and
+\code{Tests/CascadeMeasure.cpp} for the nonlinear voicing
+(\S\ref{par:drive}). The first verifies the implementation against
+classical analytical results \cite{leissa}:
 %
 \begin{itemize}
 \item simply supported unit square: $\lambda_{mn} = \pi^4 (m^2+n^2)^2$,
@@ -540,8 +545,10 @@ kills them faster --- the two classical, perceptually distinct decay
 profiles of struck plates \cite{chaigne,fletcher-rossing}.
 
 \subsection{Excitation, pickup, gain compensation}
+\label{sec:excitation}
 
-A mouse hit at $\bm{x}_h$ launches a half-sine force pulse (a standard
+A strike at $\bm{x}_h$ --- from the mouse, or from a MIDI note
+(\S\ref{sec:notes}) --- launches a half-sine force pulse (a standard
 hammer/impact model \cite{chaigne})
 %
 \begin{equation}
@@ -550,11 +557,29 @@ hammer/impact model \cite{chaigne})
 %
 with duration $\tau$ (\emph{Hammer} knob, 0.1--50\,ms: short = bright,
 long = mellow, since the pulse spectrum rolls off above $\approx 1/\tau$)
-and amplitude $F_0$ (\emph{Force} knob $\times$ click velocity). Up to 8
-hammers overlap polyphonically, each carrying its own weight vector
-$\varphi_k(\bm{x}_h)$. The external audio input is injected identically at
-the last hit point (\emph{effect mode}), and the output point
-$\bm{x}_o$ is a pair of automatable parameters.
+and amplitude $F_0$ (\emph{Force} knob $\times$ strike velocity).
+
+Up to 16 pulses may be in contact at once, each carrying its own weight
+vector $\varphi_k(\bm{x}_h)$, and all of them are summed into the drive of
+a \emph{single} bank. There is one plate, struck several times, not
+several plates: a second strike adds to the ringing of the first and
+shares its decay, as a real gong does, and no note has an envelope or a
+release of its own. The slot count therefore sizes simultaneous
+\emph{contact}, which lasts milliseconds, not sustain; slots are reused
+round-robin, and reuse can only truncate a pulse still in contact, never a
+ringing tail, since the tail lives in the shared bank.
+
+The plate is listened to at up to 8 \emph{pickups} and struck at up to 8
+\emph{sources}, each an automatable point: a pickup carries position,
+level, pan and an on switch, a source position, hammer duration, force,
+positional spread, input send, input balance, MIDI note and an on switch.
+Both collapse before the audio loop --- the pickups into one pair of
+per-mode output weights (\S\ref{sec:tailspread}), the sources into one
+pair of per-mode input weights --- so the per-sample cost is that of a
+single point however many are switched on, and a point that is off costs
+not even its mode-shape evaluation. The external audio input reaches the
+plate through the sources' sends (\emph{effect mode}), each source taking
+its own balance of the incoming stereo pair.
 
 \paragraph{Output gain, and why it is exactly $1/\zeta_k$.}
 The RBJ constant-$0$\,dB-peak band-pass has, as an analog prototype,
@@ -628,6 +653,83 @@ rescaled the nonlinearity by its square.
 Retunes triggered by parameter changes
 rewrite only the biquad coefficients (the states are preserved), which is
 inaudible for the small throttled steps used here.
+
+\subsection{Playing the plate: notes, channels and glide}
+\label{sec:notes}
+
+A MIDI note can do two things --- \emph{strike} the plate and \emph{tune}
+it --- and these are two mechanisms rather than one, routed independently
+by channel. Both are needed, because eight sources mapped to their own
+notes would otherwise fight over the tuning: every note struck would also
+transpose the instrument.
+
+\begin{itemize}
+\item \emph{Sources channel} (\emph{Src Chan}, omni by default). A note-on
+  strikes every source that is switched on and whose \emph{note} parameter
+  matches, each at its own position, hammer duration, force and spread,
+  scaled by the note velocity. Sources may share a note number, in which
+  case one key strikes the plate at several points at once (a chord on one
+  plate, rather than a chord of plates).
+\item \emph{Unmapped notes}. A note on that channel that no source claims
+  strikes the last touched position when \emph{Unmapped Hit} is on (the
+  default, so that a keyboard plays the plate before anything has been
+  mapped), and does nothing at all when it is off, which is what one wants
+  once every source has its note.
+\item \emph{Frequency channel} (\emph{Freq Chan}, off by default). A
+  note-on retunes the bank, $n \mapsto f_1 = 440 \cdot 2^{(n-69)/12}$,
+  and strikes nothing.
+\item \emph{Learning}. A source can be armed from its panel, in which case
+  the next note-on on any channel is captured as that source's note and
+  swallowed rather than played: a mapping that began with a hit nobody
+  asked for would fire on the very note being used to teach it. The channel
+  is deliberately not part of what is learned; routing is what the two
+  channel controls decide, and folding it into the mapping would give the
+  same note two meanings.
+\end{itemize}
+%
+Setting the two channel controls equal plays and tunes from one keyboard;
+splitting them lets a second controller tune while the first strikes;
+leaving Frequency off gives a fixed-pitch plate struck from the keys.
+
+What a played note sets is the $f_1$ of \eqref{eq:freqmap}, so the whole
+spectrum transposes rigidly and the timbre is unchanged --- unlike the
+nonlinear glide of \S\ref{sec:berger}, which moves $T$ and so compresses
+the overtone ratios as it rises. The two are independent and superpose.
+
+Retuning is a portamento, taken in the log domain and on the same
+decimated clock as the Berger update:
+%
+\begin{equation}
+  \log_2 f_1 \;\leftarrow\; \log_2 f_1 + \delta ,
+  \qquad
+  \delta \;=\; \frac{\log_2 f_1^{\mathrm{target}} - \log_2 f_1}
+                    {T_g f_s / P} ,
+  \label{eq:glide}
+\end{equation}
+%
+with $T_g$ the \emph{Glide} time ($0.1$--$100$\,ms) and $P = 32$ samples
+the update period. Two properties follow from the form of \eqref{eq:glide}
+rather than from tuning: a constant step in $\log_2 f$ makes the glide last
+$T_g$ whatever the interval, and sizing the step from the total number of
+updates the glide spans, $T_g f_s / P$, rather than fixing it per update,
+makes it last $T_g$ at any sample rate. The first note of a session lands
+directly, there being no previous pitch to glide from and no reason to put
+a swoop on a note nobody asked to bend. Notes are consumed in step with the
+render loop rather than at the block boundary, so a note lands on its own
+sample; the difference is audible on short blocks with a fast glide.
+Note-offs are ignored throughout: a struck plate rings out.
+
+The bank is rewritten once the tuning has drifted about 2 cents from the
+pitch it currently sounds at --- the same throttle, and the same
+state-preserving coefficient rewrite, as the Berger glide
+(\S\ref{par:driver}) --- so a portamento costs a bounded number of
+coefficient updates rather than one per sample.
+
+Because there is a single bank (\S\ref{sec:excitation}), tuning is global:
+a glide carries the whole ringing spectrum with it, including notes struck
+earlier that are still sounding. This is the behaviour of one plate being
+retuned, which is what the model is, and not that of a polyphonic
+instrument in which each note would hold its own pitch.
 
 % ============================================================================
 \section{Nonlinear approximation}
@@ -714,8 +816,11 @@ a quantity integrated over $\Omega$, it is the same wherever one listens:
 the glide belongs to the plate, not to the pickup.
 
 \paragraph{Realtime scheduling.}
-$\gamma$ is updated every 32 samples, slewed by a factor $0.2$ per update
-($\approx$ ms-scale smoothing), and the biquads are rewritten only when
+$\gamma$ is updated every 32 samples and slewed towards its target with a
+$3$\,ms time constant --- a factor $0.2$ per update at $48$\,kHz, the rate
+it was voiced at, with the coefficient recomputed in \code{prepare} so that
+the smoothing lasts the same wall-clock time at any sample rate. The
+biquads are rewritten only when
 mode 1 would move by more than $\approx 2$ cents
 ($|\Delta\gamma| > 0.0024\,(1+\gamma)$, since
 $\Delta\omega/\omega = \tfrac12 \Delta\gamma/(1+\gamma)$). Coefficient
@@ -767,17 +872,16 @@ the ladder ($\tau_b = 30\,\mathrm{ms} \times b$ and a $2\,\mathrm{s}$
 release in the voiced defaults), so the brightening is a progressive glow
 and the pumping tails off smoothly instead of collapsing with the cube of
 the decaying ring. Voicing found a hard-saturating transfer most
-convincing: a large drive ($B = 16$) with a small injection gain
-($A = 1.1$, capped at $1.5$ --- beyond that the level becomes
-unpleasant). A
+convincing; the shipped combination --- an injection gain pinned high and a
+moderate drive --- is derived in \S\ref{par:drive}. A
 cubic is the leading nonlinearity of von K\'arm\'an dynamics
 \cite{ducceschi-touze}; at low amplitude \eqref{eq:cascade} vanishes as
 $w^3$ (the linear model is recovered exactly), and at high amplitude the
 bands brighten in sequence, reproducing the amplitude-gated crash of
-cymbals and gongs \cite{fletcher-rossing}. All cascade internals ($A$,
-$B$, the source window, the gate times and the overlap floor below) are
-exposed as plugin parameters while the effect is being voiced; the values
-quoted here are the defaults. Note also that the material damping law
+cymbals and gongs \cite{fletcher-rossing}. The cascade internals that remain
+adjustable ($B$, the source window, the gate times, the overlap floor below
+and the depletion) are exposed as plugin parameters; the values quoted here
+are the defaults, $A$ being fixed (\S\ref{par:drive}). Note also that the material damping law
 $\zeta \propto \nu$ dominates the high-mode decay when hunting long
 shimmer: at $\zeta_m = 10^{-4}$ a mode at $\nu = 80$ decays in
 milliseconds whatever the cascade does.
@@ -895,16 +999,18 @@ filter states of the modes in band $b$ are scaled by
 %
 \begin{equation}
   d_b \;=\; 1 - \mathrm{Deplete} \times \mathrm{cascade} \times
-            \varepsilon_0\, \bar g_{b}^{\,\uparrow},
-  \qquad \varepsilon_0 = 3\cdot 10^{-4}
-  \quad (\mathrm{Deplete} = 0.07 \text{ by default}),
+            \varepsilon\, \bar g_{b}^{\,\uparrow},
+  \qquad \varepsilon = 1 - e^{-1/(\tau_d f_s)}, \quad \tau_d = 69.4\,\mathrm{ms}
 \end{equation}
 %
-where $\bar g_b^{\,\uparrow}$ is the mean gate level of the bands fed by
-band $b$: the lows decay exactly when, and as strongly as, they are
-pumping the highs, gluing the two ends of the spectrum. The mechanism is
-purely dissipative (it only removes energy), so it cannot affect
-stability.
+($\mathrm{Deplete} = 0.07$ by default), where $\bar g_b^{\,\uparrow}$ is
+the mean gate level of the bands fed by band $b$: the lows decay exactly when, and as strongly as, they are
+pumping the highs, gluing the two ends of the spectrum. The loss is stated
+as a time constant rather than as a per-sample fraction so that a given
+\emph{Deplete} setting removes energy at the same rate whatever the sample
+rate; $\varepsilon = 3\cdot 10^{-4}$ at $48$\,kHz, the value it was voiced
+at. The mechanism is purely dissipative (it only removes energy), so it
+cannot affect stability.
 
 \paragraph{Stability by structure.}
 The obvious way to spread energy upward is a feedback loop closed through
@@ -921,8 +1027,8 @@ dilemma structurally: band $b$ receives only from bands $c<b$ and
 contributes only to bands $c>b$, so the transfer graph over bands is a
 strict DAG --- no loop exists at any stage, stability is unconditional,
 and the injection gain $A$ is free to be set for audibility
-($A = \mathrm{Amp} \times \mathrm{cascade}$, the $\tanh^3$ keeping every
-stage bounded).
+($A = 10 \times \mathrm{cascade}$, the $\tanh^3$ keeping every stage
+bounded).
 
 \subsection{The statistical mode tail}
 \label{sec:tail}
@@ -984,7 +1090,7 @@ independently of $\bm{x}_p$, since mass normalisation fixes
 $\overline{\varphi^2} = 1/A$ at every interior point
 (\S\ref{sec:tail}). Every term is positive, so the sum concentrates:
 measured on the default plate, two pickups differ by $2.1$~dB over the
-first four modes and by $0.29$~dB over all 512. The cascade regenerates
+first four modes and by $0.29$~dB over 512 of them. The cascade regenerates
 its shimmer across hundreds of tail modes at once, so
 \eqref{eq:tailpower} applies in full and the whole of it arrives at
 both channels at the same level. The low modes, being few, keep the
@@ -1148,7 +1254,8 @@ Shape / boundary editing & message & \code{ShapeCanvas}; outline + arc-parameter
 Mesh generation & message & milliseconds; preview in \code{FemViewComponent} \\
 Eigensolution \eqref{eq:gep} & background & \code{BackgroundTaskRunner}; progress; seconds \\
 Model publication & message $\to$ audio & atomic pointer, generation-acknowledged reclamation \\
-Filter bank \eqref{eq:modal} & audio & allocation-free; retunes throttled \\
+Note routing \S\ref{sec:notes} & audio & per-channel; strike and tune are separate calls \\
+Filter bank \eqref{eq:modal} & audio & allocation-free; one bank, retunes throttled \\
 Nonlinearities \eqref{eq:gamma}, \eqref{eq:cascade} & audio & decimated $\gamma$ update; bounded feedback \\
 \bottomrule
 \end{tabular}
