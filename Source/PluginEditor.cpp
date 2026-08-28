@@ -178,6 +178,10 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
     };
     addAndMakeVisible (toolBox);
 
+    fem::theme::styleButton (loadShapeButton, fem::theme::geomAccent);
+    loadShapeButton.onClick = [this] { loadShapeFile(); };
+    addAndMakeVisible (loadShapeButton);
+
     fem::theme::styleBox (aspectKnob, "Aspect", fem::theme::geomAccent);
     aspectKnob.setRange (0.25, 4.0, 0.01);
     aspectKnob.setSkewFactorFromMidPoint (1.0);
@@ -395,6 +399,49 @@ void ModalDishAudioProcessorEditor::updateWindowSize()
     // window must not stay wide when design mode hides it. It is narrower
     // than the main column because it is a single stack of number boxes.
     setSize ((advancedVisible && ! designMode) ? 1142 : 1022, 760);
+}
+
+void ModalDishAudioProcessorEditor::loadShapeFile()
+{
+    shapeChooser = std::make_unique<juce::FileChooser> (
+        "Load a plate geometry", juce::File(), "*.json");
+
+    const auto flags = juce::FileBrowserComponent::openMode
+                     | juce::FileBrowserComponent::canSelectFiles;
+
+    shapeChooser->launchAsync (flags, [this] (const juce::FileChooser& fc)
+    {
+        const auto file = fc.getResult();
+        if (file == juce::File())
+            return;                       // cancelled
+
+        const auto result = fem::shapefile::load (file);
+        if (! result.ok)
+        {
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::MessageBoxIconType::WarningIcon,
+                "Could not load " + file.getFileName(), result.error);
+            return;
+        }
+
+        // Lands in the canvas as an ordinary editable shape: the points can be
+        // dragged, the segments re-cut, the conditions cycled, and nothing is
+        // computed until Compute is pressed. Loading a file is a starting
+        // point, not a commitment.
+        canvas.setShape (result.shape.outline, result.shape.segStarts,
+                         result.shape.segBcs);
+
+        if (result.shape.meshDensity > 0)
+        {
+            processor.shape().meshDensity = result.shape.meshDensity;
+            densityKnob.setValue (result.shape.meshDensity, juce::dontSendNotification);
+        }
+
+        setDesignMode (true);
+        toolBox.setSelectedId (5, juce::dontSendNotification);   // Edit boundary
+        canvas.setTool (fem::ShapeCanvas::Tool::Boundary);
+        syncShapeToProcessor (true);
+    });
 }
 
 void ModalDishAudioProcessorEditor::syncShapeToProcessor (bool geometryChanged)
@@ -1020,7 +1067,15 @@ void ModalDishAudioProcessorEditor::resized()
         designPanel = colA.removeFromTop (2 * padding + titleH + 26 + gap + 2 * boxH + gap);
         auto r = designPanel.reduced (padding);
         r.removeFromTop (titleH);
-        toolBox.setBounds (r.removeFromTop (26));
+        {
+            // Load shares the tool row: it is another way of getting a shape
+            // in, so it belongs beside the tools rather than among the knobs
+            // that shape one once it is there.
+            auto toolRow = r.removeFromTop (26);
+            loadShapeButton.setBounds (toolRow.removeFromRight (62).reduced (0, 1));
+            toolRow.removeFromRight (gap);
+            toolBox.setBounds (toolRow);
+        }
         r.removeFromTop (gap);
         twoColumns (r, { &aspectKnob, &pointsKnob, &densityKnob, &modesKnob });
     }

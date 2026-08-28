@@ -761,6 +761,11 @@ void ModalDishAudioProcessor::requestStrike (float x, float y, float velocity)
 }
 
 //==============================================================================
+// Version of the BoundaryCondition numbering that segBcs is stored in.
+// 1 = the original Free/SimplySupported/Clamped/Sliding order, written
+// without a bcOrder property at all; 2 = the stiffness order in use now.
+static constexpr int bcOrderCurrent = 2;
+
 juce::ValueTree ModalDishAudioProcessor::shapeToTree() const
 {
     juce::ValueTree t ("SHAPE");
@@ -778,6 +783,10 @@ juce::ValueTree ModalDishAudioProcessor::shapeToTree() const
     t.setProperty ("segStarts", starts.joinIntoString (";"), nullptr);
     t.setProperty ("segBcs", bcs.joinIntoString (";"), nullptr);
     t.setProperty ("meshDensity", shapeData.meshDensity, nullptr);
+    // Stamps which BoundaryCondition numbering segBcs is written in. State
+    // saved before the enum was reordered by stiffness carries no such
+    // property, which is exactly how shapeFromTree recognises it.
+    t.setProperty ("bcOrder", bcOrderCurrent, nullptr);
     return t;
 }
 
@@ -798,6 +807,17 @@ void ModalDishAudioProcessor::shapeFromTree (const juce::ValueTree& t)
     for (const auto& b : juce::StringArray::fromTokens (t["segBcs"].toString(), ";", ""))
         s.segBcs.push_back (b.getIntValue());
     s.meshDensity = (int) t.getProperty ("meshDensity", 16);
+
+    // Migrate state written under the old numbering (Free, SimplySupported,
+    // Clamped, Sliding) to the present stiffness order (Clamped,
+    // SimplySupported, Sliding, Free). Without this a session saved earlier
+    // would silently reopen with clamped edges reading as free.
+    if ((int) t.getProperty ("bcOrder", 1) < bcOrderCurrent)
+    {
+        static constexpr int fromLegacy[4] = { 3, 1, 0, 2 };
+        for (int& b : s.segBcs)
+            b = fromLegacy[juce::jlimit (0, 3, b)];
+    }
 
     if (s.outline.size() >= 3 && s.segStarts.size() == s.segBcs.size()
          && ! s.segStarts.empty())

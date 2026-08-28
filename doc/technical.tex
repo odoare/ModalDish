@@ -105,10 +105,10 @@ carrying one of four classical conditions:
 \toprule
 Name & Essential constraints & Natural conditions & DOFs constrained \\
 \midrule
-Free            & ---                          & $M_n=0$, $V_n=0$ & --- \\
-Simple support  & $w=0$                        & $M_n=0$          & vertex $w$ \\
 Clamp           & $w=0$, $\partial_n w=0$      & ---              & vertex $w$, edge $\partial_n w$ \\
+Simple support  & $w=0$                        & $M_n=0$          & vertex $w$ \\
 Sliding support & $\partial_n w=0$             & $V_n=0$          & edge $\partial_n w$ \\
+Free            & ---                          & $M_n=0$, $V_n=0$ & --- \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -526,6 +526,17 @@ the plate ratios $\sqrt{\lambda_k/\lambda_1}$), which is perceived as a
 (inharmonicity pattern) is set by geometry, boundary conditions and
 tension, while $f_1$ transposes it. Modes falling outside
 $[20\,\mathrm{Hz},\ 0.47 f_s]$ are muted.
+
+Muting the modes is not by itself enough to keep the sub-audio band clear,
+because $f_1$ reaches down to $1$\,Hz and a live mode just above the floor
+is a band-pass whose lower skirt falls at only $6$\,dB/oct, while the
+half-sine hammer pulse carries DC. The output therefore passes a fixed
+second-order Butterworth highpass at $20$\,Hz, the last stage before the
+bus. Its double zero at the origin removes an offset absolutely rather than
+attenuating it, it adds $12$\,dB/oct below the corner ($-12.3$\,dB at
+$10$\,Hz, $-24.1$\,dB at $5$\,Hz), and it is within $0.44$\,dB of flat from
+$35$\,Hz up, so it does not touch what the plate is meant to produce. The
+meters read the buffer after it, so what they show is what leaves.
 
 Projecting the two damping terms of \eqref{eq:scaled} onto mode $k$ gives
 modal damping ratios (using $\bilap \varphi_k \approx \omega_k^2 \varphi_k$

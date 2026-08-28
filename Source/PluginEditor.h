@@ -19,6 +19,7 @@
 #include <JuceHeader.h>
 
 #include <algorithm>
+#include <memory>
 #include <vector>
 
 #include "PluginProcessor.h"
@@ -26,6 +27,7 @@
 #include "Components/ShapeCanvas.h"
 #include "Components/PlatePointPanel.h"
 #include "Components/PointToggle.h"
+#include "ShapeFile.h"
 
 //==============================================================================
 class ModalDishAudioProcessorEditor : public juce::AudioProcessorEditor,
@@ -131,7 +133,13 @@ private:
 
     // Right column — modal design (shape, mesh, bank size).
     juce::ComboBox toolBox;
+    juce::TextButton loadShapeButton { "Load" };
     fxme::FxmeNumberBox aspectKnob, pointsKnob, densityKnob, modesKnob;
+
+    // Held as a member because the chooser runs asynchronously and must
+    // outlive the call that launches it.
+    std::unique_ptr<juce::FileChooser> shapeChooser;
+    void loadShapeFile();
     std::unique_ptr<SliderAttachment> modesAtt;
 
     // Right column — dynamics.

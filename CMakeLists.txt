@@ -148,6 +148,29 @@ if(MODALDISH_BUILD_TESTS)
     target_compile_features(IoTests PRIVATE cxx_std_17)
     add_test(NAME IoTests COMMAND IoTests)
 
+    # The JSON geometry reader. The odd one out: it needs juce_core, because
+    # what it tests is a JSON parser. Only juce_core though — no host, no
+    # plugin client, no GUI — so it stays a console app and builds in seconds.
+    juce_add_console_app(ShapeFileTests PRODUCT_NAME "ShapeFileTests")
+    target_sources(ShapeFileTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/ShapeFileTests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Source/ShapeFile.cpp)
+    juce_generate_juce_header(ShapeFileTests)
+    target_include_directories(ShapeFileTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/Source)
+    # The plugin target's definitions do not reach here, and juce_core will
+    # pull in libcurl at link time without this.
+    target_compile_definitions(ShapeFileTests PRIVATE
+        JUCE_USE_CURL=0
+        JUCE_WEB_BROWSER=0)
+    target_link_libraries(ShapeFileTests PRIVATE
+        FxmeCore
+        juce::juce_core
+        juce::juce_recommended_config_flags)
+    target_compile_features(ShapeFileTests PRIVATE cxx_std_17)
+    add_test(NAME ShapeFileTests
+             COMMAND ShapeFileTests ${CMAKE_CURRENT_SOURCE_DIR}/Shapes)
+
     add_executable(CascadeMeasure Tests/CascadeMeasure.cpp Source/Dsp/PlateSynth.cpp)
     target_include_directories(CascadeMeasure PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/juce_stub

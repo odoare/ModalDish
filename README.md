@@ -4,9 +4,10 @@ FX-Mechanics plugin: physical model of a **plate / membrane of arbitrary
 shape**, simulated by finite elements and played as an instrument (click the
 plate) or used as an effect (feed it audio).
 
-Draw a shape (freehand spline, ellipse or rectangle), split its border into
-segments and give each one a boundary condition (free / simple support /
-clamp / sliding support), build a finite-element grid, compute the eigenmodes
+Draw a shape (freehand spline, ellipse or rectangle) or load one from a JSON
+file, split its border into segments and give each one a boundary condition
+(clamp / simple support / sliding support / free, ordered stiffest first),
+build a finite-element grid, compute the eigenmodes
 in the background — then hit the plate anywhere with the mouse, or send any
 signal through it. The synthesis is a resonant filter bank (one band-pass per
 mode, the MechanOdd approach) driven by the FEM modal data.
@@ -27,7 +28,13 @@ documented in its own README). Eigenvalues converge at O(h²) — validated
 against analytic plates in `Tests/FemTests.cpp`.
 
 * **Base Freq** maps the first eigenfrequency to f1; all other modes scale
-  accordingly.
+  accordingly. It reaches down to 1 Hz, where most of the bank falls below
+  the 20 Hz audibility floor and is muted outright, leaving a sparse high
+  spectrum. The output carries a fixed second-order Butterworth highpass at
+  20 Hz so that what the low settings do not use never reaches a woofer: it
+  is −3 dB at 20 Hz, 12 dB/oct below, and has a double zero at DC, so an
+  offset is removed absolutely rather than attenuated. Above 35 Hz it is
+  within 0.4 dB of flat, so nothing the plate is meant to produce is touched.
 * **Tension** T retunes the bank at audio rate through the first-order law
   `ωₖ(T)² = λₖ + (T − T₀)gₖ` (exact at the tension the modes were computed
   at; press *Compute* again for exactness at a very different tension).
@@ -266,6 +273,50 @@ belong to the mode you are in.
    the spatial detail. Neither shows the cascade, whose shimmer lives in the
    statistical tail, and tail modes have no mesh shape to draw.
 
+## Loading a geometry from a file
+
+*Load* (beside the tool selector, in design mode) reads a plate outline from
+a JSON file. The shape lands **in the canvas** as an ordinary editable one:
+points can be dragged, segments re-cut, conditions cycled, and nothing is
+computed until you press *Compute*.
+
+```json
+{
+  "modaldish_shape": 1,
+  "name": "Trapezoid gong",
+  "meshDensity": 20,
+  "points": [
+    [-0.85, -0.55],
+    [ 0.85, -0.55],
+    [ 0.55,  0.75],
+    [-0.55,  0.75]
+  ],
+  "boundary": { "2": "support" }
+}
+```
+
+* `points` — (x, y) pairs in [-1, 1] with **y up** (the mathematical
+  convention, not the screen one), joined in order and closed from the last
+  back to the first. Straight edges: the mesher resamples them and keeps any
+  turn sharper than 30° as a corner, so four points really is a valid file.
+  The full [-1, 1] range maps onto the same margin box a drawn shape is
+  fitted into. A shape that uses less of the range stays proportionally
+  smaller rather than being stretched to fill — which also means it gets
+  proportionally fewer elements, since *Grid* sets an absolute element size.
+* `boundary` — optional, maps a **point index** to the condition starting at
+  that point. A point that is not listed inherits the condition of the
+  previous listed one, wrapping around from the end, so the example above is
+  supported from point 2 round to point 1. Names are case-insensitive and
+  accept the obvious variants (`clamp`/`clamped`, `support`/`simplysupported`,
+  `slide`/`sliding`, `free`); a bare 0–3 works too. Omit the key entirely for
+  a simply supported edge all round.
+* `meshDensity` — optional, 8 to 48, the same number the *Grid* control sets.
+* `name` and `modaldish_shape` are carried but not required.
+
+A malformed file is refused with a message naming what is wrong and where
+(the offending point index, the unknown condition, the out-of-range key)
+rather than loading a half-shape. Examples live in [`Shapes/`](Shapes/).
+
 ## Playing it from MIDI
 
 A note does two independent things: it **triggers** and it **tunes**. Which
@@ -332,6 +383,10 @@ cmake --build Builds -j --target FemTests
 ctest --test-dir Builds
 ```
 
+`ShapeFileTests` is the one suite that links JUCE (juce_core only, for its
+JSON parser); the rest are JUCE-free.
+
+
 ## Repo layout
 
 | Path | Contents |
@@ -340,6 +395,7 @@ ctest --test-dir Builds
 | `Source/Dsp/PlateSynth.*` | modal resonant filter bank (audio thread) |
 | `Source/Dsp/ModalModel.h` | immutable mesh + modes shared with the audio thread |
 | `Source/Components/ShapeCanvas.*` | shape drawing / boundary editing component |
+| `Source/ShapeFile.*` | JSON geometry reader (see `Shapes/`) |
 | `Source/PluginEditor.*` | FX-Mechanics UI (TopBar, knobs, plate view) |
 | `lib/FxmeTools/core/FxmeTools/acoustics/` | reusable FEM library (mesh, Morley plate solver) |
 | `lib/FxmeTools/core/FxmeTools/math/` | the linear algebra under it (sparse/dense storage, Cholesky, subspace eigensolver) |

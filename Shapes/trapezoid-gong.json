@@ -1,0 +1,14 @@
+{
+  "modaldish_shape": 1,
+  "name": "Trapezoid gong",
+  "meshDensity": 20,
+  "points": [
+    [-0.85, -0.55],
+    [ 0.85, -0.55],
+    [ 0.55,  0.75],
+    [-0.55,  0.75]
+  ],
+  "boundary": {
+    "2": "support"
+  }
+}

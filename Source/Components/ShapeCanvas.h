@@ -12,8 +12,8 @@
       * Rotate tool    — click-drag rotates the shape about its centre.
       * Boundary tool  — Ns draggable points on the border split it into Ns
                          segments; clicking a segment cycles its boundary
-                         condition (Free / SimplySupported / Clamped /
-                         Sliding, colour-coded).
+                         condition, cycling stiffest-first (Clamped /
+                         SimplySupported / Sliding / Free, colour-coded).
 
     The shape lives in plate coordinates in the unit square (y up); segment
     positions are arc-length parameters in [0,1) along the outline — the

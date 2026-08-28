@@ -74,21 +74,22 @@ namespace fem::theme
     inline const juce::Colour fieldPos  { 0xffe0784a };
 
     /** Colour code of the four boundary-condition types, indexed by
-        (int) fxme::acoustics::BoundaryCondition. */
+        (int) fxme::acoustics::BoundaryCondition — stiffest first. Each
+        condition keeps the colour it has always had; only the order moved. */
     inline juce::Colour bcColour (int bc) noexcept
     {
         static const juce::Colour colours[4] = {
-            juce::Colour (0xff8a93a6),   // Free            — grey
-            juce::Colour (0xff4cc9f0),   // SimplySupported — cyan
             juce::Colour (0xffe0784a),   // Clamped         — coral
+            juce::Colour (0xff4cc9f0),   // SimplySupported — cyan
             juce::Colour (0xff9ac93c),   // Sliding         — lime
+            juce::Colour (0xff8a93a6),   // Free            — grey
         };
         return colours[juce::jlimit (0, 3, bc)];
     }
 
     inline const char* bcName (int bc) noexcept
     {
-        static const char* names[4] = { "Free", "Support", "Clamp", "Slide" };
+        static const char* names[4] = { "Clamp", "Support", "Slide", "Free" };
         return names[juce::jlimit (0, 3, bc)];
     }
 
