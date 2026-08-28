@@ -162,7 +162,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout ModalDishAudioProcessor::cre
     };
 
     p.push_back (std::make_unique<FloatParam> (
-        juce::ParameterID (fem::id::f1, 1), "Base Freq", logRange (20.0f, 2000.0f), 110.0f,
+        juce::ParameterID (fem::id::f1, 1), "Base Freq", logRange (1.0f, 2000.0f), 110.0f,
         juce::AudioParameterFloatAttributes().withLabel ("Hz")));
 
     // Tension-to-flexural-stiffness: 0 = pure plate, large = membrane-like.
@@ -409,6 +409,12 @@ void ModalDishAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBl
     // output meters it needs somewhere to put a block before measuring it.
     pickupMeter.prepare (sampleRate);
     pickupMeterScratch.assign ((size_t) juce::jmax (0, samplesPerBlock), 0.0f);
+
+    const auto hp = fxme::BiquadCoeffs::highpass (sampleRate, outHighpassHz, outHighpassQ);
+    outHpL.c = hp;
+    outHpR.c = hp;
+    outHpL.reset();
+    outHpR.reset();
 }
 
 void ModalDishAudioProcessor::releaseResources()
@@ -586,8 +592,12 @@ void ModalDishAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         if (meterScratch != nullptr)
             meterScratch[i] = synth.getMeteredSample();
 
-        outL *= outGain;
-        outR *= outGain;
+        // Out Gain first, then the subsonic filter, so that the filter is the
+        // last thing between the plate and the bus and nothing downstream can
+        // put low end back. The meters read the buffer below, so what they
+        // show is post-filter — what actually leaves.
+        outL = outHpL.processSample (outL * outGain);
+        outR = outHpR.processSample (outR * outGain);
 
         if (out1 != nullptr)
         {

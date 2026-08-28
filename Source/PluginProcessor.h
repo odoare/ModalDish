@@ -37,6 +37,7 @@
 #include "Dsp/ModalModel.h"
 #include "Dsp/PlateSynth.h"
 
+#include <FxmeTools/dsp/Biquad.h>
 #include <FxmeTools/dsp/VuMeter.h>
 
 #include <atomic>
@@ -201,6 +202,17 @@ private:
     int lastStrikeSeen = 0;
 
     fem::PlateSynth synth;
+    // Subsonic protection on the output. Base Freq reaches down to 1 Hz now,
+    // and although modes below 20 Hz are muted outright (PlateSynth::retune),
+    // that is not the whole of the low end: a live mode just above 20 Hz is a
+    // band-pass whose lower skirt falls at only 6 dB/oct, and the half-sine
+    // hammer pulse carries DC. Second-order Butterworth, so there is a double
+    // zero at DC — an offset is removed absolutely rather than attenuated —
+    // and 12 dB/oct below, while 35 Hz and up is untouched to within 0.4 dB.
+    static constexpr float outHighpassHz = 20.0f;
+    static constexpr float outHighpassQ  = 0.70710678f;   // Butterworth
+    fxme::Biquad outHpL, outHpR;
+
     fxme::VuMeter outMeterL, outMeterR;
 
     // Peak-hold ballistics, in dBFS. 20 dB/s is slow enough to read a
