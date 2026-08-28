@@ -2,7 +2,7 @@
   ------------------------------------------------------------------------------
     Theme.h
 
-    FemPlate colour scheme, after the Mango / Spread / AmbiRR2 pattern: dark
+    ModalDish colour scheme, after the Mango / Spread / AmbiRR2 pattern: dark
     diagonal gradient backdrop, one identity accent, one accent per control
     section, and the FxmeTools knob styling helpers (dark disc, accent on
     arc / outline / pointer).

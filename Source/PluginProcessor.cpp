@@ -90,7 +90,7 @@ namespace
 }
 
 //==============================================================================
-FemPlateAudioProcessor::FemPlateAudioProcessor()
+ModalDishAudioProcessor::ModalDishAudioProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput ("Input", juce::AudioChannelSet::stereo(), true)
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
@@ -142,12 +142,12 @@ FemPlateAudioProcessor::FemPlateAudioProcessor()
     buildMesh();
 }
 
-FemPlateAudioProcessor::~FemPlateAudioProcessor()
+ModalDishAudioProcessor::~ModalDishAudioProcessor()
 {
     runner.cancelAndWait();
 }
 
-juce::AudioProcessorValueTreeState::ParameterLayout FemPlateAudioProcessor::createLayout()
+juce::AudioProcessorValueTreeState::ParameterLayout ModalDishAudioProcessor::createLayout()
 {
     using FloatParam = juce::AudioParameterFloat;
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> p;
@@ -381,7 +381,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout FemPlateAudioProcessor::crea
     return { p.begin(), p.end() };
 }
 
-FemPlateAudioProcessor::ShapeData FemPlateAudioProcessor::makeDefaultShape()
+ModalDishAudioProcessor::ShapeData ModalDishAudioProcessor::makeDefaultShape()
 {
     ShapeData s;
     // Slightly elliptic default plate, four simply supported segments.
@@ -398,7 +398,7 @@ FemPlateAudioProcessor::ShapeData FemPlateAudioProcessor::makeDefaultShape()
 }
 
 //==============================================================================
-void FemPlateAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+void ModalDishAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     juce::FloatVectorOperations::disableDenormalisedNumberSupport();
     synth.prepare (sampleRate);
@@ -411,14 +411,14 @@ void FemPlateAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     pickupMeterScratch.assign ((size_t) juce::jmax (0, samplesPerBlock), 0.0f);
 }
 
-void FemPlateAudioProcessor::releaseResources()
+void ModalDishAudioProcessor::releaseResources()
 {
     // No processBlock can run concurrently with or after this call, so
     // superseded models can be reclaimed regardless of acknowledgement.
     reclaimModels (true);
 }
 
-bool FemPlateAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+bool ModalDishAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
     const auto& in = layouts.getMainInputChannelSet();
     const auto& out = layouts.getMainOutputChannelSet();
@@ -428,7 +428,7 @@ bool FemPlateAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts)
         || in == juce::AudioChannelSet::disabled();
 }
 
-void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
+void ModalDishAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                            juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -626,13 +626,13 @@ void FemPlateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 }
 
 //==============================================================================
-void FemPlateAudioProcessor::invalidateShape()
+void ModalDishAudioProcessor::invalidateShape()
 {
     displayMesh = nullptr;
     invalidateBoundary();
 }
 
-void FemPlateAudioProcessor::invalidateBoundary()
+void ModalDishAudioProcessor::invalidateBoundary()
 {
     // Mark the modes stale for the UI, but keep the published model sounding
     // until a new computation replaces it: edits shouldn't cut the audio.
@@ -640,7 +640,7 @@ void FemPlateAudioProcessor::invalidateBoundary()
     sendChangeMessage();
 }
 
-bool FemPlateAudioProcessor::buildMesh()
+bool ModalDishAudioProcessor::buildMesh()
 {
     const double h = 1.0 / juce::jlimit (6, 48, shapeData.meshDensity);
     auto mesh = std::make_shared<fxme::acoustics::FemMesh> (
@@ -652,7 +652,7 @@ bool FemPlateAudioProcessor::buildMesh()
     return true;
 }
 
-void FemPlateAudioProcessor::computeModes()
+void ModalDishAudioProcessor::computeModes()
 {
     if (runner.isRunning())
         return;
@@ -715,7 +715,7 @@ void FemPlateAudioProcessor::computeModes()
     sendChangeMessage();
 }
 
-void FemPlateAudioProcessor::publishModel (std::unique_ptr<fem::ModalModel> model)
+void ModalDishAudioProcessor::publishModel (std::unique_ptr<fem::ModalModel> model)
 {
     model->generation = nextGeneration++;
     currentModel = model.get();
@@ -724,7 +724,7 @@ void FemPlateAudioProcessor::publishModel (std::unique_ptr<fem::ModalModel> mode
     reclaimModels (false);
 }
 
-void FemPlateAudioProcessor::reclaimModels (bool audioStopped)
+void ModalDishAudioProcessor::reclaimModels (bool audioStopped)
 {
     // A superseded model can be freed once the audio thread acknowledged a
     // newer generation (or the audio is known to be stopped). The published
@@ -742,7 +742,7 @@ void FemPlateAudioProcessor::reclaimModels (bool audioStopped)
         modelStore.end());
 }
 
-void FemPlateAudioProcessor::requestStrike (float x, float y, float velocity)
+void ModalDishAudioProcessor::requestStrike (float x, float y, float velocity)
 {
     strikeX.store (x);
     strikeY.store (y);
@@ -751,7 +751,7 @@ void FemPlateAudioProcessor::requestStrike (float x, float y, float velocity)
 }
 
 //==============================================================================
-juce::ValueTree FemPlateAudioProcessor::shapeToTree() const
+juce::ValueTree ModalDishAudioProcessor::shapeToTree() const
 {
     juce::ValueTree t ("SHAPE");
 
@@ -771,7 +771,7 @@ juce::ValueTree FemPlateAudioProcessor::shapeToTree() const
     return t;
 }
 
-void FemPlateAudioProcessor::shapeFromTree (const juce::ValueTree& t)
+void ModalDishAudioProcessor::shapeFromTree (const juce::ValueTree& t)
 {
     if (! t.hasType ("SHAPE"))
         return;
@@ -820,7 +820,7 @@ namespace
     eigensolver. The mesh itself is NOT serialised: generateMesh is a pure
     deterministic function of the outline and density, so it is rebuilt on
     load and only the vertex count is stored as a consistency check. */
-juce::ValueTree FemPlateAudioProcessor::modesToTree() const
+juce::ValueTree ModalDishAudioProcessor::modesToTree() const
 {
     if (currentModel == nullptr || currentModel->mesh == nullptr
          || ! currentModel->modes.valid())
@@ -857,7 +857,7 @@ juce::ValueTree FemPlateAudioProcessor::modesToTree() const
     return t;
 }
 
-bool FemPlateAudioProcessor::modesFromTree (const juce::ValueTree& t)
+bool ModalDishAudioProcessor::modesFromTree (const juce::ValueTree& t)
 {
     if (! t.hasType ("MODES") || displayMesh == nullptr)
         return false;
@@ -896,9 +896,9 @@ bool FemPlateAudioProcessor::modesFromTree (const juce::ValueTree& t)
     return true;
 }
 
-void FemPlateAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
+void ModalDishAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    juce::ValueTree root ("FemPlateState");
+    juce::ValueTree root ("ModalDishState");
     root.setProperty ("version", stateVersion, nullptr);
     root.appendChild (apvts.copyState(), nullptr);
     root.appendChild (shapeToTree(), nullptr);
@@ -909,14 +909,14 @@ void FemPlateAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
         copyXmlToBinary (*xml, destData);
 }
 
-void FemPlateAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
+void ModalDishAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     auto xml = getXmlFromBinary (data, sizeInBytes);
     if (xml == nullptr)
         return;
 
     const auto root = juce::ValueTree::fromXml (*xml);
-    if (! root.hasType ("FemPlateState"))
+    if (! root.hasType ("ModalDishState"))
         return;
 
     const auto params = root.getChildWithName (apvts.state.getType());
@@ -929,7 +929,7 @@ void FemPlateAudioProcessor::setStateInformation (const void* data, int sizeInBy
     triggerAsyncUpdate();
 }
 
-void FemPlateAudioProcessor::handleAsyncUpdate()
+void ModalDishAudioProcessor::handleAsyncUpdate()
 {
     invalidateShape();
     if (buildMesh())
@@ -943,12 +943,12 @@ void FemPlateAudioProcessor::handleAsyncUpdate()
 }
 
 //==============================================================================
-juce::AudioProcessorEditor* FemPlateAudioProcessor::createEditor()
+juce::AudioProcessorEditor* ModalDishAudioProcessor::createEditor()
 {
-    return new FemPlateAudioProcessorEditor (*this);
+    return new ModalDishAudioProcessorEditor (*this);
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-    return new FemPlateAudioProcessor();
+    return new ModalDishAudioProcessor();
 }

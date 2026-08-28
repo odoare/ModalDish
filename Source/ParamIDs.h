@@ -2,7 +2,7 @@
   ------------------------------------------------------------------------------
     ParamIDs.h
 
-    FemPlate parameter identifiers and a few shared constants.
+    ModalDish parameter identifiers and a few shared constants.
 
     Author: Olivier Doaré, github.com/odoare
     (c) 2026 Olivier Doaré

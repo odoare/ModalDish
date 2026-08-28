@@ -11,7 +11,7 @@
 #include "PluginEditor.h"
 
 //==============================================================================
-FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcessor& p)
+ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProcessor& p)
     : AudioProcessorEditor (&p), processor (p)
 {
     setLookAndFeel (&lnf);
@@ -324,14 +324,14 @@ FemPlateAudioProcessorEditor::FemPlateAudioProcessorEditor (FemPlateAudioProcess
     setAdvancedVisible (false);   // also sets the window size
 }
 
-FemPlateAudioProcessorEditor::~FemPlateAudioProcessorEditor()
+ModalDishAudioProcessorEditor::~ModalDishAudioProcessorEditor()
 {
     processor.removeChangeListener (this);
     setLookAndFeel (nullptr);
 }
 
 //==============================================================================
-void FemPlateAudioProcessorEditor::setAdvancedVisible (bool shouldShow)
+void ModalDishAudioProcessorEditor::setAdvancedVisible (bool shouldShow)
 {
     advancedVisible = shouldShow;
     advancedButton.setToggleState (shouldShow, juce::dontSendNotification);
@@ -345,7 +345,7 @@ void FemPlateAudioProcessorEditor::setAdvancedVisible (bool shouldShow)
     repaint();
 }
 
-void FemPlateAudioProcessorEditor::setDesignMode (bool design)
+void ModalDishAudioProcessorEditor::setDesignMode (bool design)
 {
     designMode = design;
     canvas.setVisible (design);
@@ -389,7 +389,7 @@ void FemPlateAudioProcessorEditor::setDesignMode (bool design)
     repaint();
 }
 
-void FemPlateAudioProcessorEditor::updateWindowSize()
+void ModalDishAudioProcessorEditor::updateWindowSize()
 {
     // The cascade column only exists in Perform with Advanced up, so the
     // window must not stay wide when design mode hides it. It is narrower
@@ -397,7 +397,7 @@ void FemPlateAudioProcessorEditor::updateWindowSize()
     setSize ((advancedVisible && ! designMode) ? 1142 : 1022, 760);
 }
 
-void FemPlateAudioProcessorEditor::syncShapeToProcessor (bool geometryChanged)
+void ModalDishAudioProcessorEditor::syncShapeToProcessor (bool geometryChanged)
 {
     auto& s = processor.shape();
     s.outline = canvas.outline();
@@ -417,7 +417,7 @@ void FemPlateAudioProcessorEditor::syncShapeToProcessor (bool geometryChanged)
     refreshStatus();
 }
 
-void FemPlateAudioProcessorEditor::refreshMeshAndField()
+void ModalDishAudioProcessorEditor::refreshMeshAndField()
 {
     // Every view of the mesh gets it here, and this is the only place any of
     // them does: a view left holding a null mesh draws nothing at all, with
@@ -431,36 +431,36 @@ void FemPlateAudioProcessorEditor::refreshMeshAndField()
     refreshField();
 }
 
-bool FemPlateAudioProcessorEditor::showingLiveField() const
+bool ModalDishAudioProcessorEditor::showingLiveField() const
 {
     return viewBox.getSelectedId() >= 2;
 }
 
-fem::PlateSynth::Field FemPlateAudioProcessorEditor::selectedQuantity() const
+fem::PlateSynth::Field ModalDishAudioProcessorEditor::selectedQuantity() const
 {
     const int id = viewBox.getSelectedId();
     return (id == 3 || id == 5) ? fem::PlateSynth::Field::velocity
                                 : fem::PlateSynth::Field::displacement;
 }
 
-bool FemPlateAudioProcessorEditor::showing3D() const
+bool ModalDishAudioProcessorEditor::showing3D() const
 {
     return viewBox.getSelectedId() >= 4;
 }
 
-juce::Component& FemPlateAudioProcessorEditor::activePlateView()
+juce::Component& ModalDishAudioProcessorEditor::activePlateView()
 {
     return showing3D() ? (juce::Component&) plateView3D : (juce::Component&) plateView;
 }
 
-void FemPlateAudioProcessorEditor::updatePlateViewVisibility()
+void ModalDishAudioProcessorEditor::updatePlateViewVisibility()
 {
     const bool perform = ! designMode;
     plateView.setVisible (perform && ! showing3D());
     plateView3D.setVisible (perform && showing3D());
 }
 
-void FemPlateAudioProcessorEditor::refreshField()
+void ModalDishAudioProcessorEditor::refreshField()
 {
     if (showingLiveField())
     {
@@ -488,7 +488,7 @@ void FemPlateAudioProcessorEditor::refreshField()
     }
 }
 
-void FemPlateAudioProcessorEditor::refreshLiveField()
+void ModalDishAudioProcessorEditor::refreshLiveField()
 {
     // w(x) = sum_k q_k phi_k(x) (or its time derivative), evaluated at the
     // mesh vertices. No field reconstruction is needed on the audio thread:
@@ -558,7 +558,7 @@ void FemPlateAudioProcessorEditor::refreshLiveField()
     }
 }
 
-void FemPlateAudioProcessorEditor::refreshStatus()
+void ModalDishAudioProcessorEditor::refreshStatus()
 {
     juce::String text;
     const auto mesh = processor.getDisplayMesh();
@@ -617,7 +617,7 @@ void FemPlateAudioProcessorEditor::refreshStatus()
     statusLabel.setText (text, juce::dontSendNotification);
 }
 
-void FemPlateAudioProcessorEditor::setOutputPosition (double x, double y)
+void ModalDishAudioProcessorEditor::setOutputPosition (double x, double y)
 {
     auto setParam = [this] (const char* id, float value)
     {
@@ -629,19 +629,19 @@ void FemPlateAudioProcessorEditor::setOutputPosition (double x, double y)
     plateView.repaint();
 }
 
-juce::String FemPlateAudioProcessorEditor::PlateMarker::label() const
+juce::String ModalDishAudioProcessorEditor::PlateMarker::label() const
 {
     return isPickup ? juce::String (index + 1)
                     : juce::String::charToString ((juce::juce_wchar) fem::sourceLabel (index));
 }
 
-juce::Colour FemPlateAudioProcessorEditor::PlateMarker::colour() const
+juce::Colour ModalDishAudioProcessorEditor::PlateMarker::colour() const
 {
     return isPickup ? fem::theme::pickupAccent : fem::theme::sourceAccent;
 }
 
-std::vector<FemPlateAudioProcessorEditor::PlateMarker>
-FemPlateAudioProcessorEditor::plateMarkers() const
+std::vector<ModalDishAudioProcessorEditor::PlateMarker>
+ModalDishAudioProcessorEditor::plateMarkers() const
 {
     const auto value = [this] (const char* id)
     {
@@ -660,7 +660,7 @@ FemPlateAudioProcessorEditor::plateMarkers() const
     return out;
 }
 
-int FemPlateAudioProcessorEditor::markerAt (const std::vector<PlateMarker>& markers,
+int ModalDishAudioProcessorEditor::markerAt (const std::vector<PlateMarker>& markers,
                                             juce::Point<float> screenPos) const
 {
     // Nearest within the radius rather than the first one inside it: markers
@@ -688,7 +688,7 @@ int FemPlateAudioProcessorEditor::markerAt (const std::vector<PlateMarker>& mark
     return best;
 }
 
-void FemPlateAudioProcessorEditor::setMarkerPosition (const PlateMarker& m, double x, double y)
+void ModalDishAudioProcessorEditor::setMarkerPosition (const PlateMarker& m, double x, double y)
 {
     const auto setParam = [this] (const char* id, float value)
     {
@@ -702,7 +702,7 @@ void FemPlateAudioProcessorEditor::setMarkerPosition (const PlateMarker& m, doub
     plateView.repaint();
 }
 
-void FemPlateAudioProcessorEditor::setMarkerOn (const PlateMarker& m, bool shouldBeOn)
+void ModalDishAudioProcessorEditor::setMarkerOn (const PlateMarker& m, bool shouldBeOn)
 {
     const char* id = m.isPickup ? fem::id::pickupOn[m.index] : fem::id::sourceOn[m.index];
     if (auto* param = processor.apvts.getParameter (id))
@@ -710,7 +710,7 @@ void FemPlateAudioProcessorEditor::setMarkerOn (const PlateMarker& m, bool shoul
     plateView.repaint();
 }
 
-void FemPlateAudioProcessorEditor::showMarkerPanel (const PlateMarker& m)
+void ModalDishAudioProcessorEditor::showMarkerPanel (const PlateMarker& m)
 {
     auto panel = std::make_unique<PlatePointPanel> (processor, m.isPickup, m.index);
     const auto centre = plateView.plateToScreen (m.x, m.y);
@@ -722,7 +722,7 @@ void FemPlateAudioProcessorEditor::showMarkerPanel (const PlateMarker& m)
     juce::CallOutBox::launchAsynchronously (std::move (panel), area, this);
 }
 
-bool FemPlateAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
+bool ModalDishAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
 {
     // 1..4 place a pickup, a..h a source, at whatever the mouse is over.
     // Placing something also switches it on: the gesture that turns a marker
@@ -750,7 +750,7 @@ bool FemPlateAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
     return true;
 }
 
-void FemPlateAudioProcessorEditor::drawPlateOverlay (juce::Graphics& g,
+void ModalDishAudioProcessorEditor::drawPlateOverlay (juce::Graphics& g,
                                                      fxme::acoustics::FemViewComponent& v)
 {
     const auto mesh = v.mesh();
@@ -847,7 +847,7 @@ void FemPlateAudioProcessorEditor::drawPlateOverlay (juce::Graphics& g,
 }
 
 //==============================================================================
-void FemPlateAudioProcessorEditor::timerCallback()
+void ModalDishAudioProcessorEditor::timerCallback()
 {
     const bool computing = processor.isComputing();
     computeButton.setEnabled (! computing);
@@ -906,7 +906,7 @@ void FemPlateAudioProcessorEditor::timerCallback()
     }
 }
 
-void FemPlateAudioProcessorEditor::changeListenerCallback (juce::ChangeBroadcaster*)
+void ModalDishAudioProcessorEditor::changeListenerCallback (juce::ChangeBroadcaster*)
 {
     refreshMeshAndField();
     refreshStatus();
@@ -916,7 +916,7 @@ void FemPlateAudioProcessorEditor::changeListenerCallback (juce::ChangeBroadcast
 }
 
 //==============================================================================
-void FemPlateAudioProcessorEditor::paint (juce::Graphics& g)
+void ModalDishAudioProcessorEditor::paint (juce::Graphics& g)
 {
     fem::theme::paintBackground (g, getLocalBounds().toFloat());
 
@@ -965,7 +965,7 @@ void FemPlateAudioProcessorEditor::paint (juce::Graphics& g)
 
 }
 
-void FemPlateAudioProcessorEditor::resized()
+void ModalDishAudioProcessorEditor::resized()
 {
     // Two columns of number boxes throughout. A box is legible at a third of
     // the height a knob needs for the same information, which is what makes

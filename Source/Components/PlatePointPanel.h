@@ -40,7 +40,7 @@ class PlatePointPanel : public juce::Component,
 {
 public:
     /** `index` is the pickup or source (both 0..7) this panel edits. */
-    PlatePointPanel (FemPlateAudioProcessor& p, bool pickup, int index)
+    PlatePointPanel (ModalDishAudioProcessor& p, bool pickup, int index)
         : processor (p), isPickup (pickup), pointIndex (index),
           accent (pickup ? fem::theme::pickupAccent : fem::theme::sourceAccent)
     {
@@ -202,7 +202,7 @@ private:
     static constexpr int pad = 8, headerH = 22, rowH = 42, footerH = 26, knobW = 62,
                          meterH = 14;
 
-    FemPlateAudioProcessor& processor;
+    ModalDishAudioProcessor& processor;
     const bool isPickup;
     const int pointIndex;
     const juce::Colour accent;

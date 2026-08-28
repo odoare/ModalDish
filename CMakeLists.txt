@@ -4,7 +4,7 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
 endif()
 
-project(FemPlate VERSION 0.1.0 LANGUAGES C CXX)
+project(ModalDish VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -15,11 +15,11 @@ if(APPLE)
 endif()
 
 # JUCE is expected as a sibling of this repo; FxmeTools lives in-tree as a git
-# submodule under lib/ (registered directly: FemPlate does not need the WDL
+# submodule under lib/ (registered directly: ModalDish does not need the WDL
 # sources, so fxmetools_attach is not used).
 #
-# FxmeTools is split in two, and the FEM code FemPlate is built on — FemMesh and
-# PlateModes — is entirely in the JUCE-free half under lib/FxmeTools/core. That
+# FxmeTools is split in two, and the FEM code ModalDish is built on (FemMesh and
+# PlateModes) is entirely in the JUCE-free half under lib/FxmeTools/core. That
 # directory is a second include root for the same <FxmeTools/...> spelling, so
 # no include changes, but the target has to be added or nothing resolves.
 add_subdirectory(../JUCE JUCE)
@@ -31,14 +31,14 @@ juce_add_module(${CMAKE_CURRENT_SOURCE_DIR}/lib/FxmeTools/FxmeTools)
 # with it.
 target_link_libraries(FxmeTools INTERFACE FxmeCore)
 
-juce_add_plugin(FemPlate
+juce_add_plugin(ModalDish
     COMPANY_NAME                "FX-Mechanics"
     COMPANY_WEBSITE             "www.fx-mechanics.com"
     PLUGIN_MANUFACTURER_CODE    FXME
-    PLUGIN_CODE                 FMPL
+    PLUGIN_CODE                 MDSH
     FORMATS                     AU VST3 Standalone
     COPY_PLUGIN_AFTER_BUILD     TRUE
-    PRODUCT_NAME                "FemPlate"
+    PRODUCT_NAME                "ModalDish"
     DESCRIPTION                 "FX-Mechanics finite-element plate physical model"
     IS_SYNTH                    FALSE
     NEEDS_MIDI_INPUT            TRUE
@@ -47,40 +47,40 @@ juce_add_plugin(FemPlate
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     VST3_CATEGORIES             Fx
     AU_MAIN_TYPE                kAudioUnitType_MusicEffect
-    BUNDLE_ID                   "com.FXMechanics.FemPlate"
+    BUNDLE_ID                   "com.FXMechanics.ModalDish"
 )
 
 # Source files are discovered recursively so adding a new module/component
 # does not require editing this file. Re-run CMake configure after adding files.
-file(GLOB_RECURSE FEMPLATE_SOURCES CONFIGURE_DEPENDS
+file(GLOB_RECURSE MODALDISH_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/*.h
 )
 
-target_sources(FemPlate PRIVATE ${FEMPLATE_SOURCES})
+target_sources(ModalDish PRIVATE ${MODALDISH_SOURCES})
 
 # Make every subdirectory under Source/ an include root so headers can be
 # included by name regardless of where a module lives.
-file(GLOB FEMPLATE_INCLUDE_DIRS LIST_DIRECTORIES true
+file(GLOB MODALDISH_INCLUDE_DIRS LIST_DIRECTORIES true
     ${CMAKE_CURRENT_SOURCE_DIR}/Source
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/*
 )
-list(FILTER FEMPLATE_INCLUDE_DIRS EXCLUDE REGEX "\\.(c|cc|cpp|cxx|h|hpp|hxx|mm)$")
-target_include_directories(FemPlate PRIVATE ${FEMPLATE_INCLUDE_DIRS})
+list(FILTER MODALDISH_INCLUDE_DIRS EXCLUDE REGEX "\\.(c|cc|cpp|cxx|h|hpp|hxx|mm)$")
+target_include_directories(ModalDish PRIVATE ${MODALDISH_INCLUDE_DIRS})
 
 # Image assets (logo, etc.)
-file(GLOB FEMPLATE_ASSETS ${CMAKE_CURRENT_SOURCE_DIR}/Source/Assets/*.png
+file(GLOB MODALDISH_ASSETS ${CMAKE_CURRENT_SOURCE_DIR}/Source/Assets/*.png
                           ${CMAKE_CURRENT_SOURCE_DIR}/Source/Assets/*.jpg)
-if(FEMPLATE_ASSETS)
-    juce_add_binary_data(FemPlateBinaryData SOURCES ${FEMPLATE_ASSETS})
-    set_target_properties(FemPlateBinaryData PROPERTIES
+if(MODALDISH_ASSETS)
+    juce_add_binary_data(ModalDishBinaryData SOURCES ${MODALDISH_ASSETS})
+    set_target_properties(ModalDishBinaryData PROPERTIES
         INTERPROCEDURAL_OPTIMIZATION OFF)
-    target_link_libraries(FemPlate PRIVATE FemPlateBinaryData)
+    target_link_libraries(ModalDish PRIVATE ModalDishBinaryData)
 endif()
 
-juce_generate_juce_header(FemPlate)
+juce_generate_juce_header(ModalDish)
 
-target_compile_definitions(FemPlate
+target_compile_definitions(ModalDish
     PUBLIC
         JUCE_STRICT_REFCOUNTEDPOINTER=1
         JUCE_VST3_CAN_REPLACE_VST2=0
@@ -90,7 +90,7 @@ target_compile_definitions(FemPlate
         JUCE_MODAL_LOOPS_PERMITTED=1
 )
 
-target_link_libraries(FemPlate
+target_link_libraries(ModalDish
     PRIVATE
         FxmeTools
         FxmeCore
@@ -114,10 +114,10 @@ target_link_libraries(FemPlate
 )
 
 # Console validation of the JUCE-free FEM core (mesh generation, Morley plate
-# eigensolver vs analytic references). Build with -DFEMPLATE_BUILD_TESTS=ON,
+# eigensolver vs analytic references). Build with -DMODALDISH_BUILD_TESTS=ON,
 # run with ctest (or ./FemTests directly).
-option(FEMPLATE_BUILD_TESTS "Build FemPlate unit tests" OFF)
-if(FEMPLATE_BUILD_TESTS)
+option(MODALDISH_BUILD_TESTS "Build ModalDish unit tests" OFF)
+if(MODALDISH_BUILD_TESTS)
     enable_testing()
     # FemMesh.cpp and PlateModes.cpp used to be listed here by path. They now
     # live in core and FxmeCore compiles them, so this links that instead of

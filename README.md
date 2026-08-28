@@ -1,4 +1,4 @@
-# FemPlate
+# ModalDish
 
 FX-Mechanics plugin: physical model of a **plate / membrane of arbitrary
 shape**, simulated by finite elements and played as an instrument (click the
@@ -208,7 +208,7 @@ nonlinearity (both 0 = exactly the linear model):
   other — could only shift the shimmer sideways. What does not converge
   is the *signed* sum `Σ φ_k(x)` over a band, a random walk whose terms
   cancel instead of accumulating, and whose ratio between two pickups
-  stays broadly spread however many modes the band holds. FemPlate takes
+  stays broadly spread however many modes the band holds. ModalDish takes
   each band's pan from it, minus the mean so the tail scatters without
   drifting to one side, over bands about three to the octave (any
   narrower and the ear sums them back to the centre). Measured one
@@ -306,7 +306,7 @@ Hosts differ on whether an audio effect can receive MIDI at all:
 | Host | How |
 | --- | --- |
 | REAPER | Any track; MIDI on it reaches the plugin directly. |
-| Ableton Live | **Cannot** route MIDI to an audio effect on an audio track. Put FemPlate on a MIDI track *after* an instrument. |
+| Ableton Live | **Cannot** route MIDI to an audio effect on an audio track. Put ModalDish on a MIDI track *after* an instrument. |
 | Bitwig / Studio One / Cubase | Route a MIDI track's output to the plugin (note-input assignment). |
 | Logic | Use the AU: it appears under *MIDI-controlled Effects*, not Audio FX. |
 
@@ -327,7 +327,7 @@ cmake --build Builds -j
 Console FEM validation tests (JUCE-free):
 
 ```
-cmake -B Builds -DFEMPLATE_BUILD_TESTS=ON
+cmake -B Builds -DMODALDISH_BUILD_TESTS=ON
 cmake --build Builds -j --target FemTests
 ctest --test-dir Builds
 ```

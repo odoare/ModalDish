@@ -1,4 +1,4 @@
-FemPlate is a Juce plugin that simulates the vibration of plates or mambrane of arbitrary shape with the following design spec for the user perspective:
+ModalDish is a Juce plugin that simulates the vibration of plates or mambrane of arbitrary shape with the following design spec for the user perspective:
 
 - The user draw a shape on a square canvas with is then approximated/smoothed using a spline. The user can also define standard shapes such as ellipses or rectangles with given aspect ratio.
 

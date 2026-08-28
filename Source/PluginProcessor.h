@@ -2,7 +2,7 @@
   ------------------------------------------------------------------------------
     PluginProcessor.h
 
-    FemPlate — physical model of a plate / membrane of arbitrary shape.
+    ModalDish — physical model of a plate / membrane of arbitrary shape.
     The user draws the shape, sets boundary conditions per border segment,
     a finite-element modal analysis runs in the background
     (FxmeTools/acoustics), and the resulting modes drive a resonant filter
@@ -43,13 +43,13 @@
 #include <vector>
 
 //==============================================================================
-class FemPlateAudioProcessor : public juce::AudioProcessor,
+class ModalDishAudioProcessor : public juce::AudioProcessor,
                                public juce::ChangeBroadcaster,
                                private juce::AsyncUpdater
 {
 public:
-    FemPlateAudioProcessor();
-    ~FemPlateAudioProcessor() override;
+    ModalDishAudioProcessor();
+    ~ModalDishAudioProcessor() override;
 
     //==========================================================================
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
@@ -261,5 +261,5 @@ private:
     std::atomic<float>* pInGain = nullptr;
     std::atomic<float>* pOutGain = nullptr;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FemPlateAudioProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ModalDishAudioProcessor)
 };

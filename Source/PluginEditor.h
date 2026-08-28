@@ -2,7 +2,7 @@
   ------------------------------------------------------------------------------
     PluginEditor.h
 
-    FemPlate editor: FX-Mechanics top bar; on the left the plate area — the
+    ModalDish editor: FX-Mechanics top bar; on the left the plate area — the
     shape canvas (draw / standard shapes / rotate / boundary editing) and the
     FEM view (grid + modal filled contours, click to hit the plate), switched
     by two view buttons — with the grid / compute controls underneath; on the
@@ -28,13 +28,13 @@
 #include "Components/PointToggle.h"
 
 //==============================================================================
-class FemPlateAudioProcessorEditor : public juce::AudioProcessorEditor,
+class ModalDishAudioProcessorEditor : public juce::AudioProcessorEditor,
                                      private juce::Timer,
                                      private juce::ChangeListener
 {
 public:
-    explicit FemPlateAudioProcessorEditor (FemPlateAudioProcessor&);
-    ~FemPlateAudioProcessorEditor() override;
+    explicit ModalDishAudioProcessorEditor (ModalDishAudioProcessor&);
+    ~ModalDishAudioProcessorEditor() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -107,11 +107,11 @@ private:
     void showMarkerPanel (const PlateMarker& m);
     bool keyPressed (const juce::KeyPress& key) override;
 
-    FemPlateAudioProcessor& processor;
+    ModalDishAudioProcessor& processor;
 
     fxme::FxmeLookAndFeel lnf;
 
-    fxme::TopBar topBar { "FemPlate", "finite-element plate physical model",
+    fxme::TopBar topBar { "ModalDish", "finite-element plate physical model",
                           JucePlugin_VersionString,
                           juce::ImageCache::getFromMemory (BinaryData::logo686_png,
                                                            BinaryData::logo686_pngSize) };
@@ -210,5 +210,5 @@ private:
     // (including FxmeSlider's right-click value entry).
     fxme::TextEntryFocusFixer textEntryFixer { *this };
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FemPlateAudioProcessorEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ModalDishAudioProcessorEditor)
 };

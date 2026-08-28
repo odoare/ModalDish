@@ -1,5 +1,5 @@
 % ----------------------------------------------------------------------------
-% FemPlate — technical documentation
+% ModalDish — technical documentation
 %
 % Build:  pdflatex technical.tex  (twice, for references)
 %
@@ -22,18 +22,18 @@
 \newcommand{\dd}{\mathrm{d}}
 \newcommand{\code}[1]{\texttt{#1}}
 
-\title{FemPlate: finite-element modal synthesis of plates and membranes
+\title{ModalDish: finite-element modal synthesis of plates and membranes
        of arbitrary shape\\[1ex]
        \large Technical documentation}
 \author{Olivier Doaré\thanks{FX-Mechanics, \url{github.com/odoare}. Model,
         implementation and documentation developed with Claude (Anthropic).}}
-\date{July 2026 --- FemPlate v0.1}
+\date{July 2026 --- ModalDish v0.1}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-FemPlate is an audio plugin that simulates the linear and weakly nonlinear
+ModalDish is an audio plugin that simulates the linear and weakly nonlinear
 vibration of a thin plate (or tensioned membrane) of arbitrary user-drawn
 shape, with mixed boundary conditions. The plate eigenmodes are computed by
 a non-conforming (Morley) finite-element discretisation and a dense subspace
@@ -76,7 +76,7 @@ damping mechanisms:
 \end{equation}
 %
 where $\rho h$ is the surface density, $D$ the flexural rigidity, $\nu$ the
-Poisson ratio ($\nu = 0.3$ in FemPlate), $c_1$ a viscous (air/support)
+Poisson ratio ($\nu = 0.3$ in ModalDish), $c_1$ a viscous (air/support)
 damping coefficient and $c_2$ a stiffness-proportional (material,
 Kelvin--Voigt-type) damping coefficient. Dividing by $\rho h$ and rescaling
 space and time so that the coefficients of $\ddot w$ and $\bilap w$ are
@@ -159,7 +159,7 @@ target element size $h$:
 
 The biharmonic operator requires $C^1$ continuity for conforming elements,
 which leads to high-order elements (Argyris, Bell) that are expensive and
-delicate. FemPlate instead uses the \emph{Morley triangle}
+delicate. ModalDish instead uses the \emph{Morley triangle}
 \cite{morley}, the simplest non-conforming plate bending element: on each
 triangle the deflection is a full quadratic polynomial (6 coefficients)
 determined by 6 degrees of freedom,
@@ -174,7 +174,7 @@ The element is non-conforming ($w$ is discontinuous along edges except at
 vertices), yet it converges for fourth-order problems, and its eigenvalue
 approximations converge at rate $O(h^2)$, \emph{from below}
 \cite{rannacher,babuska-osborn} --- both properties are verified numerically
-in \S\ref{sec:validation}. Crucially for FemPlate, its two DOF families are
+in \S\ref{sec:validation}. Crucially for ModalDish, its two DOF families are
 exactly the quantities constrained by the four boundary conditions of
 \S\ref{sec:bc}.
 
@@ -491,7 +491,7 @@ damped oscillators
 %
 for a point force $F$ at $\bm{x}_h$ and a pickup at $\bm{x}_o$ --- the
 standard modal synthesis framework \cite{adrien,morrison,vandendoel,bilbao}.
-FemPlate realises each oscillator as a second-order IIR resonator, exactly
+ModalDish realises each oscillator as a second-order IIR resonator, exactly
 as in the MechanOdd modal resonators: one constant-peak-gain band-pass
 biquad per mode (RBJ ``cookbook'' coefficients \cite{rbj}) with
 $Q_k = 1/(2\zeta_k)$, excited by $\varphi_k(\bm{x}_h) F$ and weighted on
@@ -762,7 +762,7 @@ the modes, cascading energy towards high frequencies (the cymbal
 von K\'arm\'an synthesis requires the cubic coupling tensors
 $\Gamma_{klmn}$ --- $O(N^3)$--$O(N^4)$ storage and work
 \cite{ducceschi-touze,bilbao-vk} --- which is beyond a realtime budget at
-a few hundred modes. FemPlate implements two lightweight surrogates, one for each
+a few hundred modes. ModalDish implements two lightweight surrogates, one for each
 phenomenon; \S\ref{sec:related} compares them with the direct simulation
 of the full system, which is affordable in real time on a rectangle.
 
@@ -858,7 +858,7 @@ scheme is the side effect of its overlap floor --- high-frequency damping.
 The physical cascade climbs the spectrum \emph{iteratively}: products
 beget products, stage after stage \cite{touze-turbulence}.
 
-FemPlate reproduces this with a \emph{windowed} band ladder. The active
+ModalDish reproduces this with a \emph{windowed} band ladder. The active
 modes are split into $N_b = 8$ contiguous index bands
 $\mathcal{B}_0 \ldots \mathcal{B}_7$ (equal index ranges are equal
 frequency ranges, plate modal density being constant); band $b$ is driven
@@ -1011,7 +1011,7 @@ the top of the spectrum.
 The transfer \eqref{eq:cascade} is additive: it copies energy upward but
 takes none from the sources, so the struck low modes ring on untouched
 under the shimmer --- audibly two disconnected layers. In the real
-cascade the low modes \emph{lose} the energy they hand upward. FemPlate
+cascade the low modes \emph{lose} the energy they hand upward. ModalDish
 models this as an extra dissipation on the source bands: each sample, the
 filter states of the modes in band $b$ are scaled by
 %
@@ -1054,7 +1054,7 @@ bounded).
 Even a 256-mode FEM bank remains a sparse comb at the top of the
 spectrum, and solving for many hundreds of accurate FEM modes is
 prohibitive (\S\ref{sec:eig}) --- while a convincing crash needs a dense
-receiving continuum up to Nyquist. FemPlate therefore fills the bank
+receiving continuum up to Nyquist. ModalDish therefore fills the bank
 (to 1024 modes in all) with \emph{synthetic} modes above the FEM set,
 built from asymptotics instead of the discrete operator:
 %
@@ -1138,7 +1138,7 @@ a random walk whose terms carry Berry's random phases and so cancel
 rather than accumulate. $|S_b|$ stays of order $\sqrt{N_b/A}$ for any
 $N_b$, and the ratio $|S_b(\bm{x}_1)|/|S_b(\bm{x}_2)|$ between two
 pickups therefore keeps a broad distribution however many modes the band
-holds. FemPlate uses it as the band's stereo placement,
+holds. ModalDish uses it as the band's stereo placement,
 %
 \begin{equation}
   p_b \;=\; \frac{|S_b^R| - |S_b^L|}{|S_b^R| + |S_b^L|} \;-\; \bar{p},
@@ -1175,7 +1175,7 @@ replacing them with a band statistic would discard the very thing
 \subsection{Relation to other nonlinear plate synthesis}
 \label{sec:related}
 
-The closest published work to FemPlate's objective is the real-time gong
+The closest published work to ModalDish's objective is the real-time gong
 synthesis of Bilbao, Webb, Wang and Ducceschi \cite{bilbao-gong23}, which
 reaches the same sounds --- pitch glide, crash, swell --- from the opposite
 direction, and the contrast is worth stating plainly because it delimits
@@ -1209,7 +1209,7 @@ places:
   it the real-time budget.
 \item \emph{Cost.} Reported timings are $0.15$--$0.57$\,s of computation per
   second of audio on a recent laptop CPU, and $0.26$--$0.99$\,s on an older
-  one, for grids of roughly $300$ to $720$ interior points. FemPlate's full
+  one, for grids of roughly $300$ to $720$ interior points. ModalDish's full
   bank --- 256
   modes with both the Berger glide and the cascade engaged --- measures
   $0.054$\,s per second of audio on an Intel i7-10810U, roughly an order of
@@ -1247,7 +1247,7 @@ basis of the gong and cymbal synthesis of Ducceschi and Touz\'e
 shallow shells by Touz\'e, Thomas and Chaigne
 \cite{touze-circular,thomas-shells}; Nguyen and Touz\'e extend it to plates
 of variable thickness for cymbals \cite{nguyen-touze}. That route keeps the
-modal picture --- and would keep FemPlate's arbitrary geometry, since the
+modal picture --- and would keep ModalDish's arbitrary geometry, since the
 tensors can in principle be assembled from any set of FEM modes --- but the
 $O(N^3)$--$O(N^4)$ tensor is what rules it out at $N = 256$ in a plugin,
 and it is the reason the two cheap surrogates were chosen instead.
