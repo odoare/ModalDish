@@ -21,17 +21,114 @@ namespace
     constexpr double margin = 0.08;          // shape fitting box inside [0,1]
     constexpr int splineResolution = 128;    // freehand outline points
 
+    // Fallbacks for a canvas used without a host supplying the palette. In
+    // BoundaryCondition order, which is stiffest first.
     juce::Colour defaultBcColour (int bc)
     {
-        static const juce::Colour c[4] = { juce::Colour (0xff8a93a6), juce::Colour (0xff4cc9f0),
-                                           juce::Colour (0xffe0784a), juce::Colour (0xff9ac93c) };
+        static const juce::Colour c[4] = { juce::Colour (0xffe0784a), juce::Colour (0xff4cc9f0),
+                                           juce::Colour (0xff9ac93c), juce::Colour (0xff8a93a6) };
         return c[juce::jlimit (0, 3, bc)];
     }
 
     juce::String defaultBcName (int bc)
     {
-        static const char* n[4] = { "Free", "Support", "Clamp", "Slide" };
+        static const char* n[4] = { "Clamp", "Support", "Slide", "Free" };
         return n[juce::jlimit (0, 3, bc)];
+    }
+
+    // Most vertices the Polygon tool will show at once. A freehand outline is
+    // 128 points and an ellipse 96, which are handles to drag, not a shape to
+    // edit; this is the count they get reduced to on the way in.
+    constexpr int maxPolygonVertices = 20;
+
+    /** Douglas-Peucker over the open chain p[first..last], flagging the
+        vertices that have to stay for the chain to stay within `tol`. */
+    void simplifyChain (const std::vector<fxme::acoustics::Point2>& p,
+                        size_t first, size_t last, double tol, std::vector<char>& keep)
+    {
+        if (last <= first + 1)
+            return;
+
+        const auto& a = p[first];
+        const auto& b = p[last];
+        const double dx = b.x - a.x, dy = b.y - a.y;
+        const double len2 = dx * dx + dy * dy;
+
+        double worst = -1.0;
+        size_t worstAt = first;
+        for (size_t i = first + 1; i < last; ++i)
+        {
+            double d2;
+            if (len2 <= 0.0)
+            {
+                const double ex = p[i].x - a.x, ey = p[i].y - a.y;
+                d2 = ex * ex + ey * ey;
+            }
+            else
+            {
+                // Squared distance to the segment's infinite line: the cross
+                // product over the segment length.
+                const double cross = (p[i].x - a.x) * dy - (p[i].y - a.y) * dx;
+                d2 = cross * cross / len2;
+            }
+            if (d2 > worst)
+            {
+                worst = d2;
+                worstAt = i;
+            }
+        }
+
+        if (worst > tol * tol)
+        {
+            keep[worstAt] = 1;
+            simplifyChain (p, first, worstAt, tol, keep);
+            simplifyChain (p, worstAt, last, tol, keep);
+        }
+    }
+
+    /** One Douglas-Peucker pass over a closed polygon at a given tolerance. */
+    std::vector<fxme::acoustics::Point2>
+    simplifyClosed (const std::vector<fxme::acoustics::Point2>& pts, double tol)
+    {
+        const size_t n = pts.size();
+        if (n < 4)
+            return pts;
+
+        // A closed ring has no endpoints, so anchor it on vertex 0 and the
+        // vertex furthest from it, and simplify the two chains between them.
+        size_t far = 0;
+        double best = -1.0;
+        for (size_t i = 1; i < n; ++i)
+        {
+            const double ex = pts[i].x - pts[0].x, ey = pts[i].y - pts[0].y;
+            const double d2 = ex * ex + ey * ey;
+            if (d2 > best) { best = d2; far = i; }
+        }
+
+        std::vector<char> keep (n, 0);
+        keep[0] = 1;
+        keep[far] = 1;
+        simplifyChain (pts, 0, far, tol, keep);
+
+        // Second chain wraps past the end, so walk it in a rotated copy.
+        std::vector<fxme::acoustics::Point2> tail;
+        tail.reserve (n - far + 1);
+        for (size_t i = far; i < n; ++i)
+            tail.push_back (pts[i]);
+        tail.push_back (pts[0]);
+        std::vector<char> tailKeep (tail.size(), 0);
+        tailKeep.front() = 1;
+        tailKeep.back() = 1;
+        simplifyChain (tail, 0, tail.size() - 1, tol, tailKeep);
+        for (size_t i = 1; i + 1 < tail.size(); ++i)
+            if (tailKeep[i])
+                keep[far + i] = 1;
+
+        std::vector<fxme::acoustics::Point2> out;
+        for (size_t i = 0; i < n; ++i)
+            if (keep[i])
+                out.push_back (pts[i]);
+        return out;
     }
 }
 
@@ -66,11 +163,26 @@ void ShapeCanvas::setTool (Tool t)
 {
     tool = t;
     rawStroke.clear();
+    draggedVertex = -1;
     if (t == Tool::Ellipse || t == Tool::Rectangle)
     {
         makeStandardShape (t == Tool::Rectangle);
         notifyShape();
         notifyBoundary();
+    }
+    else if (t == Tool::Polygon)
+    {
+        // Pick up whatever shape is on screen, so that a freehand blob or an
+        // ellipse can be taken over and edited rather than started again.
+        // Only a dense outline is touched; a shape already made of a few
+        // vertices is adopted exactly as it stands.
+        const size_t before = outlinePts.size();
+        adoptOutlineAsPolygon();
+        if (outlinePts.size() != before)
+        {
+            notifyShape();
+            notifyBoundary();
+        }
     }
     repaint();
 }
@@ -259,6 +371,40 @@ double ShapeCanvas::nearestParam (const Point2& pt) const
     return t;
 }
 
+void ShapeCanvas::adoptOutlineAsPolygon()
+{
+    if ((int) outlinePts.size() <= maxPolygonVertices)
+        return;
+
+    // Raise the tolerance until the vertex count is manageable. Starting
+    // small and growing keeps the shape as faithful as it can be at that
+    // count, and Douglas-Peucker spends its budget on the corners, which is
+    // where a plate outline carries its character.
+    double tol = 0.002;
+    auto reduced = outlinePts;
+    for (int pass = 0; pass < 32; ++pass)
+    {
+        reduced = simplifyClosed (outlinePts, tol);
+        if ((int) reduced.size() <= maxPolygonVertices)
+            break;
+        tol *= 1.4;
+    }
+
+    if (reduced.size() >= 3)
+    {
+        outlinePts = std::move (reduced);
+        rebuildArcTable();
+    }
+}
+
+int ShapeCanvas::hitTestVertex (juce::Point<float> screenPos) const
+{
+    for (size_t i = 0; i < outlinePts.size(); ++i)
+        if (plateToScreen (outlinePts[i]).getDistanceFrom (screenPos) < handleRadius + 4.0f)
+            return (int) i;
+    return -1;
+}
+
 int ShapeCanvas::hitTestHandle (juce::Point<float> screenPos) const
 {
     for (size_t i = 0; i < segStarts.size(); ++i)
@@ -346,6 +492,65 @@ void ShapeCanvas::mouseDown (const juce::MouseEvent& e)
             break;
         }
 
+        case Tool::Polygon:
+        {
+            const int v = hitTestVertex (e.position);
+
+            if (e.mods.isAltDown())
+            {
+                // Delete, but never below a triangle: fewer than three points
+                // is not a shape the mesher can take, and silently emptying
+                // the plate is worse than refusing the last deletion.
+                if (v >= 0 && outlinePts.size() > 3)
+                {
+                    outlinePts.erase (outlinePts.begin() + v);
+                    rebuildArcTable();
+                    notifyShape();
+                    notifyBoundary();
+                }
+                break;      // alt-click on nothing does nothing, as asked
+            }
+
+            if (v >= 0)
+            {
+                draggedVertex = v;      // drag moves it; see mouseDrag
+                break;
+            }
+
+            const auto p = screenToPlate (e.position);
+            if (outlinePts.size() < 3)
+            {
+                // Still building the first chain: points go on the end, and
+                // the third one closes the shape.
+                outlinePts.push_back (p);
+            }
+            else
+            {
+                // Closed already, so a new vertex belongs in the edge it was
+                // dropped nearest to. Appending would fold the outline over
+                // itself instead of refining it.
+                const size_t n = outlinePts.size();
+                const double t = nearestParam (p);
+                const double s = t * perimeter;
+                size_t edge = 0;
+                while (edge + 1 < n && arcCum[edge + 1] < s)
+                    ++edge;
+                outlinePts.insert (outlinePts.begin() + (long) edge + 1, p);
+            }
+
+            rebuildArcTable();
+            if (outlinePts.size() >= 3)
+            {
+                notifyShape();
+                notifyBoundary();
+            }
+            else
+            {
+                repaint();
+            }
+            break;
+        }
+
         case Tool::Ellipse:
         case Tool::Rectangle:
             break;
@@ -414,6 +619,20 @@ void ShapeCanvas::mouseDrag (const juce::MouseEvent& e)
             break;
         }
 
+        case Tool::Polygon:
+        {
+            if (draggedVertex < 0)
+                break;
+            // Kept inside the unit square: a vertex dragged off the canvas
+            // would still be meshed, just nowhere anyone could see it.
+            const auto p = screenToPlate (e.position);
+            outlinePts[(size_t) draggedVertex] = { juce::jlimit (0.0, 1.0, p.x),
+                                                   juce::jlimit (0.0, 1.0, p.y) };
+            rebuildArcTable();
+            repaint();
+            break;
+        }
+
         case Tool::Ellipse:
         case Tool::Rectangle:
             break;
@@ -442,6 +661,17 @@ void ShapeCanvas::mouseUp (const juce::MouseEvent&)
             {
                 draggedHandle = -1;
                 normalizeSegments();
+                notifyBoundary();
+            }
+            break;
+
+        case Tool::Polygon:
+            if (draggedVertex >= 0)
+            {
+                draggedVertex = -1;
+                // Only now: remeshing on every drag step would rebuild the
+                // grid a hundred times across one gesture.
+                notifyShape();
                 notifyBoundary();
             }
             break;
@@ -565,7 +795,32 @@ void ShapeCanvas::paint (juce::Graphics& g)
     }
 
     if (outlinePts.size() < 3)
+    {
+        // A chain still being built: no area to fill and no boundary to
+        // colour, but the points placed so far have to be visible.
+        if (tool == Tool::Polygon && ! outlinePts.empty())
+        {
+            if (outlinePts.size() == 2)
+            {
+                g.setColour (juce::Colour (0xff4cc9f0).withAlpha (0.7f));
+                g.drawLine ({ plateToScreen (outlinePts[0]), plateToScreen (outlinePts[1]) }, 1.6f);
+            }
+            for (const auto& v : outlinePts)
+            {
+                const auto hp = plateToScreen (v);
+                g.setColour (juce::Colour (0xff4cc9f0));
+                g.fillEllipse (hp.x - handleRadius * 0.6f, hp.y - handleRadius * 0.6f,
+                               handleRadius * 1.2f, handleRadius * 1.2f);
+            }
+            g.setColour (juce::Colour (0xff97a1b4));
+            g.setFont (12.0f);
+            g.drawText (outlinePts.size() == 1 ? "one more point, then a third closes the shape"
+                                               : "one more point closes the shape",
+                        getLocalBounds().reduced (8).removeFromBottom (16),
+                        juce::Justification::centredLeft);
+        }
         return;
+    }
 
     // Filled shape.
     juce::Path shape;
@@ -608,6 +863,24 @@ void ShapeCanvas::paint (juce::Graphics& g)
                        handleRadius * 1.2f, handleRadius * 1.2f, 1.2f);
     }
 
+    // Outline vertices, when they are what is being edited. Square, so they
+    // are never mistaken for the round boundary-segment handles that may sit
+    // on the same edge.
+    if (tool == Tool::Polygon)
+    {
+        constexpr float r = handleRadius * 0.55f;
+        for (size_t i = 0; i < outlinePts.size(); ++i)
+        {
+            const auto hp = plateToScreen (outlinePts[i]);
+            const bool held = (int) i == draggedVertex;
+            g.setColour (held ? juce::Colours::white
+                              : juce::Colour (0xff4cc9f0).withAlpha (0.95f));
+            g.fillRect (hp.x - r, hp.y - r, 2 * r, 2 * r);
+            g.setColour (juce::Colour (0xff141a24));
+            g.drawRect (hp.x - r, hp.y - r, 2 * r, 2 * r, 1.0f);
+        }
+    }
+
     // Tool hint.
     g.setColour (juce::Colour (0xff97a1b4));
     g.setFont (12.0f);
@@ -619,6 +892,7 @@ void ShapeCanvas::paint (juce::Graphics& g)
         case Tool::Rectangle: hint = "rectangle from the Aspect knob"; break;
         case Tool::Rotate:    hint = "drag to rotate the shape"; break;
         case Tool::Boundary:  hint = "drag border points - click a segment to change its condition"; break;
+        case Tool::Polygon:   hint = "click to add a vertex - drag to move - alt-click to delete"; break;
     }
     g.drawText (hint, getLocalBounds().reduced (8).removeFromBottom (16),
                 juce::Justification::centredLeft);

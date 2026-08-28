@@ -165,7 +165,11 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
 
     // --- right: geometry panel -------------------------------------------------
     fem::theme::styleCombo (toolBox, fem::theme::geomAccent);
+    // Ids are positions in ShapeCanvas::Tool (id - 1), so Place points keeps
+    // id 6 wherever it sits in the list; it reads next to Draw shape because
+    // the two are the same job by different means.
     toolBox.addItem ("Draw shape", 1);
+    toolBox.addItem ("Place points", 6);
     toolBox.addItem ("Ellipse", 2);
     toolBox.addItem ("Rectangle", 3);
     toolBox.addItem ("Rotate", 4);

@@ -244,8 +244,9 @@ The plugin has two modes, and the controls on screen are the ones that
 belong to the mode you are in.
 
 1. **Modal design** — what the plate *is*. Pick a tool: *Draw shape*
-   (freehand, smoothed with a closed spline), *Ellipse* / *Rectangle* (from
-   the *Aspect* knob), *Rotate* (drag), *Edit boundary*. In boundary mode,
+   (freehand, smoothed with a closed spline), *Place points* (see below),
+   *Ellipse* / *Rectangle* (from the *Aspect* knob), *Rotate* (drag),
+   *Edit boundary*. In boundary mode,
    drag the border points (*Points* knob sets how many) and click a segment
    to cycle its condition (colour-coded, see legend). *Grid* sets the element
    density and *Modes* the size of the filter bank; the mesh is rebuilt as
@@ -272,6 +273,32 @@ belong to the mode you are in.
    indistinguishable, while at 0.3 ms the velocity field carries about twice
    the spatial detail. Neither shows the cascade, whose shimmer lives in the
    statistical tail, and tail modes have no mesh shape to draw.
+
+### Place points
+
+A polygon edited vertex by vertex, for when a shape wants exact corners
+rather than a drawn curve.
+
+* **Click** adds a vertex. Below three points you are building an open chain
+  and the third closes it; once closed, a click inserts the new vertex into
+  the **edge nearest the click**, which refines the outline instead of
+  folding it over itself.
+* **Drag** a vertex moves it. The mesh is rebuilt on release, not during the
+  gesture.
+* **Alt-click** a vertex deletes it; alt-clicking empty space does nothing.
+  The last three are kept, since fewer than three is not a shape the mesher
+  can take — so deleting down to a triangle and dragging it about is how you
+  start over.
+
+Switching to this tool **adopts whatever shape is already on screen**, so a
+freehand blob or an ellipse can be taken over and edited. A dense outline
+(freehand is 128 points, an ellipse 96) is first reduced to at most 20
+vertices by Douglas–Peucker, which spends its budget on the corners: a
+dense-sampled rectangle comes back as exactly its four corners, while an
+ellipse holds its area to within 2%. Shapes already made of a few vertices —
+a rectangle, or one loaded from a file — are adopted untouched. Boundary
+conditions are carried as arc-length fractions, so they survive the
+reduction.
 
 ## Loading a geometry from a file
 

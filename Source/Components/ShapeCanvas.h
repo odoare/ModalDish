@@ -10,6 +10,9 @@
       * Ellipse /      — standard shapes generated from the current aspect
         Rectangle        ratio (width / height).
       * Rotate tool    — click-drag rotates the shape about its centre.
+      * Polygon tool   — click to add a vertex, drag one to move it, alt-click
+                         one to delete it. Fewer than three points is an open
+                         chain being built; the third closes the shape.
       * Boundary tool  — Ns draggable points on the border split it into Ns
                          segments; clicking a segment cycles its boundary
                          condition, cycling stiffest-first (Clamped /
@@ -42,7 +45,9 @@ class ShapeCanvas : public juce::Component
 public:
     using Point2 = fxme::acoustics::Point2;
 
-    enum class Tool { Draw = 0, Ellipse, Rectangle, Rotate, Boundary };
+    // Appended, never reordered: the editor's tool combo maps its item ids
+    // to these by position.
+    enum class Tool { Draw = 0, Ellipse, Rectangle, Rotate, Boundary, Polygon };
 
     ShapeCanvas();
 
@@ -102,6 +107,12 @@ private:
     Point2 screenToPlate (juce::Point<float> p) const;
 
     void makeStandardShape (bool rectangle);
+
+    /** Reduce the outline to a handful of draggable vertices, so that a
+        freehand or ellipse shape can be picked up by the Polygon tool. A
+        shape that is already sparse enough is left exactly as it is. */
+    void adoptOutlineAsPolygon();
+    int hitTestVertex (juce::Point<float> screenPos) const;
     void resetSegmentsUniform (int ns, bool atCorners);
     void finishFreehand();
     void rebuildArcTable();
@@ -127,6 +138,7 @@ private:
     std::shared_ptr<const fxme::acoustics::FemMesh> mesh;   // drawn, never edited
     std::vector<juce::Point<float>> rawStroke;   // freehand, screen coords
     int draggedHandle = -1;
+    int draggedVertex = -1;      // Polygon tool: outline point being moved
     bool rotating = false;
     double rotateStartAngle = 0.0;
     std::vector<Point2> rotateBase;
