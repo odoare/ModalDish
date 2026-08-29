@@ -38,6 +38,7 @@
 #include "Dsp/PlateSynth.h"
 
 #include <FxmeTools/dsp/Biquad.h>
+#include <FxmeTools/presets/PresetManager.h>
 #include <FxmeTools/dsp/VuMeter.h>
 
 #include <atomic>
@@ -78,6 +79,20 @@ public:
 
     //==========================================================================
     juce::AudioProcessorValueTreeState apvts;
+
+    fxme::PresetManager& getPresetManager() noexcept { return presetManager; }
+
+    /** True the first time it is called on this processor, false ever after.
+        The editor shows the splash on the first call. The flag lives here
+        rather than on the editor because the editor is destroyed and rebuilt
+        every time the window is closed and reopened, and a reopened window is
+        not a new run. Deliberately not serialised: a reloaded session is. */
+    bool claimSplash() noexcept
+    {
+        const bool first = ! splashClaimed;
+        splashClaimed = true;
+        return first;
+    }
 
     /** MIDI learn, editor <-> audio thread.
 
@@ -171,6 +186,17 @@ public:
     fem::PlateSynth::HitPoint getHit (int i) const noexcept { return synth.getHit (i); }
 
 private:
+    fxme::PresetManager presetManager;
+    bool splashClaimed = false;
+
+    /** A preset carries the plate's geometry as well as its knobs, so the
+        shape is folded into apvts.state on the way out and read back on the
+        way in. The computed modes are deliberately *not* included: they are
+        megabytes of mode shapes, and recomputing them from the geometry is
+        what Compute already does. */
+    void storeShapeInState();
+    void loadShapeFromState();
+
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     void handleAsyncUpdate() override;   // post-setState rebuild
     void publishModel (std::unique_ptr<fem::ModalModel> model);

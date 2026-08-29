@@ -69,8 +69,12 @@ list(FILTER MODALDISH_INCLUDE_DIRS EXCLUDE REGEX "\\.(c|cc|cpp|cxx|h|hpp|hxx|mm)
 target_include_directories(ModalDish PRIVATE ${MODALDISH_INCLUDE_DIRS})
 
 # Image assets (logo, etc.)
+# Images, plus the factory presets: PresetManager reads every embedded
+# "*_xml" resource whose root tag matches the APVTS state, so dropping an
+# exported preset into Source/Presets/ is all it takes to ship it.
 file(GLOB MODALDISH_ASSETS ${CMAKE_CURRENT_SOURCE_DIR}/Source/Assets/*.png
-                          ${CMAKE_CURRENT_SOURCE_DIR}/Source/Assets/*.jpg)
+                          ${CMAKE_CURRENT_SOURCE_DIR}/Source/Assets/*.jpg
+                          ${CMAKE_CURRENT_SOURCE_DIR}/Source/Presets/*.xml)
 if(MODALDISH_ASSETS)
     juce_add_binary_data(ModalDishBinaryData SOURCES ${MODALDISH_ASSETS})
     set_target_properties(ModalDishBinaryData PROPERTIES

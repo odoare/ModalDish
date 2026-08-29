@@ -73,6 +73,40 @@ namespace fem::theme
     inline const juce::Colour fieldNeg  { 0xff4cc9f0 };
     inline const juce::Colour fieldPos  { 0xffe0784a };
 
+    /** The identity line under the top bar, and the ramp behind it: the same
+        three colours the plate view paints a mode with, blue through grey to
+        orange. Sampling the plate's own palette is the point — the line is a
+        small copy of what the big picture does.
+
+        The glow is a stack of ever-taller, ever-fainter copies of the ramp.
+        On a dark backdrop that reads as light spilling off the line rather
+        than as a drawn halo, and it costs a handful of gradient fills, so it
+        needs no blur buffer. */
+    inline void paintIdentityLine (juce::Graphics& g, juce::Rectangle<float> line,
+                                   float glowHeight = 16.0f)
+    {
+        auto fillRamp = [&g] (juce::Rectangle<float> b, float alpha)
+        {
+            juce::ColourGradient grad (fieldNeg.withMultipliedAlpha (alpha), b.getTopLeft(),
+                                       fieldPos.withMultipliedAlpha (alpha), b.getTopRight(),
+                                       false);
+            grad.addColour (0.5, plateGrid.withMultipliedAlpha (alpha));
+            g.setGradientFill (grad);
+            g.fillRect (b);
+        };
+
+        // Halo first, widest and faintest, so the crisp line lands on top of
+        // it; the layers accumulate towards the centre, which is the falloff.
+        constexpr int layers = 5;
+        for (int i = layers; i >= 1; --i)
+        {
+            const float t = (float) i / (float) layers;   // 1 = outermost
+            fillRamp (line.expanded (0.0f, glowHeight * t), 0.10f * (1.0f - t) + 0.025f);
+        }
+
+        fillRamp (line, 1.0f);
+    }
+
     /** Colour code of the four boundary-condition types, indexed by
         (int) fxme::acoustics::BoundaryCondition — stiffest first. Each
         condition keeps the colour it has always had; only the order moved. */

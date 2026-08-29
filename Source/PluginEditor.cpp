@@ -25,6 +25,29 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
     topBar.setBackgroundColour (fem::theme::topBarBg);
     topBar.setAccentColour (fem::theme::accent);
 
+    // Above the header so the halo can bleed up over it.
+    addAndMakeVisible (glowLine);
+
+    // Hidden until shown; show() brings it to the front itself, so it does
+    // not matter that later children are added above it.
+    splash.setImage (juce::ImageCache::getFromMemory (BinaryData::splash_jpg,
+                                                      BinaryData::splash_jpgSize));
+    addChildComponent (splash);
+    topBar.onLogoClicked = [this] { splash.show(); };
+
+    presetBar.setAccentColour (fem::theme::accent);
+    presetsButton.setTooltip ("Browse presets");
+    presetsButton.setMouseClickGrabsKeyboardFocus (false);
+    fem::theme::styleButton (presetsButton, fem::theme::accent);
+    presetsButton.onClick = [this]
+    {
+        setPresetPanelVisible (! presetOverlay.isVisible());
+    };
+    topBar.setRightControls (&presetBar, 260, &presetsButton, 74);
+
+    addChildComponent (presetOverlay);
+    presetOverlay.browser.setAccentColour (fem::theme::accent);
+
     // Advanced toggle: shows the cascade tuning column, widening the window.
     // The Advanced toggle sits in the Dynamics panel, in the slot next to the
     // controls it extends, rather than in the top bar away from them.
@@ -330,6 +353,11 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
     startTimerHz (30);
 
     setAdvancedVisible (false);   // also sets the window size
+
+    // First window of this run only: reopening the editor must not replay the
+    // splash, which is why the flag lives on the processor.
+    if (processor.claimSplash())
+        splash.show();
 }
 
 ModalDishAudioProcessorEditor::~ModalDishAudioProcessorEditor()
@@ -403,6 +431,14 @@ void ModalDishAudioProcessorEditor::updateWindowSize()
     // window must not stay wide when design mode hides it. It is narrower
     // than the main column because it is a single stack of number boxes.
     setSize ((advancedVisible && ! designMode) ? 1142 : 1022, 760);
+}
+
+void ModalDishAudioProcessorEditor::setPresetPanelVisible (bool shouldBeVisible)
+{
+    presetOverlay.setVisible (shouldBeVisible);
+    if (shouldBeVisible)
+        presetOverlay.toFront (false);
+    resized();
 }
 
 void ModalDishAudioProcessorEditor::loadShapeFile()
@@ -1049,6 +1085,14 @@ void ModalDishAudioProcessorEditor::resized()
 
     auto area = getLocalBounds();
     topBar.setBounds (area.removeFromTop (54));
+
+    // Straddles the header's bottom edge so the glow bleeds into both.
+    glowLine.setBounds (0, topBar.getBottom() - GlowLine::kHeight / 2,
+                        getWidth(), GlowLine::kHeight);
+
+    splash.setBounds (getLocalBounds());
+    presetOverlay.setBounds (area);
+
     area.reduce (padding, padding);
 
     // Column B is the cascade tuning: one narrow column, so a single stack of

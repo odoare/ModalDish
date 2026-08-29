@@ -94,8 +94,28 @@ ModalDishAudioProcessor::ModalDishAudioProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput ("Input", juce::AudioChannelSet::stereo(), true)
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "Parameters", createLayout())
+      apvts (*this, nullptr, "Parameters", createLayout()),
+      presetManager (apvts,
+                     fxme::PresetManager::getDefaultUserPresetDirectory ("ModalDish"),
+                     BinaryData::namedResourceList,
+                     BinaryData::namedResourceListSize,
+                     BinaryData::getNamedResource)
 {
+    // A preset only carries apvts.state, so the geometry has to travel inside
+    // it. Saving folds the shape in; loading takes it back out, rebuilds the
+    // mesh and starts a modal computation — the same background job Compute
+    // runs, so the plate keeps sounding the previous model until the new one
+    // is ready rather than falling silent.
+    presetManager.onBeforeSave = [this] { storeShapeInState(); };
+    presetManager.onAfterLoad  = [this]
+    {
+        loadShapeFromState();
+        invalidateShape();
+        if (buildMesh())
+            computeModes();
+        sendChangeMessage();
+    };
+
     pF1       = apvts.getRawParameterValue (fem::id::f1);
     pTension  = apvts.getRawParameterValue (fem::id::tension);
     pViscDamp = apvts.getRawParameterValue (fem::id::viscDamp);
@@ -924,6 +944,18 @@ bool ModalDishAudioProcessor::modesFromTree (const juce::ValueTree& t)
     publishModel (std::move (model));
     sendChangeMessage();
     return true;
+}
+
+void ModalDishAudioProcessor::storeShapeInState()
+{
+    auto state = apvts.state;
+    state.removeChild (state.getChildWithName ("SHAPE"), nullptr);
+    state.appendChild (shapeToTree(), nullptr);
+}
+
+void ModalDishAudioProcessor::loadShapeFromState()
+{
+    shapeFromTree (apvts.state.getChildWithName ("SHAPE"));
 }
 
 void ModalDishAudioProcessor::getStateInformation (juce::MemoryBlock& destData)

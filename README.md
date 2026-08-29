@@ -300,6 +300,23 @@ a rectangle, or one loaded from a file — are adopted untouched. Boundary
 conditions are carried as arc-length fractions, so they survive the
 reduction.
 
+## Presets
+
+The top bar carries the standard FX-Mechanics preset strip (previous / next /
+name / save) and a *Presets* button opening the browser over the working area.
+User presets live in the per-product folder — `~/.config/ModalDish/Presets` on
+Linux, `~/Library/Application Support/ModalDish/Presets` on macOS,
+`%APPDATA%\ModalDish\Presets` on Windows — and any `.xml` dropped into
+[`Source/Presets/`](Source/Presets/) is embedded as a factory preset.
+
+A preset carries the parameters **and the plate geometry**: the outline,
+segment positions and boundary conditions are folded into the state on save
+and read back on load. It does *not* carry the computed modes, which are
+megabytes of mode shapes — loading a preset rebuilds the mesh and starts the
+same background computation the *Compute* button runs, so the plate goes on
+sounding the previous model until the new one is ready rather than falling
+silent.
+
 ## Loading a geometry from a file
 
 *Load* (beside the tool selector, in design mode) reads a plate outline from
