@@ -171,6 +171,7 @@
 
 #include "ModalModel.h"
 
+#include <FxmeTools/dsp/Biquad.h>
 #include <FxmeTools/util/Random.h>
 
 namespace fem
@@ -462,22 +463,6 @@ private:
     void updateDynamicTension() noexcept;    // decimated Berger feedback step
     void updateGlide() noexcept;             // decimated portamento step
 
-    // Allocation-free RBJ band-pass (constant 0 dB peak), one per mode.
-    struct Resonator
-    {
-        fxme::BiquadCoeffs c;
-        float z1 = 0.0f, z2 = 0.0f;
-
-        float process (float x) noexcept
-        {
-            const float y = c.b0 * x + z1;
-            z1 = c.b1 * x - c.a1 * y + z2;
-            z2 = c.b2 * x - c.a2 * y;
-            return y;
-        }
-        void reset() noexcept { z1 = z2 = 0.0f; }
-    };
-
     struct Hammer
     {
         float weights[fem::maxModes] {};
@@ -494,7 +479,11 @@ private:
 
     int activeModes = 0;
     int liveModes = 0;                   // modes actually in band, always <= activeModes
-    Resonator filters[fem::maxModes];
+    // One allocation-free RBJ band-pass per mode (constant 0 dB peak; see
+    // the compensation note at the top of the .cpp for why that shape).
+    // fxme::Biquad exposes its state, which the cascade's depletion needs:
+    // it scales z1 and z2 directly to bleed energy out of the source bands.
+    fxme::Biquad filters[fem::maxModes];
     // Mode shapes sampled at each pickup, and the two vectors they collapse
     // into once levels and pans are applied. The per-sample loop only ever
     // touches the collapsed pair.

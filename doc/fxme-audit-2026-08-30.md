@@ -2,6 +2,7 @@
 
 Revisions:
 
+- 2026-08-30, fourth pass: H1 and H2 applied, both verified bit-identical.
 - 2026-08-30, third pass: R2 applied except the cascade column (declined, see
   below) and R3 applied. R1 declined for now.
 - 2026-08-30, second pass: S1, S2, S3 and S4 applied (see the ticks below).
@@ -135,9 +136,17 @@ not in front of the player.
 
 ### H1 — `PlateSynth::Resonator` duplicates `fxme::Biquad` — **decision**
 
-- [ ] [../Source/Dsp/PlateSynth.h:402](../Source/Dsp/PlateSynth.h#L402) declares
-      a `Resonator` with `BiquadCoeffs c`, `float z1, z2`, a transposed
-      direct-form-II `process` and a `reset`.
+- [x] Done. `Resonator` is gone; the bank is
+      `fxme::Biquad filters[fem::maxModes]`, with `process` renamed to
+      `processSample` at its one call site and an explicit
+      `#include <FxmeTools/dsp/Biquad.h>` (it had been arriving through
+      `JuceHeader.h`, which the JUCE-free test build does not provide).
+
+      Verified rather than assumed: IoTests renders the same peaks to five
+      decimals as before the swap (centred 0.01451, hard left 0.02052, the
+      live-switch pair 0.02210, hammer 1 ms 0.03911 against 20 ms 0.00521), and
+      CascadeMeasure's sample-rate table is unmoved. The depletion still scales
+      `z1`/`z2` directly, which `fxme::Biquad` allows because it exposes them.
 
 `fxme::Biquad` in `core/FxmeTools/dsp/Biquad.h` is the same struct, member for
 member, with the same TDF-II body and the same public `z1`/`z2` (which the audio
@@ -151,7 +160,20 @@ using-declaration plus a rename at three call sites.
 
 ### H2 — `tailRand` reimplements `fxme::detrand::avalanche` — **safe to apply**
 
-- [ ] [../Source/PluginProcessor.cpp:22](../Source/PluginProcessor.cpp#L22).
+- [x] Done. `tailRand` now calls `fxme::detrand::avalanche`, keeping only the
+      counter's golden-ratio increment as a named constant.
+
+      The order matters and is not obvious: `avalanche` folds that increment in
+      itself, so it must read the counter *before* the advance. Written the
+      other way round the stream shifts by one draw and every plate's tail
+      changes. Proved equivalent rather than argued: a harness ran the old and
+      new functions side by side for 200 000 draws on each of five seeds
+      (including the two the plugin actually uses) and compared both the
+      returned doubles and the final counter state, with zero divergence.
+
+      `detrand::u01` is deliberately not used: it takes the top 24 bits into a
+      float where this takes the low 32 into a double, so it would renumber
+      every tail for no gain.
 
 The local splitmix64 step uses the identical three constants
 (`0x9e3779b97f4a7c15`, `0xbf58476d1ce4e5b9`, `0x94d049bb133111eb`) and the same

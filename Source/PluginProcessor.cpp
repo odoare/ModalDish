@@ -11,6 +11,8 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+#include <FxmeTools/dsp/DeterministicRandom.h>
+
 #include <limits>
 
 namespace
@@ -21,15 +23,24 @@ namespace
     // unreleased, a format change means changing the format.
     constexpr int stateVersion = 1;
 
-    // Deterministic uniform in [0,1) (splitmix-style), so a given plate
-    // always regenerates the same statistical tail.
+    // Deterministic uniform in [0,1), so a given plate always regenerates the
+    // same statistical tail.
+    //
+    // The mixing is fxme::detrand::avalanche, which is the splitmix64 step.
+    // Note the order: avalanche folds the golden-ratio increment in itself, so
+    // it takes the counter *before* the advance, and the counter then steps by
+    // that same increment. Written the other way round the stream would be
+    // shifted by one draw and every tail would change.
+    //
+    // detrand::u01 is deliberately not used: it takes the top 24 bits into a
+    // float, where this takes the low 32 into a double, and switching would
+    // renumber every existing plate's tail for no gain.
+    constexpr std::uint64_t splitmixGamma = 0x9e3779b97f4a7c15ull;
+
     double tailRand (std::uint64_t& s)
     {
-        s += 0x9e3779b97f4a7c15ull;
-        std::uint64_t k = s;
-        k = (k ^ (k >> 30)) * 0xbf58476d1ce4e5b9ull;
-        k = (k ^ (k >> 27)) * 0x94d049bb133111ebull;
-        k ^= k >> 31;
+        const std::uint64_t k = fxme::detrand::avalanche (s);
+        s += splitmixGamma;
         return (double) (k & 0xffffffffull) / 4294967296.0;
     }
 

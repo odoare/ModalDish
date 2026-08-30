@@ -1126,7 +1126,7 @@ void PlateSynth::processSample (float inL, float inR, float& outL, float& outR) 
         float x = inWL[k] * inL + inWR[k] * inR + cascadeW[k] * cascadeFb[band];
         for (int p = 0; p < numPulses; ++p)
             x += pulse[p] * hammers[pulseSlot[p]].weights[k];
-        const float y = filters[k].process (x);
+        const float y = filters[k].processSample (x);
         stretch += nlWeight[k] * y * y;   // Berger driver, g_k q_k^2 term
         if (snapField)
         {
