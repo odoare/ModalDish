@@ -14,6 +14,39 @@ mode, the MechanOdd approach) driven by the FEM modal data.
 
 The original design brief lives in [doc/starting_spec.md](doc/starting_spec.md).
 
+## Installing
+
+Builds are published on the releases page: a zip per platform, plus a `.pkg`
+installer for macOS. VST3 and AU on macOS, VST3 on Windows and Linux, with a
+standalone application everywhere.
+
+### macOS
+
+ModalDish is free software and is **not signed with an Apple Developer ID**
+(that is a paid Apple subscription). macOS therefore marks anything downloaded
+through a browser as untrusted, and the DAW skips it during its scan, usually
+with no error at all: the plugin simply never appears.
+
+After copying the bundles into place, run the lines matching what you
+installed:
+
+```sh
+xattr -dr com.apple.quarantine /Library/Audio/Plug-Ins/VST3/ModalDish.vst3
+xattr -dr com.apple.quarantine /Library/Audio/Plug-Ins/Components/ModalDish.component
+```
+
+Then rescan. If you used the `.pkg` and macOS refused to open it, right-click
+it and choose Open rather than double-clicking.
+
+The builds are universal (Apple Silicon and Intel) and target macOS 10.13 and
+later.
+
+### Windows and Linux
+
+Copy `ModalDish.vst3` into the VST3 folder your host scans
+(`C:\Program Files\Common Files\VST3` on Windows, `~/.vst3` on Linux) and
+rescan. Nothing else is needed.
+
 ## Physics
 
 Scaled Kirchhoff plate with tension (flexural rigidity = 1, density = 1):
@@ -76,6 +109,49 @@ against analytic plates in `Tests/FemTests.cpp`.
   a note no source claims falls back to a hit at the last struck point with
   the global Hammer and Force knobs.
 
+  A source has three **mapped** quantities — where it strikes, how long the
+  hammer stays in contact, and how hard — each a *min* / *max* pair plus a
+  *Control* selecting what moves between them:
+
+  | | | |
+  | --- | --- | --- |
+  | X1 | Y1 | Spread |
+  | X2 | Y2 | Pos Ctl |
+  | Ham Min | Ham Max | Ham Ctl |
+  | Frc Min | Frc Max | Frc Ctl |
+  | Curve | In Vol | In Bal |
+
+  The value used for a strike is `min + amount × (max − min)`, where *amount*
+  is 0..1 from the control. **Min is not required to be below max**: putting
+  it above simply inverts the mapping, so a source can hit *softer* the harder
+  it is played, or move toward the rim as a pedal is released.
+
+  *Control* is **Off**, **Vel**, or a **CC number**. Off holds the quantity at
+  its min. Vel uses the triggering note's velocity, shaped by *Curve* — *Slow*
+  squares it (a hard hit is needed before much happens), *Fast* takes its root
+  (it responds early), *Linear* is the identity. A CC is taken as the player's
+  hardware left it, uncurved, and is read at strike time from the sources'
+  MIDI channel; a controller that has never moved reads zero, holding the min.
+  The three controls are independent — position can follow a pedal while force
+  follows velocity.
+
+  Position is the segment on the plate: the lower-case marker (*a*) is the
+  *min* end and the upper-case one (*A*) the *max*. Played across the range,
+  the plate is struck in different places — nearer the rim, nearer the centre
+  — which is what a real player does and a fixed point cannot imitate. Both
+  endpoints start on top of each other, so a source is a plain point until you
+  pull it apart, and dragging the marker then moves the whole thing. To
+  separate them, hover the plate and press the **capital** letter (`A`–`H`) to
+  drop the *A* end under the cursor, or use the *X2* / *Y2* knobs; the two are
+  then joined by a thin line and drag independently. *Spread* scatters around
+  wherever the mapping placed the hit, not around the base.
+
+  Out of the box a source is *Frc Min* 0, *Frc Max* 1, *Frc Ctl* Vel — which
+  is exactly "velocity scales force", what the hammer did before any of this
+  existed. Only strikes follow the mappings: the audio input is injected at
+  the *X1*/*Y1* point alone, a continuous signal having no velocity to place
+  it by.
+
   Both are linear mixes, so the audio loop costs the same whether one pickup
   and one source are on or eight and eight.
 
@@ -90,6 +166,7 @@ against analytic plates in `Tests/FemTests.cpp`.
   | Gesture | Effect |
   | --- | --- |
   | `1`–`8` / `a`–`h` with the mouse over the plate | put that pickup or source under the cursor, switching it on |
+  | `A`–`H` with the mouse over the plate | put that source's *velocity endpoint* under the cursor |
   | click a marker | open its panel — every parameter of that one point |
   | alt-click a marker | switch it off |
   | click anywhere else | hit the plate there, with the global Hammer and Force |

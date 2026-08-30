@@ -73,6 +73,11 @@ namespace fem::id
     // MIDI note, and its own send of the plugin input.
     inline constexpr const char* sourceX[]    = { "sourceax", "sourcebx", "sourcecx", "sourcedx", "sourceex", "sourcefx", "sourcegx", "sourcehx" };
     inline constexpr const char* sourceY[]    = { "sourceay", "sourceby", "sourcecy", "sourcedy", "sourceey", "sourcefy", "sourcegy", "sourcehy" };
+    // The velocity endpoint: where the source strikes at full control. The
+    // pair (sourceX, sourceX2) is the segment 'a'..'A' drawn on the plate;
+    // equal endpoints, the default, mean the control does not move the hit.
+    inline constexpr const char* sourceX2[]   = { "sourceax2", "sourcebx2", "sourcecx2", "sourcedx2", "sourceex2", "sourcefx2", "sourcegx2", "sourcehx2" };
+    inline constexpr const char* sourceY2[]   = { "sourceay2", "sourceby2", "sourcecy2", "sourcedy2", "sourceey2", "sourcefy2", "sourcegy2", "sourcehy2" };
     inline constexpr const char* sourceHammer[] = { "sourceahammer", "sourcebhammer", "sourcechammer", "sourcedhammer", "sourceehammer", "sourcefhammer", "sourceghammer", "sourcehhammer" };
     inline constexpr const char* sourceForce[] = { "sourceaforce", "sourcebforce", "sourcecforce", "sourcedforce", "sourceeforce", "sourcefforce", "sourcegforce", "sourcehforce" };
     inline constexpr const char* sourceNote[] = { "sourceanote", "sourcebnote", "sourcecnote", "sourcednote", "sourceenote", "sourcefnote", "sourcegnote", "sourcehnote" };
@@ -80,12 +85,57 @@ namespace fem::id
     inline constexpr const char* sourceSend[] = { "sourceasend", "sourcebsend", "sourcecsend", "sourcedsend", "sourceesend", "sourcefsend", "sourcegsend", "sourcehsend" };
     inline constexpr const char* sourcePan[]  = { "sourceapan", "sourcebpan", "sourcecpan", "sourcedpan", "sourceepan", "sourcefpan", "sourcegpan", "sourcehpan" };
     inline constexpr const char* sourceOn[]   = { "sourceaon", "sourcebon", "sourcecon", "sourcedon", "sourceeon", "sourcefon", "sourcegon", "sourcehon" };
+
+    // Each source has three modulated quantities — where it strikes, how long
+    // the hammer is in contact, and how hard — and each is a min/max pair plus
+    // a controller selecting what moves between them. sourceHammer and
+    // sourceForce above are the *min* ends, keeping their original ids so that
+    // sessions written before the pairs existed still find them.
+    inline constexpr const char* sourceHammerMax[] = { "sourceahammermax", "sourcebhammermax", "sourcechammermax", "sourcedhammermax", "sourceehammermax", "sourcefhammermax", "sourceghammermax", "sourcehhammermax" };
+    inline constexpr const char* sourceForceMax[] = { "sourceaforcemax", "sourcebforcemax", "sourcecforcemax", "sourcedforcemax", "sourceeforcemax", "sourcefforcemax", "sourcegforcemax", "sourcehforcemax" };
+
+    // What drives each mapping: fem::ctlOff, fem::ctlVelocity, or
+    // fem::ctlCcBase + n for MIDI CC n.
+    inline constexpr const char* sourcePosCtl[] = { "sourceaposctl", "sourcebposctl", "sourcecposctl", "sourcedposctl", "sourceeposctl", "sourcefposctl", "sourcegposctl", "sourcehposctl" };
+    inline constexpr const char* sourceHammerCtl[] = { "sourceahamctl", "sourcebhamctl", "sourcechamctl", "sourcedhamctl", "sourceehamctl", "sourcefhamctl", "sourceghamctl", "sourcehhamctl" };
+    inline constexpr const char* sourceForceCtl[] = { "sourceaforcectl", "sourcebforcectl", "sourcecforcectl", "sourcedforcectl", "sourceeforcectl", "sourcefforcectl", "sourcegforcectl", "sourcehforcectl" };
+
+    // Shape applied to velocity before it drives anything: 0 slow, 1 linear,
+    // 2 fast. CCs are not curved — a controller is already whatever shape the
+    // player's hardware makes it.
+    inline constexpr const char* sourceVelCurve[] = { "sourceavelcurve", "sourcebvelcurve", "sourcecvelcurve", "sourcedvelcurve", "sourceevelcurve", "sourcefvelcurve", "sourcegvelcurve", "sourcehvelcurve" };
+
     inline constexpr const char* inGain    = "ingain";    // external-signal drive (effect mode)
     inline constexpr const char* outGain   = "outgain";   // output level (dB)
 }
 
 namespace fem
 {
+    // Encoding of a source's controller selector. Off leaves the quantity at
+    // its min; Velocity uses the triggering note's velocity; anything from
+    // ctlCcBase up is MIDI CC (value - ctlCcBase), held per channel and read
+    // at strike time.
+    inline constexpr int ctlOff      = 0;
+    inline constexpr int ctlVelocity = 1;
+    inline constexpr int ctlCcBase   = 2;
+    inline constexpr int ctlMax      = ctlCcBase + 127;
+
+    // Velocity curve choices, in the order the parameter lists them.
+    inline constexpr int velCurveSlow   = 0;
+    inline constexpr int velCurveLinear = 1;
+    inline constexpr int velCurveFast   = 2;
+
+    /** The curve applied to a velocity in [0,1]. Slow needs a hard hit before
+        it gives much, fast reaches high values early; both are the same
+        square, one inverted, so linear sits exactly between them. */
+    inline float applyVelCurve (float v, int curve) noexcept
+    {
+        v = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+        if (curve == velCurveSlow) return v * v;
+        if (curve == velCurveFast) return std::sqrt (v);
+        return v;
+    }
+
     // Listening points on the plate. The cap is a matter of how many points
     // are worth putting on a plate, not of cost: the mix into the stereo pair
     // is linear, so any number of pickups collapses into two per-mode weight

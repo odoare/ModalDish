@@ -233,6 +233,216 @@ int main()
         (void) d;
     }
 
+    // --- 0a. Velocity moves the strike along the source's segment ----------
+    // (x, y) is the velocity-0 end and (x2, y2) the full-velocity one, so a
+    // hit lands on the straight line between them at t = velocity. Endpoints
+    // left equal — the default and what an old session migrates to — must
+    // reproduce a fixed point exactly.
+    std::printf ("\n== Velocity-dependent source position ==\n");
+    {
+        auto p = basePatch();
+        p.sources[0].on = true;
+        p.sources[0].note = 60;
+        p.sources[0].spread = 0.0f;      // deterministic: no random draw
+        // The plugin exposes two absolute endpoints, 'a' and 'A', and hands
+        // the synth their difference: base (0.30, 0.40), 'A' at (0.70, 0.60).
+        p.sources[0].x = 0.30f; p.sources[0].y = 0.40f;
+        p.sources[0].velX = 0.40f; p.sources[0].velY = 0.20f;
+
+        fem::PlateSynth s; s.prepare (fs); s.update (&model, p);
+
+        auto hitAt = [&] (float vel)
+        {
+            s.strikeSourcesForNote (60, vel);
+            return s.getHit (s.getHitCount() - 1);
+        };
+
+        const auto lo  = hitAt (0.0f);
+        const auto mid = hitAt (0.5f);
+        const auto hi  = hitAt (1.0f);
+        std::printf ("  v=0.0 (%.3f, %.3f)  v=0.5 (%.3f, %.3f)  v=1.0 (%.3f, %.3f)\n",
+                     lo.x, lo.y, mid.x, mid.y, hi.x, hi.y);
+
+        check (std::abs (lo.x - 0.30f) < 1e-6f && std::abs (lo.y - 0.40f) < 1e-6f,
+               "velocity 0 strikes the 'a' end exactly");
+        check (std::abs (hi.x - 0.70f) < 1e-6f && std::abs (hi.y - 0.60f) < 1e-6f,
+               "full velocity strikes the 'A' end exactly");
+        check (std::abs (mid.x - 0.50f) < 1e-6f && std::abs (mid.y - 0.50f) < 1e-6f,
+               "half velocity lands halfway along the segment");
+
+        // Linear, not merely monotonic: a quarter of the way is a quarter.
+        const auto q = hitAt (0.25f);
+        check (std::abs (q.x - 0.40f) < 1e-6f && std::abs (q.y - 0.45f) < 1e-6f,
+               "the interpolation is linear in velocity");
+
+        // No offset: the pre-segment behaviour, exactly. This is also the
+        // struct's default, so a caller that never heard of the segment —
+        // every other test below — gets a fixed point.
+        p.sources[0].velX = 0.0f;
+        p.sources[0].velY = 0.0f;
+        fem::PlateSynth f; f.prepare (fs); f.update (&model, p);
+        f.strikeSourcesForNote (60, 0.1f);
+        const auto soft = f.getHit (f.getHitCount() - 1);
+        f.strikeSourcesForNote (60, 1.0f);
+        const auto hard = f.getHit (f.getHitCount() - 1);
+        check (std::abs (soft.x - hard.x) < 1e-9f && std::abs (soft.y - hard.y) < 1e-9f,
+               "equal endpoints make the position velocity-independent");
+        check (std::abs (soft.x - 0.30f) < 1e-6f,
+               "and that fixed point is the source's own");
+
+        // Velocity still scales the hit as it always did; the segment moves
+        // where it lands, not how hard.
+        check (hard.amplitude > soft.amplitude * 5.0f,
+               "velocity still drives amplitude, not only position");
+    }
+
+    // --- 0c. Min/max mappings and their controllers -------------------------
+    // Each of position, hammer and force is min + amount * (max - min), where
+    // amount comes from the selected controller. The pair is not ordered:
+    // min above max inverts the mapping, which is the whole point of letting
+    // a source hit softer the harder it is played.
+    std::printf ("\n== Source controller mappings ==\n");
+    {
+        auto base = basePatch();
+        base.sources[0].on = true;
+        base.sources[0].note = 60;
+
+        auto lastHit = [] (fem::PlateSynth& s) { return s.getHit (s.getHitCount() - 1); };
+
+        // Force: Off holds the min, Velocity sweeps the pair.
+        {
+            auto p = base;
+            p.sources[0].force = 2.0f; p.sources[0].forceMax = 9.0f;
+            p.sources[0].forceCtl = fem::ctlOff;
+            fem::PlateSynth s; s.prepare (fs); s.update (&model, p);
+            s.strikeSourcesForNote (60, 1.0f);
+            const float off = lastHit (s).amplitude;
+            check (std::abs (off - 2.0f) < 1e-4f, "Off holds a mapping at its min");
+
+            p.sources[0].forceCtl = fem::ctlVelocity;
+            fem::PlateSynth v; v.prepare (fs); v.update (&model, p);
+            v.strikeSourcesForNote (60, 0.0f);
+            const float lo = lastHit (v).amplitude;
+            v.strikeSourcesForNote (60, 1.0f);
+            const float hi = lastHit (v).amplitude;
+            v.strikeSourcesForNote (60, 0.5f);
+            const float mid = lastHit (v).amplitude;
+            std::printf ("  force 2..9 by velocity: %.3f / %.3f / %.3f\n", lo, mid, hi);
+            check (std::abs (lo - 2.0f) < 1e-4f && std::abs (hi - 9.0f) < 1e-4f,
+                   "velocity sweeps force between its ends");
+            check (std::abs (mid - 5.5f) < 1e-4f, "and does so linearly");
+        }
+
+        // Inverted pair: min above max, so playing harder hits softer.
+        {
+            auto p = base;
+            p.sources[0].force = 9.0f; p.sources[0].forceMax = 2.0f;
+            p.sources[0].forceCtl = fem::ctlVelocity;
+            fem::PlateSynth s; s.prepare (fs); s.update (&model, p);
+            s.strikeSourcesForNote (60, 0.0f);
+            const float lo = lastHit (s).amplitude;
+            s.strikeSourcesForNote (60, 1.0f);
+            const float hi = lastHit (s).amplitude;
+            std::printf ("  inverted 9..2: v=0 -> %.3f, v=1 -> %.3f\n", lo, hi);
+            check (lo > hi && std::abs (lo - 9.0f) < 1e-4f && std::abs (hi - 2.0f) < 1e-4f,
+                   "a min above its max inverts the mapping");
+        }
+
+        // A CC drives a mapping, and does so independently of velocity.
+        {
+            auto p = base;
+            p.sources[0].force = 0.0f; p.sources[0].forceMax = 4.0f;
+            p.sources[0].forceCtl = fem::ctlCcBase + 74;
+            fem::PlateSynth s; s.prepare (fs); s.update (&model, p);
+
+            s.strikeSourcesForNote (60, 1.0f);
+            check (std::abs (lastHit (s).amplitude) < 1e-4f,
+                   "an unmoved CC reads zero, holding the min");
+
+            s.setControllerValue (74, 1.0f);
+            s.strikeSourcesForNote (60, 0.1f);      // velocity must not matter
+            const float full = lastHit (s).amplitude;
+            std::printf ("  CC74 at full, velocity 0.1 -> %.3f\n", full);
+            check (std::abs (full - 4.0f) < 1e-4f,
+                   "a CC drives the mapping regardless of velocity");
+
+            s.setControllerValue (73, 0.0f);        // a different CC changes nothing
+            s.strikeSourcesForNote (60, 0.1f);
+            check (std::abs (lastHit (s).amplitude - 4.0f) < 1e-4f,
+                   "and only the selected CC is listened to");
+        }
+
+        // The velocity curve shapes velocity only.
+        {
+            auto p = base;
+            p.sources[0].force = 0.0f; p.sources[0].forceMax = 1.0f;
+            p.sources[0].forceCtl = fem::ctlVelocity;
+
+            auto at = [&] (int curve)
+            {
+                p.sources[0].velCurve = curve;
+                fem::PlateSynth s; s.prepare (fs); s.update (&model, p);
+                s.strikeSourcesForNote (60, 0.5f);
+                return s.getHit (s.getHitCount() - 1).amplitude;
+            };
+            const float slow = at (fem::velCurveSlow);
+            const float lin  = at (fem::velCurveLinear);
+            const float fast = at (fem::velCurveFast);
+            std::printf ("  curve at velocity 0.5: slow %.3f, linear %.3f, fast %.3f\n",
+                         slow, lin, fast);
+            check (slow < lin && lin < fast, "slow, linear and fast are ordered");
+            check (std::abs (lin - 0.5f) < 1e-4f, "linear is the identity");
+            check (std::abs (slow - 0.25f) < 1e-4f && std::abs (fast - 0.70711f) < 1e-4f,
+                   "slow squares the velocity and fast takes its root");
+        }
+
+        // Hammer time is mapped by the same machinery, on its own controller.
+        {
+            auto p = base;
+            p.sources[0].hammerMs = 1.0f; p.sources[0].hammerMsMax = 20.0f;
+            p.sources[0].hammerCtl = fem::ctlVelocity;
+            p.sources[0].force = 1.0f; p.sources[0].forceMax = 1.0f;
+            p.sources[0].forceCtl = fem::ctlOff;
+
+            // A long contact is a duller strike, so the same force puts less
+            // into the high modes: compare the peak of a rendered hit.
+            auto peakAt = [&] (float vel)
+            {
+                fem::PlateSynth s; s.prepare (fs); s.update (&model, p);
+                s.strikeSourcesForNote (60, vel);
+                double l = 0.0, r = 0.0;
+                render (s, 0.5, [] (int, float&, float&) {}, l, r);
+                return l;
+            };
+            const double shortHit = peakAt (0.0f);   // 1 ms
+            const double longHit  = peakAt (1.0f);   // 20 ms
+            std::printf ("  hammer 1 ms -> %.5f, 20 ms -> %.5f\n", shortHit, longHit);
+            check (shortHit > longHit * 1.5,
+                   "the hammer mapping changes the strike, not just a number");
+        }
+
+        // Position, hammer and force each answer to their own controller.
+        {
+            auto p = base;
+            p.sources[0].x = 0.3f; p.sources[0].y = 0.4f;
+            p.sources[0].velX = 0.3f; p.sources[0].velY = 0.0f;
+            p.sources[0].posCtl = fem::ctlCcBase + 1;
+            p.sources[0].forceCtl = fem::ctlVelocity;
+            p.sources[0].force = 0.0f; p.sources[0].forceMax = 5.0f;
+
+            fem::PlateSynth s; s.prepare (fs); s.update (&model, p);
+            s.setControllerValue (1, 1.0f);
+            s.strikeSourcesForNote (60, 0.4f);
+            const auto h = lastHit (s);
+            std::printf ("  pos on CC1, force on velocity: (%.3f, %.3f) amp %.3f\n",
+                         h.x, h.y, h.amplitude);
+            check (std::abs (h.x - 0.6f) < 1e-4f,
+                   "position followed its CC, not the velocity");
+            check (std::abs (h.amplitude - 2.0f) < 1e-4f,
+                   "while force followed the velocity, not the CC");
+        }
+    }
+
     // --- 0b. The point panel's pickup meter --------------------------------
     // Mono, pre-pan, post-level. A centred pickup at unity is exactly the
     // mono output (that is what the sqrt(2) in equalPowerPan buys), so the
@@ -319,12 +529,15 @@ int main()
         auto p = basePatch();
         p.force = 1.0f;                       // global, deliberately different
         p.sources[2].on = true; p.sources[2].x = 0.42f; p.sources[2].y = 0.45f;
-        p.sources[2].force = 1.0f;
+        // Force is a min/max pair driven by a controller now; "Force N" as it
+        // used to mean is min 0, max N, velocity.
+        p.sources[2].force = 0.0f; p.sources[2].forceCtl = fem::ctlVelocity;
+        p.sources[2].forceMax = 1.0f;
         fem::PlateSynth s1; s1.prepare(fs); s1.update(&model,p);
         s1.strikeSource(2, 1.0f);
         render(s1, 2.0, [](int,float&,float&){}, lo, a);
 
-        p.sources[2].force = 4.0f;
+        p.sources[2].forceMax = 4.0f;
         fem::PlateSynth s2; s2.prepare(fs); s2.update(&model,p);
         s2.strikeSource(2, 1.0f);
         render(s2, 2.0, [](int,float&,float&){}, hi, b);
@@ -337,7 +550,9 @@ int main()
     std::printf("\n== Velocity maps 0..Force ==\n");
     {
         auto p = basePatch();
-        p.sources[0].on=true; p.sources[0].force=4.0f;
+        p.sources[0].on=true;
+        p.sources[0].force = 0.0f; p.sources[0].forceMax = 4.0f;
+        p.sources[0].forceCtl = fem::ctlVelocity;
         double half=0, full=0, d=0;
         fem::PlateSynth s1; s1.prepare(fs); s1.update(&model,p);
         s1.strikeSource(0, 0.5f); render(s1,2.0,[](int,float&,float&){},half,d);
@@ -472,7 +687,11 @@ int main()
             q.force = 1.0f;
             q.sources[3].on = true;
             q.sources[3].x = 0.5f; q.sources[3].y = 0.47f;
-            q.sources[3].force = 8.0f;
+            // Force is a mapping now: 0 at velocity 0, 8 at full velocity,
+            // which is what a plain "Force 8" used to mean.
+            q.sources[3].force = 0.0f;
+            q.sources[3].forceMax = 8.0f;
+            q.sources[3].forceCtl = fem::ctlVelocity;
 
             fem::PlateSynth u; u.prepare (fs); u.update (&model, q);
             u.strikeSource (3, 1.0f);

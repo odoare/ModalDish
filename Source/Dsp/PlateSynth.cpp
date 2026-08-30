@@ -793,11 +793,15 @@ void PlateSynth::updateCascadeWeights() noexcept
 
 void PlateSynth::strike (float x, float y, float velocity)
 {
-    fireHammer (x, y, velocity, current.hammerMs, current.force);
+    // The global path — mouse hits, and notes no source claims — has no
+    // mapping of its own, so velocity scales the global Force as it always
+    // did. Only the sources go through controlAmount.
+    fireHammer (x, y, juce::jlimit (0.0f, 1.0f, velocity) * current.force,
+                current.hammerMs);
 }
 
-void PlateSynth::fireHammer (float x, float y, float velocity,
-                             float hammerMs, float force) noexcept
+void PlateSynth::fireHammer (float x, float y, float amplitude,
+                             float hammerMs) noexcept
 {
     if (model == nullptr || activeModes < 1)
         return;
@@ -812,7 +816,7 @@ void PlateSynth::fireHammer (float x, float y, float velocity,
     const double lenSamples = juce::jmax (1.0, fs * (double) hammerMs * 1.0e-3);
     h.phase = 0.0f;
     h.phaseInc = (float) (1.0 / lenSamples);
-    h.amplitude = juce::jlimit (0.0f, 1.0f, velocity) * force;
+    h.amplitude = juce::jmax (0.0f, amplitude);
     h.active = true;
 
     // The cascade injects wherever the plate was last struck — the one point
@@ -832,11 +836,26 @@ void PlateSynth::fireHammer (float x, float y, float velocity,
     hitCount.store (n + 1, std::memory_order_release);
 }
 
-void PlateSynth::randomSourcePoint (int s, float& x, float& y) noexcept
+float PlateSynth::controlAmount (const Source& src, int control, float velocity) const noexcept
+{
+    if (control == fem::ctlVelocity)
+        return fem::applyVelCurve (velocity, src.velCurve);
+    if (control >= fem::ctlCcBase && control <= fem::ctlMax)
+        return ccValue[(size_t) (control - fem::ctlCcBase)];
+    return 0.0f;      // Off: hold the min end
+}
+
+void PlateSynth::randomSourcePoint (int s, float velocity, float& x, float& y) noexcept
 {
     const auto& src = current.sources[s];
-    x = src.x;
-    y = src.y;
+
+    // Where along the source's segment this strike lands: the 'a' end at 0,
+    // the 'A' end at 1, whatever the position controller currently reads.
+    // With the endpoints equal, which is the default, this is just the
+    // source's point however the controller moves.
+    const float t = controlAmount (src, src.posCtl, velocity);
+    x = src.x + t * src.velX;
+    y = src.y + t * src.velY;
 
     const float sigma = juce::jmax (0.0f, src.spread);
     if (sigma <= 0.0f || model == nullptr || model->mesh == nullptr)
@@ -850,8 +869,8 @@ void PlateSynth::randomSourcePoint (int s, float& x, float& y) noexcept
         const float u2 = rng.nextFloat();
         const float mag = sigma * std::sqrt (-2.0f * std::log (u1));
         const float ang = juce::MathConstants<float>::twoPi * u2;
-        const float px = src.x + mag * std::cos (ang);
-        const float py = src.y + mag * std::sin (ang);
+        const float px = x + mag * std::cos (ang);
+        const float py = y + mag * std::sin (ang);
 
         // A draw that lands off the plate excites nothing at all — evalShapes
         // would return silence and the hammer would be spent on nothing — so
@@ -878,8 +897,17 @@ void PlateSynth::strikeSource (int s, float velocity) noexcept
         return;
 
     float x = 0.0f, y = 0.0f;
-    randomSourcePoint (s, x, y);
-    fireHammer (x, y, velocity, src.hammerMs, src.force);
+    randomSourcePoint (s, velocity, x, y);
+
+    // min + amount * (max - min), with no ordering imposed on the pair: a min
+    // above its max simply inverts the mapping, which is how a source is made
+    // to hit softer the harder it is played.
+    const float hamT = controlAmount (src, src.hammerCtl, velocity);
+    const float frcT = controlAmount (src, src.forceCtl, velocity);
+    const float hammerMs = src.hammerMs + hamT * (src.hammerMsMax - src.hammerMs);
+    const float force    = src.force    + frcT * (src.forceMax    - src.force);
+
+    fireHammer (x, y, juce::jmax (0.0f, force), juce::jmax (0.01f, hammerMs));
 }
 
 int PlateSynth::strikeSourcesForNote (int note, float velocity) noexcept

@@ -580,6 +580,38 @@ release of its own. The slot count therefore sizes simultaneous
 round-robin, and reuse can only truncate a pulse still in contact, never a
 ringing tail, since the tail lives in the shared bank.
 
+A source does not carry fixed excitation parameters but three
+\emph{mappings}, one each for the strike position, the contact time and the
+force. Each is a pair of endpoints and a controller, and a strike evaluates
+%
+\begin{equation}
+  u \;=\; u_{\min} + a\,(u_{\max} - u_{\min}),
+  \qquad a \in [0,1],
+  \label{eq:sourcemap}
+\end{equation}
+%
+where $a$ is what the selected controller currently reads: zero when it is
+off, the note's velocity shaped by the source's curve
+($a = v^2$, $v$ or $\sqrt{v}$), or the latest value of a MIDI continuous
+controller. No ordering is imposed on the pair, so $u_{\min} > u_{\max}$
+simply inverts the mapping.
+
+The position mapping is the interesting one physically. With
+$\bm{x}_h = \bm{x}_a + a\,(\bm{x}_A - \bm{x}_a)$ the excitation
+\emph{moves}, so playing harder changes which modes are driven rather than
+only how strongly: the modal amplitudes go as $\varphi_k(\bm{x}_h)$, and a
+plate struck near the rim and near the centre has two genuinely different
+spectra. A fixed excitation point cannot produce both, and scaling a single
+point's amplitude --- what a velocity-sensitive sampler does --- reproduces
+neither. Equal endpoints, the default, recover the fixed point exactly. The
+positional spread of \S\ref{sec:excitation} scatters about
+$\bm{x}_h$, and the audio input is injected at $\bm{x}_a$ alone, a
+continuous signal having no velocity to place it by.
+
+Force ships as $u_{\min} = 0$, $u_{\max} = 1$ on velocity, which is
+identically the $v \times \mathrm{Force}$ amplitude the hammer had before
+\eqref{eq:sourcemap} existed.
+
 The plate is listened to at up to 8 \emph{pickups} and struck at up to 8
 \emph{sources}, each an automatable point: a pickup carries position,
 level, pan and an on switch, a source position, hammer duration, force,

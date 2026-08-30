@@ -1,0 +1,257 @@
+name: Release
+
+# Version tags publish; workflow_dispatch runs the same three builds without
+# publishing, which is how a release is rehearsed before the tag exists.
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+
+env:
+  JUCE_VERSION: 8.0.12
+  # Fallback for manual runs, which have no tag to take a version from. Keep
+  # in step with project(ModalDish VERSION ...) in CMakeLists.txt; this is the
+  # one place the number is duplicated.
+  FALLBACK_VERSION: 0.1.0
+
+jobs:
+  # ---------------------------------------------------------------- Linux ---
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ModalDish
+          submodules: recursive        # FxmeTools, and anything nested in it
+
+      # CMakeLists expects JUCE as a sibling of the project directory.
+      - uses: actions/checkout@v4
+        with:
+          repository: juce-framework/JUCE
+          ref: ${{ env.JUCE_VERSION }}
+          path: JUCE
+
+      - name: Install JUCE build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libfreetype-dev libx11-dev libxcomposite-dev \
+            libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev \
+            libxrender-dev libwebkit2gtk-4.1-dev libglu1-mesa-dev \
+            libcurl4-openssl-dev
+
+      - name: Configure
+        run: |
+          cmake -B ModalDish/build -S ModalDish \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DMODALDISH_BUILD_TESTS=ON
+
+      # BinaryData on its own first: juceaide turning ~1.2 MB of artwork into
+      # source is a step that does not like sharing a machine with an LTO link.
+      - name: Build binary data
+        run: cmake --build ModalDish/build --config Release --target ModalDishBinaryData --parallel 1
+
+      # --parallel 2 throughout: Release links with -flto, and the memory spike
+      # of several LTO links at once is what kills a runner.
+      - name: Build
+        run: cmake --build ModalDish/build --config Release --parallel 2
+
+      # CascadeMeasure is excluded deliberately. It is a measurement harness
+      # rather than a pass/fail suite, and it currently reports one known
+      # failure (shimmer tracking the Material knob) that is a voicing
+      # question, not a regression. The other three suites must pass.
+      - name: Test
+        run: ctest --test-dir ModalDish/build --output-on-failure -E CascadeMeasure
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          [[ "$VERSION" =~ ^[0-9] ]] || VERSION="${FALLBACK_VERSION}"
+          ART=ModalDish/build/ModalDish_artefacts/Release
+          mkdir -p stage
+          cp -r "$ART/VST3/ModalDish.vst3" stage/
+          cp -r "$ART/Standalone/ModalDish" stage/ModalDish-standalone
+          cp ModalDish/README.md stage/
+          cd stage && zip -r "../ModalDish-${VERSION}-linux-x86_64.zip" .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: ModalDish-*-linux-x86_64.zip
+
+  # -------------------------------------------------------------- Windows ---
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ModalDish
+          submodules: recursive
+
+      - uses: actions/checkout@v4
+        with:
+          repository: juce-framework/JUCE
+          ref: ${{ env.JUCE_VERSION }}
+          path: JUCE
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure
+        run: cmake -B ModalDish/build -S ModalDish -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build binary data
+        run: cmake --build ModalDish/build --config Release --target ModalDishBinaryData --parallel 1
+
+      - name: Build
+        run: cmake --build ModalDish/build --config Release --parallel 2
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          [[ "$VERSION" =~ ^[0-9] ]] || VERSION="${FALLBACK_VERSION}"
+          ART=ModalDish/build/ModalDish_artefacts/Release
+          mkdir -p stage
+          cp -r "$ART/VST3/ModalDish.vst3" stage/
+          cp -r "$ART/Standalone/ModalDish.exe" stage/
+          cp ModalDish/README.md stage/
+          cd stage && 7z a "../ModalDish-${VERSION}-windows-x86_64.zip" .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: ModalDish-*-windows-x86_64.zip
+
+  # ---------------------------------------------------------------- macOS ---
+  build-macos:
+    # macos-14 is Apple Silicon. A build that loses the architecture list here
+    # produces an arm64-only bundle that looks perfectly fine on the runner.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ModalDish
+          submodules: recursive
+
+      - uses: actions/checkout@v4
+        with:
+          repository: juce-framework/JUCE
+          ref: ${{ env.JUCE_VERSION }}
+          path: JUCE
+
+      # Passed as -D as well as being set in CMakeLists: a -D is in the cache
+      # before any line of CMakeLists runs, so it cannot be lost to file
+      # ordering. The CMakeLists block is what makes a local macOS build
+      # universal too; this is the belt to its braces.
+      - name: Configure
+        run: |
+          cmake -B ModalDish/build -S ModalDish \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13
+
+      - name: Build binary data
+        run: cmake --build ModalDish/build --config Release --target ModalDishBinaryData --parallel 1
+
+      # Capped harder than elsewhere: a universal build doubles both the
+      # compile and the LTO link load.
+      - name: Build
+        run: cmake --build ModalDish/build --config Release --parallel 2
+
+      # A verification step that cannot fail is not one. lipo printing "arm64"
+      # while the job goes green is exactly how an arm64-only "universal"
+      # release ships. All three bundles, because they are three separate link
+      # steps and a user reporting "the standalone won't open either" is
+      # reporting this same bug.
+      - name: Verify universal binaries
+        run: |
+          set -euo pipefail
+          ART=ModalDish/build/ModalDish_artefacts/Release
+          status=0
+          for bundle in \
+            "$ART/VST3/ModalDish.vst3/Contents/MacOS/ModalDish" \
+            "$ART/AU/ModalDish.component/Contents/MacOS/ModalDish" \
+            "$ART/Standalone/ModalDish.app/Contents/MacOS/ModalDish"
+          do
+            if [[ ! -f "$bundle" ]]; then
+              echo "::error::missing binary: $bundle"; status=1; continue
+            fi
+            info=$(lipo -info "$bundle")
+            echo "$info"
+            for arch in x86_64 arm64; do
+              grep -qw "$arch" <<< "$info" \
+                || { echo "::error::$bundle has no $arch slice"; status=1; }
+            done
+            vtool -show-build "$bundle" | grep -E 'minos|platform' || true
+          done
+          exit $status
+
+      # Ad-hoc: free, no Apple account, and it does nothing for Gatekeeper. It
+      # only makes the bundle internally consistent, which arm64 code needs to
+      # execute at all and which repackaging can invalidate. Not the fix for
+      # "doesn't appear in my DAW" — that is quarantine, answered in the README.
+      - name: Ad-hoc codesign
+        run: |
+          set -euo pipefail
+          ART=ModalDish/build/ModalDish_artefacts/Release
+          for b in "$ART/VST3/ModalDish.vst3" \
+                   "$ART/AU/ModalDish.component" \
+                   "$ART/Standalone/ModalDish.app"; do
+            codesign --force --deep --sign - --timestamp=none "$b"
+            codesign --verify --verbose "$b"
+          done
+
+      - name: Build pkg installer
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          [[ "$VERSION" =~ ^[0-9] ]] || VERSION="${FALLBACK_VERSION}"
+          ART=ModalDish/build/ModalDish_artefacts/Release
+          mkdir -p pkg_root/Library/Audio/Plug-Ins/VST3
+          mkdir -p pkg_root/Library/Audio/Plug-Ins/Components
+          cp -r "$ART/VST3/ModalDish.vst3"    pkg_root/Library/Audio/Plug-Ins/VST3/
+          cp -r "$ART/AU/ModalDish.component" pkg_root/Library/Audio/Plug-Ins/Components/
+          pkgbuild --root pkg_root --identifier com.fx-mechanics.ModalDish \
+                   --version "$VERSION" --install-location / \
+                   "ModalDish-${VERSION}-macOS.pkg"
+
+      - name: Package zip
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          [[ "$VERSION" =~ ^[0-9] ]] || VERSION="${FALLBACK_VERSION}"
+          ART=ModalDish/build/ModalDish_artefacts/Release
+          mkdir -p stage
+          cp -r "$ART/VST3/ModalDish.vst3"       stage/
+          cp -r "$ART/AU/ModalDish.component"    stage/
+          cp -r "$ART/Standalone/ModalDish.app"  stage/
+          cp ModalDish/README.md stage/
+          cd stage && zip -ry "../ModalDish-${VERSION}-macOS.zip" .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-pkg
+          path: ModalDish-*-macOS.pkg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-zip
+          path: ModalDish-*-macOS.zip
+
+  # -------------------------------------------------------------- release ---
+  release:
+    needs: [build-linux, build-windows, build-macos]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true

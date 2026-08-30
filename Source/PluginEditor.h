@@ -96,12 +96,21 @@ private:
         float x = 0.0f, y = 0.0f;
         bool on = false;
 
+        /** A source's velocity endpoint ('A') rather than its base ('a').
+            Everything that acts on a marker still treats it the same way and
+            only reaches for a different pair of parameter ids, so this needs
+            no special case in the drag, the popup or the on/off. */
+        bool velocityEnd = false;
+
         juce::String label() const;
         juce::Colour colour() const;
     };
 
     /** Every marker, pickups first. Reads the current parameter values. */
     std::vector<PlateMarker> plateMarkers() const;
+
+    /** Whether a source's two endpoints are close enough to be one point. */
+    static bool coincident (float x1, float y1, float x2, float y2);
 
     /** The marker under a plate-space point, or -1. `markers` must be the
         result of plateMarkers(); the search is in screen space so that the
@@ -135,6 +144,44 @@ private:
         }
     };
 
+    /** The preset browser's toggle: a small triangle that points down when
+        the panel is closed and up when it is open, so the control says which
+        way the panel will move rather than merely that it exists. Drawn here
+        rather than with juce::ArrowButton because that one bakes its
+        direction in at construction and cannot be flipped. */
+    struct TriangleButton : juce::Button
+    {
+        TriangleButton() : juce::Button ("presets") {}
+
+        juce::Colour accent { juce::Colours::white };
+        bool pointsUp = false;
+
+        void paintButton (juce::Graphics& g, bool highlighted, bool down) override
+        {
+            const auto b = getLocalBounds().toFloat().reduced (3.0f);
+            const float w = juce::jmin (b.getWidth(), 11.0f);
+            const float h = juce::jmin (b.getHeight(), 7.0f);
+            const auto c = b.getCentre();
+
+            juce::Path t;
+            if (pointsUp)
+            {
+                t.addTriangle (c.x - w * 0.5f, c.y + h * 0.5f,
+                               c.x + w * 0.5f, c.y + h * 0.5f,
+                               c.x,            c.y - h * 0.5f);
+            }
+            else
+            {
+                t.addTriangle (c.x - w * 0.5f, c.y - h * 0.5f,
+                               c.x + w * 0.5f, c.y - h * 0.5f,
+                               c.x,            c.y + h * 0.5f);
+            }
+
+            g.setColour ((highlighted || down) ? accent.brighter (0.4f) : accent);
+            g.fillPath (t);
+        }
+    };
+
     /** Opaque backdrop for the preset browser, which paints no background of
         its own and would otherwise show the plate through it. */
     struct PresetOverlay : juce::Component
@@ -154,7 +201,7 @@ private:
     GlowLine glowLine;
     fxme::SplashOverlay splash;
     fxme::PresetBarComponent presetBar { processor.getPresetManager() };
-    juce::TextButton presetsButton { "Presets" };
+    TriangleButton presetsButton;
     PresetOverlay presetOverlay { processor.getPresetManager() };
 
     fxme::TopBar topBar { "ModalDish", "finite-element plate physical model",

@@ -30,20 +30,28 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
 
     // Hidden until shown; show() brings it to the front itself, so it does
     // not matter that later children are added above it.
-    splash.setImage (juce::ImageCache::getFromMemory (BinaryData::splash_jpg,
-                                                      BinaryData::splash_jpgSize));
+    splash.setImage (juce::ImageCache::getFromMemory (BinaryData::splash_png,
+                                                      BinaryData::splash_pngSize));
     addChildComponent (splash);
+
+    // Centred in whatever the bar has left between the title blurb and the
+    // preset controls; the bar gives the blurb priority and shrinks the
+    // artwork into the gap, so it never collides with either.
+    topBar.setDecoration (juce::ImageCache::getFromMemory (BinaryData::icon_png,
+                                                           BinaryData::icon_pngSize));
+
+    // Clicking either the company logo or the icon reopens the splash.
     topBar.onLogoClicked = [this] { splash.show(); };
 
     presetBar.setAccentColour (fem::theme::accent);
     presetsButton.setTooltip ("Browse presets");
     presetsButton.setMouseClickGrabsKeyboardFocus (false);
-    fem::theme::styleButton (presetsButton, fem::theme::accent);
+    presetsButton.accent = fem::theme::accent;
     presetsButton.onClick = [this]
     {
         setPresetPanelVisible (! presetOverlay.isVisible());
     };
-    topBar.setRightControls (&presetBar, 260, &presetsButton, 74);
+    topBar.setRightControls (&presetBar, 260, &presetsButton, 22);
 
     addChildComponent (presetOverlay);
     presetOverlay.browser.setAccentColour (fem::theme::accent);
@@ -438,6 +446,8 @@ void ModalDishAudioProcessorEditor::setPresetPanelVisible (bool shouldBeVisible)
     presetOverlay.setVisible (shouldBeVisible);
     if (shouldBeVisible)
         presetOverlay.toFront (false);
+    presetsButton.pointsUp = shouldBeVisible;   // points the way the panel will go
+    presetsButton.repaint();
     resized();
 }
 
@@ -718,13 +728,25 @@ void ModalDishAudioProcessorEditor::setOutputPosition (double x, double y)
 
 juce::String ModalDishAudioProcessorEditor::PlateMarker::label() const
 {
-    return isPickup ? juce::String (index + 1)
-                    : juce::String::charToString ((juce::juce_wchar) fem::sourceLabel (index));
+    if (isPickup)
+        return juce::String (index + 1);
+
+    const auto c = (juce::juce_wchar) fem::sourceLabel (index);
+    return juce::String::charToString (velocityEnd ? juce::CharacterFunctions::toUpperCase (c)
+                                                   : c);
 }
 
 juce::Colour ModalDishAudioProcessorEditor::PlateMarker::colour() const
 {
     return isPickup ? fem::theme::pickupAccent : fem::theme::sourceAccent;
+}
+
+bool ModalDishAudioProcessorEditor::coincident (float x1, float y1, float x2, float y2)
+{
+    // The position parameters step in thousandths, so anything under a couple
+    // of steps apart is the same point as far as the player is concerned.
+    constexpr float eps = 2.0e-3f;
+    return std::abs (x1 - x2) < eps && std::abs (y1 - y2) < eps;
 }
 
 std::vector<ModalDishAudioProcessorEditor::PlateMarker>
@@ -742,8 +764,22 @@ ModalDishAudioProcessorEditor::plateMarkers() const
         out.push_back ({ true, i, value (fem::id::pickupX[i]), value (fem::id::pickupY[i]),
                          value (fem::id::pickupOn[i]) > 0.5f });
     for (int i = 0; i < fem::maxSources; ++i)
-        out.push_back ({ false, i, value (fem::id::sourceX[i]), value (fem::id::sourceY[i]),
-                         value (fem::id::sourceOn[i]) > 0.5f });
+    {
+        const bool on = value (fem::id::sourceOn[i]) > 0.5f;
+        const float x = value (fem::id::sourceX[i]), y = value (fem::id::sourceY[i]);
+        const float x2 = value (fem::id::sourceX2[i]), y2 = value (fem::id::sourceY2[i]);
+
+        // Base first, so that when the two coincide a tie in markerAt goes to
+        // it — and dragging the base carries the endpoint along (see
+        // setMarkerPosition), which is what keeps a source a point until it
+        // is deliberately pulled into a segment.
+        out.push_back ({ false, i, x, y, on, false });
+
+        // The endpoint is only a marker of its own once it is somewhere else:
+        // stacked on the base it would be an invisible thing to catch drags.
+        if (! coincident (x, y, x2, y2))
+            out.push_back ({ false, i, x2, y2, on, true });
+    }
     return out;
 }
 
@@ -782,10 +818,40 @@ void ModalDishAudioProcessorEditor::setMarkerPosition (const PlateMarker& m, dou
         if (auto* param = processor.apvts.getParameter (id))
             param->setValueNotifyingHost (param->convertTo0to1 (value));
     };
-    setParam (m.isPickup ? fem::id::pickupX[m.index] : fem::id::sourceX[m.index],
-              (float) juce::jlimit (0.0, 1.0, x));
-    setParam (m.isPickup ? fem::id::pickupY[m.index] : fem::id::sourceY[m.index],
-              (float) juce::jlimit (0.0, 1.0, y));
+    const float nx = (float) juce::jlimit (0.0, 1.0, x);
+    const float ny = (float) juce::jlimit (0.0, 1.0, y);
+
+    if (m.isPickup)
+    {
+        setParam (fem::id::pickupX[m.index], nx);
+        setParam (fem::id::pickupY[m.index], ny);
+    }
+    else if (m.velocityEnd)
+    {
+        setParam (fem::id::sourceX2[m.index], nx);
+        setParam (fem::id::sourceY2[m.index], ny);
+    }
+    else
+    {
+        // Moving the base carries a coincident endpoint with it, so that
+        // dragging a source that is still a point moves the whole thing
+        // instead of quietly leaving 'A' behind and inventing a segment the
+        // player never drew. Once they are apart they move independently.
+        const auto value = [this] (const char* id)
+        { return processor.apvts.getRawParameterValue (id)->load(); };
+
+        const bool wasOnePoint = coincident (value (fem::id::sourceX[m.index]),
+                                             value (fem::id::sourceY[m.index]),
+                                             value (fem::id::sourceX2[m.index]),
+                                             value (fem::id::sourceY2[m.index]));
+        setParam (fem::id::sourceX[m.index], nx);
+        setParam (fem::id::sourceY[m.index], ny);
+        if (wasOnePoint)
+        {
+            setParam (fem::id::sourceX2[m.index], nx);
+            setParam (fem::id::sourceY2[m.index], ny);
+        }
+    }
     plateView.repaint();
 }
 
@@ -822,12 +888,18 @@ bool ModalDishAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
     if (! plateView.getLocalBounds().contains (local))
         return false;
 
-    const auto ch = juce::CharacterFunctions::toLowerCase (key.getTextCharacter());
+    // A capital letter places the source's velocity endpoint instead of its
+    // base — the gesture that pulls a source out into an 'a'..'A' segment,
+    // and the only one that can, since the two start on top of each other.
+    const auto typed = key.getTextCharacter();
+    const auto ch = juce::CharacterFunctions::toLowerCase (typed);
+    const bool capital = typed != ch;
+
     PlateMarker m;
     if (ch >= '1' && ch < (juce::juce_wchar) ('1' + fem::maxPickups))
-        m = { true, (int) (ch - '1'), 0.0f, 0.0f, false };
+        m = { true, (int) (ch - '1'), 0.0f, 0.0f, false, false };
     else if (ch >= 'a' && ch < (juce::juce_wchar) ('a' + fem::maxSources))
-        m = { false, (int) (ch - 'a'), 0.0f, 0.0f, false };
+        m = { false, (int) (ch - 'a'), 0.0f, 0.0f, false, capital };
     else
         return false;
 
@@ -881,6 +953,28 @@ void ModalDishAudioProcessorEditor::drawPlateOverlay (juce::Graphics& g,
     // disabled one is a faint ring, still visible so it can be found and
     // switched back on, but clearly not taking part.
     g.setFont (juce::Font (juce::FontOptions (11.0f)).boldened());
+
+    // The velocity segments first, so the markers sit on top of their line
+    // rather than under it. A source that is still a point has no segment
+    // (plateMarkers only emits its endpoint once the two are apart), so this
+    // draws nothing at all in the default case.
+    for (int i = 0; i < fem::maxSources; ++i)
+    {
+        const auto value = [this] (const char* id)
+        { return processor.apvts.getRawParameterValue (id)->load(); };
+
+        const float x = value (fem::id::sourceX[i]),  y = value (fem::id::sourceY[i]);
+        const float x2 = value (fem::id::sourceX2[i]), y2 = value (fem::id::sourceY2[i]);
+        if (coincident (x, y, x2, y2))
+            continue;
+
+        const auto a = v.plateToScreen (x, y);
+        const auto b = v.plateToScreen (x2, y2);
+        const bool on = value (fem::id::sourceOn[i]) > 0.5f;
+        g.setColour (fem::theme::sourceAccent.withAlpha (on ? 0.55f : 0.22f));
+        g.drawLine (a.x, a.y, b.x, b.y, 1.0f);
+    }
+
     for (const auto& m : plateMarkers())
     {
         const auto p = v.plateToScreen (m.x, m.y);

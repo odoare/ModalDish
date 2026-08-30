@@ -209,8 +209,8 @@ public:
 
     /** One striking / injection point.
 
-        `force` is the amplitude a full-velocity hit reaches, `hammerMs` its
-        contact time, and `spread` the standard deviation — per axis, in plate
+        `force` and `hammerMs` are the *minimum* ends of their mappings (see
+        below); `hammerMs` is the contact time, and `spread` the standard deviation — per axis, in plate
         coordinates — of the random offset applied to each hit, so 0 always
         strikes exactly on the point. `send` and `pan` are this point's share
         of the plugin input: `pan` is an L/R balance of the incoming stereo
@@ -220,9 +220,34 @@ public:
         `note` is the MIDI note that triggers it, or -1 for none. */
     struct Source
     {
+        // (x, y) is where a velocity-0 hit lands; (velX, velY) is how far
+        // full velocity moves it, so a strike lands at (x + v*velX, ...).
+        //
+        // An offset rather than a second absolute point, so that zero — the
+        // default — means "velocity does not move this source" whatever x and
+        // y are. A second absolute point would default to somewhere of its
+        // own, and any caller that set x without also setting it would get a
+        // segment it never asked for. The plugin's parameters *are* two
+        // absolute points ('a' and 'A' on the plate); the processor subtracts
+        // them on the way in.
+        //
+        // Only strikes read it: the input send is injected at (x, y) alone,
+        // a continuous signal having no velocity to place it by.
         float x = 0.5f, y = 0.47f;
-        float hammerMs = 3.0f;
-        float force = 1.0f;
+        float velX = 0.0f, velY = 0.0f;
+        // Each of the three modulated quantities is a pair plus a controller
+        // (fem::ctlOff / ctlVelocity / ctlCcBase + n). The value used for a
+        // strike is min + shaped(control) * (max - min); min above max is
+        // allowed and simply inverts the mapping. Off holds the min, which is
+        // why Force ships with min 0, max 1 and Velocity selected: that is
+        // exactly "velocity scales force", the behaviour the hammer had
+        // before any of this existed.
+        float hammerMs = 3.0f, hammerMsMax = 3.0f;
+        float force = 0.0f, forceMax = 1.0f;
+        int posCtl = fem::ctlVelocity;
+        int hammerCtl = fem::ctlOff;
+        int forceCtl = fem::ctlVelocity;
+        int velCurve = fem::velCurveLinear;
         float spread = 0.0f;
         float send = 0.0f;
         float pan = 0.0f;
@@ -315,6 +340,15 @@ public:
         glide from. */
     void glideToNote (int note) noexcept;
 
+    /** Audio thread: latest value of MIDI CC `cc`, 0..127, as a 0..1 float.
+        Held here rather than in Params because a controller move is an event
+        arriving between blocks, not a parameter the host automates. */
+    void setControllerValue (int cc, float value) noexcept
+    {
+        if (cc >= 0 && cc < 128)
+            ccValue[(size_t) cc] = juce::jlimit (0.0f, 1.0f, value);
+    }
+
     //==========================================================================
     // Where the plate was actually struck, published for display.
     //
@@ -404,14 +438,25 @@ private:
     void updateTailSpread() noexcept; // band-resolution stereo spread of the tail
     /** The one place a hammer slot is filled: position, contact time and
         amplitude, whether the hit came from a click, a source or a note. */
-    void fireHammer (float x, float y, float velocity,
-                     float hammerMs, float force) noexcept;
+    /** Launch one half-sine pulse. Takes the finished amplitude rather than
+        a velocity and a force: a source resolves those through its own
+        min/max mapping first, and only the global path still multiplies the
+        two together. */
+    void fireHammer (float x, float y, float amplitude, float hammerMs) noexcept;
     void computeHitWeights (float x, float y);   // phi_k(last hit) -> hitWeights
     void computeSourceShapes();                  // phi_k at each source -> phiSource
     void updateSourceMix() noexcept;             // phiSource + sends/pans -> inWL/R
-    /** A hit position for source `s`: its point, or a random draw around it
-        that is still inside the plate. */
-    void randomSourcePoint (int s, float& x, float& y) noexcept;
+    /** A hit position for source `s` at `velocity`: the point interpolated
+        along its 'a'..'A' segment, or a random draw around that point that is
+        still inside the plate. */
+    void randomSourcePoint (int s, float velocity, float& x, float& y) noexcept;
+
+    /** The 0..1 modulation a source's controller selection currently reads.
+        Off is 0, so an unmapped quantity sits at its min; velocity is shaped
+        by the source's curve, a CC is taken as the player's hardware left it. */
+    float controlAmount (const Source& src, int control, float velocity) const noexcept;
+
+    float ccValue[128] {};
     void updateCascadeWeights() noexcept;    // injection weights of the target modes
     void updateCascadeEnvelopes();           // attack/release coefficients from params
     void updateDynamicTension() noexcept;    // decimated Berger feedback step

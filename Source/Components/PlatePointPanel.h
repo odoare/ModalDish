@@ -7,9 +7,9 @@
 
     One class covers both because they differ only in which parameters they
     show. A pickup is a listening point (position, level, pan) with a meter of
-    what it is hearing; a source is a striking and injection point (position,
-    hammer, force, spread, send, balance) plus the MIDI note it answers to and
-    a Learn button for it.
+    what it is hearing; a source is a striking and injection point (a base
+    position and a velocity endpoint, hammer, force, spread, send, balance)
+    plus the MIDI note it answers to and a Learn button for it.
 
     It is meant to live inside a juce::CallOutBox launched from the editor, so
     it sizes itself and expects to be handed to the callout by value of its
@@ -42,14 +42,19 @@ public:
     /** `index` is the pickup or source (both 0..7) this panel edits. */
     PlatePointPanel (ModalDishAudioProcessor& p, bool pickup, int index)
         : processor (p), isPickup (pickup), pointIndex (index),
-          accent (pickup ? fem::theme::pickupAccent : fem::theme::sourceAccent)
+          accent (pickup ? fem::theme::pickupAccent : fem::theme::sourceAccent),
+          cols (pickup ? 4 : 3)
     {
         title = isPickup ? "Pickup " + juce::String (index + 1)
                          : "Source " + juce::String::charToString (
                                (juce::juce_wchar) fem::sourceLabel (index));
 
-        addKnob ("X", isPickup ? fem::id::pickupX[index] : fem::id::sourceX[index]);
-        addKnob ("Y", isPickup ? fem::id::pickupY[index] : fem::id::sourceY[index]);
+        addKnob (isPickup ? "X" : "X1",
+                 isPickup ? fem::id::pickupX[index] : fem::id::sourceX[index]);
+        addKnob (isPickup ? "Y" : "Y1",
+                 isPickup ? fem::id::pickupY[index] : fem::id::sourceY[index]);
+        if (! isPickup)
+            addKnob ("Spread", fem::id::sourceSpread[index]);
 
         if (isPickup)
         {
@@ -75,12 +80,48 @@ public:
         }
         else
         {
-            addKnob ("Hammer", fem::id::sourceHammer[index]);
-            addKnob ("Force", fem::id::sourceForce[index]);
-            addKnob ("Spread", fem::id::sourceSpread[index]);
-            addKnob ("Send", fem::id::sourceSend[index]);
+            // Three rows to a mapping: the two ends and what moves between
+            // them. Reading across a row tells you the whole story of one
+            // quantity, which is why the controller sits beside its pair
+            // rather than in a block of its own.
+            const auto ctlText = [] (double v)
+            {
+                const int i = (int) std::lround (v);
+                if (i == fem::ctlOff)      return juce::String ("Off");
+                if (i == fem::ctlVelocity) return juce::String ("Vel");
+                return "CC " + juce::String (i - fem::ctlCcBase);
+            };
+            const auto curveText = [] (double v)
+            {
+                static const char* n[3] = { "Slow", "Linear", "Fast" };
+                return juce::String (n[juce::jlimit (0, 2, (int) std::lround (v))]);
+            };
+
+            addKnob ("X2", fem::id::sourceX2[index]);
+            addKnob ("Y2", fem::id::sourceY2[index]);
+            addKnob ("Pos Ctl", fem::id::sourcePosCtl[index], {}, ctlText);
+
+            addKnob ("Ham Min", fem::id::sourceHammer[index]);
+            addKnob ("Ham Max", fem::id::sourceHammerMax[index]);
+            addKnob ("Ham Ctl", fem::id::sourceHammerCtl[index], {}, ctlText);
+
+            addKnob ("Frc Min", fem::id::sourceForce[index]);
+            addKnob ("Frc Max", fem::id::sourceForceMax[index]);
+            addKnob ("Frc Ctl", fem::id::sourceForceCtl[index], {}, ctlText);
+
+            addKnob ("Curve", fem::id::sourceVelCurve[index], {}, curveText);
+            addKnob ("In Vol", fem::id::sourceSend[index]);
             addKnob ("In Bal", fem::id::sourcePan[index], 0.0);
-            addKnob ("Note", fem::id::sourceNote[index]);
+
+            // Note lives in the footer beside the Learn button that sets it,
+            // rather than in the grid: the grid is the sound, this pair is
+            // the wiring.
+            noteBox = std::make_unique<fxme::FxmeNumberBox>();
+            fem::theme::styleBox (*noteBox, "Note", accent);
+            addAndMakeVisible (*noteBox);
+            attachments.push_back (std::make_unique<
+                juce::AudioProcessorValueTreeState::SliderAttachment> (
+                    processor.apvts, fem::id::sourceNote[index], *noteBox));
 
             fem::theme::styleButton (learnButton, accent);
             learnButton.setClickingTogglesState (true);
@@ -102,8 +143,13 @@ public:
             "On", accent);
         addAndMakeVisible (*onButton);
 
+        // Rows follow the knob count rather than the kind of point, so adding
+        // a control does not silently overflow the panel it lives in. The
+        // width is the same either way; only the number of columns differs,
+        // so a source's three columns are wider than a pickup's four.
+        const int rows = ((int) knobs.size() + cols - 1) / cols;
         setSize (4 * knobW + 2 * pad,
-                 headerH + rowH * (isPickup ? 1 : 2)
+                 headerH + rowH * rows
                    + (isPickup ? meterH + 4 : footerH) + 2 * pad);
     }
 
@@ -153,19 +199,28 @@ public:
             footer = r.removeFromBottom (footerH);
         }
 
-        for (int row = 0; row * 4 < (int) knobs.size(); ++row)
+        // Cells share the row evenly rather than taking a fixed width, so
+        // three columns fill the same panel four do.
+        for (int row = 0; row * cols < (int) knobs.size(); ++row)
         {
             auto line = r.removeFromTop (rowH);
-            for (int c = 0; c < 4; ++c)
+            const int cellW = line.getWidth() / cols;
+            for (int c = 0; c < cols; ++c)
             {
-                const size_t k = (size_t) (row * 4 + c);
+                const size_t k = (size_t) (row * cols + c);
+                const auto cell = line.removeFromLeft (c == cols - 1 ? line.getWidth() : cellW);
                 if (k < knobs.size())
-                    knobs[k]->setBounds (line.removeFromLeft (knobW).reduced (2));
+                    knobs[k]->setBounds (cell.reduced (2));
             }
         }
 
         if (! isPickup)
+        {
             learnButton.setBounds (footer.removeFromRight (110).reduced (1, 2));
+            footer.removeFromRight (6);
+            if (noteBox != nullptr)
+                noteBox->setBounds (footer.removeFromLeft (76).reduced (1, 0));
+        }
     }
 
 private:
@@ -187,30 +242,40 @@ private:
     }
 
     void addKnob (const juce::String& label, const char* paramId,
-                  std::optional<double> centre = {})
+                  std::optional<double> centre = {},
+                  std::function<juce::String (double)> textFn = {})
     {
         auto s = std::make_unique<fxme::FxmeNumberBox>();
         fem::theme::styleBox (*s, label, accent);
         if (centre.has_value())
             s->setCentralValue (*centre);          // bipolar: arc grows from centre
+        if (textFn != nullptr)
+            s->textFromValueFunction = std::move (textFn);
         addAndMakeVisible (*s);
         attachments.push_back (std::make_unique<
             juce::AudioProcessorValueTreeState::SliderAttachment> (processor.apvts, paramId, *s));
         knobs.push_back (std::move (s));
     }
 
-    static constexpr int pad = 8, headerH = 22, rowH = 42, footerH = 26, knobW = 62,
+    static constexpr int pad = 8, headerH = 22, rowH = 42, footerH = 40, knobW = 62,
                          meterH = 14;
 
     ModalDishAudioProcessor& processor;
     const bool isPickup;
     const int pointIndex;
     const juce::Colour accent;
+
+    /** Knobs per row. A pickup's four are one row of position, level and pan;
+        a source's fifteen are five rows of three, each row one quantity and
+        what moves it. Declared here so the init list stays in declaration
+        order. */
+    const int cols;
     juce::String title;
 
     std::vector<std::unique_ptr<fxme::FxmeNumberBox>> knobs;
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> attachments;
     std::unique_ptr<fxme::FxmeButton> onButton;
+    std::unique_ptr<fxme::FxmeNumberBox> noteBox;   // sources only
     juce::TextButton learnButton { "MIDI learn" };
     fxme::VuMeterComponent meter;          // pickups only
 

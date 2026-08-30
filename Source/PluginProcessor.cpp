@@ -15,6 +15,10 @@
 
 namespace
 {
+    // Stamped into saved state so that a future release has something to
+    // branch on. Nothing reads it yet, and nothing should until there are
+    // sessions in the world worth not breaking: while the plugin is
+    // unreleased, a format change means changing the format.
     constexpr int stateVersion = 1;
 
     // Deterministic uniform in [0,1) (splitmix-style), so a given plate
@@ -147,6 +151,14 @@ ModalDishAudioProcessor::ModalDishAudioProcessor()
     {
         pSourceX[i]      = apvts.getRawParameterValue (fem::id::sourceX[i]);
         pSourceY[i]      = apvts.getRawParameterValue (fem::id::sourceY[i]);
+        pSourceX2[i]     = apvts.getRawParameterValue (fem::id::sourceX2[i]);
+        pSourceY2[i]     = apvts.getRawParameterValue (fem::id::sourceY2[i]);
+        pSourceHammerMax[i] = apvts.getRawParameterValue (fem::id::sourceHammerMax[i]);
+        pSourceForceMax[i]  = apvts.getRawParameterValue (fem::id::sourceForceMax[i]);
+        pSourcePosCtl[i]    = apvts.getRawParameterValue (fem::id::sourcePosCtl[i]);
+        pSourceHammerCtl[i] = apvts.getRawParameterValue (fem::id::sourceHammerCtl[i]);
+        pSourceForceCtl[i]  = apvts.getRawParameterValue (fem::id::sourceForceCtl[i]);
+        pSourceVelCurve[i]  = apvts.getRawParameterValue (fem::id::sourceVelCurve[i]);
         pSourceHammer[i] = apvts.getRawParameterValue (fem::id::sourceHammer[i]);
         pSourceForce[i]  = apvts.getRawParameterValue (fem::id::sourceForce[i]);
         pSourceNote[i]   = apvts.getRawParameterValue (fem::id::sourceNote[i]);
@@ -356,13 +368,57 @@ juce::AudioProcessorValueTreeState::ParameterLayout ModalDishAudioProcessor::cre
             p.push_back (std::make_unique<FloatParam> (
                 juce::ParameterID (fem::id::sourceY[i], 1), prefix + "Y",
                 juce::NormalisableRange<float> (0.0f, 1.0f, 1.0e-3f), 0.47f));
+            // Velocity endpoint, defaulting on top of the base so that a
+            // source is a point until the player pulls the two apart.
+            p.push_back (std::make_unique<FloatParam> (
+                juce::ParameterID (fem::id::sourceX2[i], 1), prefix + "X2",
+                juce::NormalisableRange<float> (0.0f, 1.0f, 1.0e-3f), 0.5f));
+            p.push_back (std::make_unique<FloatParam> (
+                juce::ParameterID (fem::id::sourceY2[i], 1), prefix + "Y2",
+                juce::NormalisableRange<float> (0.0f, 1.0f, 1.0e-3f), 0.47f));
+            // Controller selectors. 0 Off, 1 Velocity, 2+n CC n — printed
+            // rather than left as a bare number, since "CC 74" is the thing
+            // the player is looking for.
+            const auto ctlName = [] (int v, int)
+            {
+                if (v == fem::ctlOff)      return juce::String ("Off");
+                if (v == fem::ctlVelocity) return juce::String ("Vel");
+                return "CC " + juce::String (v - fem::ctlCcBase);
+            };
+            p.push_back (std::make_unique<juce::AudioParameterInt> (
+                juce::ParameterID (fem::id::sourcePosCtl[i], 1), prefix + "Pos Ctl",
+                fem::ctlOff, fem::ctlMax, fem::ctlVelocity,
+                juce::AudioParameterIntAttributes().withStringFromValueFunction (ctlName)));
+            p.push_back (std::make_unique<juce::AudioParameterInt> (
+                juce::ParameterID (fem::id::sourceHammerCtl[i], 1), prefix + "Ham Ctl",
+                fem::ctlOff, fem::ctlMax, fem::ctlOff,
+                juce::AudioParameterIntAttributes().withStringFromValueFunction (ctlName)));
+            // Force follows velocity out of the box with a min of zero, which
+            // is exactly the velocity-scales-force behaviour the hammer had
+            // before the mapping existed.
+            p.push_back (std::make_unique<juce::AudioParameterInt> (
+                juce::ParameterID (fem::id::sourceForceCtl[i], 1), prefix + "Force Ctl",
+                fem::ctlOff, fem::ctlMax, fem::ctlVelocity,
+                juce::AudioParameterIntAttributes().withStringFromValueFunction (ctlName)));
+            p.push_back (std::make_unique<juce::AudioParameterChoice> (
+                juce::ParameterID (fem::id::sourceVelCurve[i], 1), prefix + "Vel Curve",
+                juce::StringArray { "Slow", "Linear", "Fast" }, fem::velCurveLinear));
+
+            p.push_back (std::make_unique<FloatParam> (
+                juce::ParameterID (fem::id::sourceHammerMax[i], 1), prefix + "Hammer Max",
+                logRange (0.1f, 50.0f), 3.0f,
+                juce::AudioParameterFloatAttributes().withLabel ("ms")));
+            p.push_back (std::make_unique<FloatParam> (
+                juce::ParameterID (fem::id::sourceForceMax[i], 1), prefix + "Force Max",
+                juce::NormalisableRange<float> (0.0f, 20.0f, 0.0f, 0.4f), 1.0f));
+
             p.push_back (std::make_unique<FloatParam> (
                 juce::ParameterID (fem::id::sourceHammer[i], 1), prefix + "Hammer",
                 logRange (0.1f, 50.0f), 3.0f,
                 juce::AudioParameterFloatAttributes().withLabel ("ms")));
             p.push_back (std::make_unique<FloatParam> (
                 juce::ParameterID (fem::id::sourceForce[i], 1), prefix + "Force",
-                juce::NormalisableRange<float> (0.0f, 20.0f, 0.0f, 0.4f), 1.0f));
+                juce::NormalisableRange<float> (0.0f, 20.0f, 0.0f, 0.4f), 0.0f));
             // -1 reads as "off" rather than as a note: a source with no note
             // is the default, and a host automation lane should say so.
             p.push_back (std::make_unique<juce::AudioParameterInt> (
@@ -496,8 +552,18 @@ void ModalDishAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         auto& src = params.sources[i];
         src.x        = pSourceX[i]->load();
         src.y        = pSourceY[i]->load();
-        src.hammerMs = pSourceHammer[i]->load();
-        src.force    = pSourceForce[i]->load();
+        // The parameters are the two absolute endpoints drawn on the plate;
+        // the synth wants the displacement between them (see Source).
+        src.velX     = pSourceX2[i]->load() - src.x;
+        src.velY     = pSourceY2[i]->load() - src.y;
+        src.hammerMs    = pSourceHammer[i]->load();
+        src.hammerMsMax = pSourceHammerMax[i]->load();
+        src.force       = pSourceForce[i]->load();
+        src.forceMax    = pSourceForceMax[i]->load();
+        src.posCtl      = (int) pSourcePosCtl[i]->load();
+        src.hammerCtl   = (int) pSourceHammerCtl[i]->load();
+        src.forceCtl    = (int) pSourceForceCtl[i]->load();
+        src.velCurve    = (int) pSourceVelCurve[i]->load();
         src.note     = (int) pSourceNote[i]->load();
         src.spread   = pSourceSpread[i]->load();
         src.send     = pSourceSend[i]->load();
@@ -552,6 +618,19 @@ void ModalDishAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         for (; midiEvent != midiEnd && (*midiEvent).samplePosition <= i; ++midiEvent)
         {
             const auto msg = (*midiEvent).getMessage();
+
+            // Controllers first, and on the sources' channel: a CC arriving
+            // in the same block as the note it shapes has to be in place
+            // before that note is struck, since a source reads its mapping
+            // once, at strike time.
+            if (msg.isController())
+            {
+                if (srcChannel == 0 || msg.getChannel() == srcChannel)
+                    synth.setControllerValue (msg.getControllerNumber(),
+                                              (float) msg.getControllerValue() / 127.0f);
+                continue;
+            }
+
             if (msg.isNoteOn())
             {
                 // Sources claim notes; a note nothing claims falls back to
@@ -781,11 +860,6 @@ void ModalDishAudioProcessor::requestStrike (float x, float y, float velocity)
 }
 
 //==============================================================================
-// Version of the BoundaryCondition numbering that segBcs is stored in.
-// 1 = the original Free/SimplySupported/Clamped/Sliding order, written
-// without a bcOrder property at all; 2 = the stiffness order in use now.
-static constexpr int bcOrderCurrent = 2;
-
 juce::ValueTree ModalDishAudioProcessor::shapeToTree() const
 {
     juce::ValueTree t ("SHAPE");
@@ -803,10 +877,6 @@ juce::ValueTree ModalDishAudioProcessor::shapeToTree() const
     t.setProperty ("segStarts", starts.joinIntoString (";"), nullptr);
     t.setProperty ("segBcs", bcs.joinIntoString (";"), nullptr);
     t.setProperty ("meshDensity", shapeData.meshDensity, nullptr);
-    // Stamps which BoundaryCondition numbering segBcs is written in. State
-    // saved before the enum was reordered by stiffness carries no such
-    // property, which is exactly how shapeFromTree recognises it.
-    t.setProperty ("bcOrder", bcOrderCurrent, nullptr);
     return t;
 }
 
@@ -827,17 +897,6 @@ void ModalDishAudioProcessor::shapeFromTree (const juce::ValueTree& t)
     for (const auto& b : juce::StringArray::fromTokens (t["segBcs"].toString(), ";", ""))
         s.segBcs.push_back (b.getIntValue());
     s.meshDensity = (int) t.getProperty ("meshDensity", 16);
-
-    // Migrate state written under the old numbering (Free, SimplySupported,
-    // Clamped, Sliding) to the present stiffness order (Clamped,
-    // SimplySupported, Sliding, Free). Without this a session saved earlier
-    // would silently reopen with clamped edges reading as free.
-    if ((int) t.getProperty ("bcOrder", 1) < bcOrderCurrent)
-    {
-        static constexpr int fromLegacy[4] = { 3, 1, 0, 2 };
-        for (int& b : s.segBcs)
-            b = fromLegacy[juce::jlimit (0, 3, b)];
-    }
 
     if (s.outline.size() >= 3 && s.segStarts.size() == s.segBcs.size()
          && ! s.segStarts.empty())
@@ -984,6 +1043,7 @@ void ModalDishAudioProcessor::setStateInformation (const void* data, int sizeInB
     const auto params = root.getChildWithName (apvts.state.getType());
     if (params.isValid())
         apvts.replaceState (params);
+
     shapeFromTree (root.getChildWithName ("SHAPE"));
     pendingModesTree = root.getChildWithName ("MODES").createCopy();
 

@@ -4,15 +4,24 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
 endif()
 
+# Before project(), and that is the whole point: project() latches the
+# toolchain and the architecture list, so an architecture set after it is read
+# too late. The build still succeeds and still calls itself universal, having
+# quietly produced a single-architecture binary — which is why CI passes these
+# as -D on the configure line as well, where the cache has them before any line
+# of this file runs, and then verifies both slices are really present.
+#
+# 10.13 rather than 11.0: 11.0 silently excludes every Intel Mac still on
+# Catalina, which is a large part of who would want a free plugin.
+if(APPLE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum macOS deployment version")
+    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Target architectures")
+endif()
+
 project(ModalDish VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-if(APPLE)
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS deployment version")
-    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Target architectures")
-endif()
 
 # JUCE is expected as a sibling of this repo; FxmeTools lives in-tree as a git
 # submodule under lib/ (registered directly: ModalDish does not need the WDL
@@ -72,7 +81,11 @@ target_include_directories(ModalDish PRIVATE ${MODALDISH_INCLUDE_DIRS})
 # Images, plus the factory presets: PresetManager reads every embedded
 # "*_xml" resource whose root tag matches the APVTS state, so dropping an
 # exported preset into Source/Presets/ is all it takes to ship it.
-file(GLOB MODALDISH_ASSETS ${CMAKE_CURRENT_SOURCE_DIR}/Source/Assets/*.png
+# CONFIGURE_DEPENDS as the source glob has: without it, renaming or removing
+# an asset leaves the build tree pointing at a file that is no longer there,
+# and the failure names the old path rather than the stale glob.
+file(GLOB MODALDISH_ASSETS CONFIGURE_DEPENDS
+                          ${CMAKE_CURRENT_SOURCE_DIR}/Source/Assets/*.png
                           ${CMAKE_CURRENT_SOURCE_DIR}/Source/Assets/*.jpg
                           ${CMAKE_CURRENT_SOURCE_DIR}/Source/Presets/*.xml)
 if(MODALDISH_ASSETS)

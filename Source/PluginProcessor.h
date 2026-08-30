@@ -289,6 +289,14 @@ private:
     std::atomic<float>* pPickupOn[fem::maxPickups] {};
     std::atomic<float>* pSourceX[fem::maxSources] {};
     std::atomic<float>* pSourceY[fem::maxSources] {};
+    std::atomic<float>* pSourceX2[fem::maxSources] {};
+    std::atomic<float>* pSourceY2[fem::maxSources] {};
+    std::atomic<float>* pSourceHammerMax[fem::maxSources] {};
+    std::atomic<float>* pSourceForceMax[fem::maxSources] {};
+    std::atomic<float>* pSourcePosCtl[fem::maxSources] {};
+    std::atomic<float>* pSourceHammerCtl[fem::maxSources] {};
+    std::atomic<float>* pSourceForceCtl[fem::maxSources] {};
+    std::atomic<float>* pSourceVelCurve[fem::maxSources] {};
     std::atomic<float>* pSourceHammer[fem::maxSources] {};
     std::atomic<float>* pSourceForce[fem::maxSources] {};
     std::atomic<float>* pSourceNote[fem::maxSources] {};
