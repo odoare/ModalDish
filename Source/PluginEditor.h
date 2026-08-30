@@ -29,6 +29,7 @@
 #include "Components/PointToggle.h"
 #include "ShapeFile.h"
 
+#include <FxmeTools/components/InfoButton.h>
 #include <FxmeTools/components/PresetBarComponent.h>
 #include <FxmeTools/components/PresetComponent.h>
 #include <FxmeTools/components/SplashOverlay.h>
@@ -199,6 +200,7 @@ private:
     void setPresetPanelVisible (bool shouldBeVisible);
 
     GlowLine glowLine;
+    fxme::InfoButton infoButton;
     fxme::SplashOverlay splash;
     fxme::PresetBarComponent presetBar { processor.getPresetManager() };
     TriangleButton presetsButton;

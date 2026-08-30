@@ -51,7 +51,46 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
     {
         setPresetPanelVisible (! presetOverlay.isVisible());
     };
-    topBar.setRightControls (&presetBar, 260, &presetsButton, 22);
+    // The plugin is driven as much from the keyboard and the plate as from the
+    // knobs, and none of that is discoverable from the panels. The README
+    // carries the same list, but the README is not in front of the player.
+    infoButton.setColours ({ fem::theme::accent,
+                             fem::theme::text,
+                             fem::theme::panel,
+                             fem::theme::panelLine });
+    infoButton.setInfo (
+        "ModalDish shortcuts",
+        "ON THE PLATE\n"
+        "  click                  strike the plate there\n"
+        "  click a marker         open that point's panel\n"
+        "  alt-click a marker     switch that point off\n"
+        "  right-click / ctrl-drag   move pickup 1\n"
+        "\n"
+        "PLACING POINTS (mouse over the plate)\n"
+        "  1 - 8                  put that pickup under the cursor\n"
+        "  a - h                  put that source under the cursor\n"
+        "  A - H                  put that source's velocity endpoint there\n"
+        "\n"
+        "A source is a segment: it strikes at 'a' when its control reads 0 and\n"
+        "at 'A' when it reads full. The two start together, so a source is a\n"
+        "plain point until you place its capital.\n"
+        "\n"
+        "PLACE POINTS TOOL (modal design)\n"
+        "  click                  add a vertex, or insert one into the\n"
+        "                         nearest edge once the shape is closed\n"
+        "  drag a vertex          move it\n"
+        "  alt-click a vertex     delete it (three are always kept)\n"
+        "\n"
+        "SOURCE MAPPINGS\n"
+        "Position, hammer and force are each a min/max pair plus a control\n"
+        "(Off, Vel or a CC). The value is min + amount * (max - min), and min\n"
+        "above max simply inverts it. Off holds the min, which is why a max\n"
+        "greys out when its control is Off.");
+    addAndMakeVisible (infoButton);
+
+    topBar.setRightControls ({ { &presetBar, 260 },
+                               { &presetsButton, 22 },
+                               { &infoButton, 26 } });
 
     addChildComponent (presetOverlay);
     presetOverlay.browser.setAccentColour (fem::theme::accent);
@@ -1030,6 +1069,12 @@ void ModalDishAudioProcessorEditor::drawPlateOverlay (juce::Graphics& g,
 //==============================================================================
 void ModalDishAudioProcessorEditor::timerCallback()
 {
+    // Glide only means something once a channel is tuning the plate: with
+    // Freq Chan Off nothing ever calls glideToNote, so the time it would take
+    // is not a setting the player can hear. Polled here rather than driven
+    // from the knob, so host automation of Freq Chan greys it too.
+    glideKnob.setEnabled (processor.apvts.getRawParameterValue (fem::id::freqChannel)->load() > 0.5f);
+
     const bool computing = processor.isComputing();
     computeButton.setEnabled (! computing);
     progressBar.setVisible (computing);

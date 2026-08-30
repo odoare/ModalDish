@@ -2,6 +2,8 @@
 
 Revisions:
 
+- 2026-08-30, third pass: R2 applied except the cascade column (declined, see
+  below) and R3 applied. R1 declined for now.
 - 2026-08-30, second pass: S1, S2, S3 and S4 applied (see the ticks below).
 - 2026-08-30, first pass: original audit.
 
@@ -78,37 +80,48 @@ DAW skips it silently. The per-host MIDI routing section is already present
 
 ## Retrofit
 
-### R1 — `setTooltip` is called but no `TooltipWindow` exists — **decision**
+### R1 — `setTooltip` is called but no `TooltipWindow` exists — **declined for now**
 
 - [ ] [../Source/PluginEditor.cpp](../Source/PluginEditor.cpp) sets a tooltip on
       the presets button; nothing in the project owns a `juce::TooltipWindow`,
       so that tooltip never appears.
 
-The fix is one member, but it is a decision because a `TooltipWindow` makes
-every future `setTooltip` visible at once. Here the blast radius is one string,
-so it is a small decision, but it is still a product one.
+Declined on 2026-08-30. Worth re-reading before release, because R3 added a
+second invisible tooltip: `fxme::InfoButton` sets one on itself in its
+constructor ("Help & shortcuts for this page"). Neither is load-bearing (both
+controls are legible without them), so nothing is broken, but the count of
+tooltips that exist and cannot be seen is now two rather than one.
 
 ### R2 — no control enablement for superseded parameters — **safe to apply**
 
-The editor already runs a 30 Hz timer, so this is a few lines in
-`timerCallback`, polled rather than driven from `onChange` so host automation is
-caught too. Now that `FxmeLookAndFeel` draws disabled state, these read as
-inert rather than merely doing nothing.
+Both parts polled from a timer rather than driven from `onChange`, so a
+parameter moved by host automation greys its dependants too.
 
-- [ ] Cascade column: when `cascade` is 0 the whole advanced set (Drive, Att,
-      Rel, Ovl, Win, Depl) does nothing.
-- [ ] `Glide` does nothing while `Freq Chan` is Off.
-- [ ] Per source, `Ham Max` is inert while `Ham Ctl` is Off, `Frc Max` while
-      `Frc Ctl` is Off, and `X2`/`Y2` while `Pos Ctl` is Off.
-- [ ] Per source, `Curve` is inert unless at least one of the three controls is
-      set to Vel (a CC is not curved).
+- [x] ~~Cascade column when `cascade` is 0.~~ **Declined deliberately**: the
+      cascade tuning is worth setting up *before* the amount is raised, so
+      greying it out would take away a working habit rather than clarify
+      anything. This is the case where the generic rule does not fit the
+      instrument, and it is left as it is on purpose.
+- [x] `Glide` greys out while `Freq Chan` is Off, in the editor's existing
+      30 Hz timer ([../Source/PluginEditor.cpp](../Source/PluginEditor.cpp)).
+- [x] Per source, `X2`/`Y2` grey out while `Pos Ctl` is Off, `Ham Max` while
+      `Ham Ctl` is Off, and `Frc Max` while `Frc Ctl` is Off.
+- [x] Per source, `Curve` greys out unless at least one of the three controls
+      reads Vel.
 
-The last two are in [../Source/Components/PlatePointPanel.h](../Source/Components/PlatePointPanel.h),
-which owns no timer today, so they need one or a change broadcast.
+The source items are `PlatePointPanel::updateEnablement()`, called from the
+10 Hz timer the source panel already ran for MIDI learn, and once in the
+constructor so the panel opens in the right state rather than a tick later.
+`addKnob` now returns the box it made, so the five superseded controls are held
+as named pointers rather than found by index into `knobs` — an index that would
+have gone stale the next time a row was added.
 
 ### R3 — no `fxme::InfoButton` — **decision**
 
-- [ ] Add one, carrying the keyboard shortcuts.
+- [x] Done. Added to the top bar's right controls beside the preset strip,
+      carrying the plate gestures, the placement keys (including the capitals
+      for a source's velocity endpoint), the Place-points tool and a short
+      statement of how the min/max mappings read.
 
 The plugin has a substantial shortcut vocabulary (`1`-`8` and `a`-`h` to place a
 pickup or source, `A`-`H` for a source's velocity endpoint, alt-click to switch

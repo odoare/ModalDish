@@ -97,19 +97,19 @@ public:
                 return juce::String (n[juce::jlimit (0, 2, (int) std::lround (v))]);
             };
 
-            addKnob ("X2", fem::id::sourceX2[index]);
-            addKnob ("Y2", fem::id::sourceY2[index]);
+            x2Box = addKnob ("X2", fem::id::sourceX2[index]);
+            y2Box = addKnob ("Y2", fem::id::sourceY2[index]);
             addKnob ("Pos Ctl", fem::id::sourcePosCtl[index], {}, ctlText);
 
             addKnob ("Ham Min", fem::id::sourceHammer[index]);
-            addKnob ("Ham Max", fem::id::sourceHammerMax[index]);
+            hamMaxBox = addKnob ("Ham Max", fem::id::sourceHammerMax[index]);
             addKnob ("Ham Ctl", fem::id::sourceHammerCtl[index], {}, ctlText);
 
             addKnob ("Frc Min", fem::id::sourceForce[index]);
-            addKnob ("Frc Max", fem::id::sourceForceMax[index]);
+            frcMaxBox = addKnob ("Frc Max", fem::id::sourceForceMax[index]);
             addKnob ("Frc Ctl", fem::id::sourceForceCtl[index], {}, ctlText);
 
-            addKnob ("Curve", fem::id::sourceVelCurve[index], {}, curveText);
+            curveBox = addKnob ("Curve", fem::id::sourceVelCurve[index], {}, curveText);
             addKnob ("In Vol", fem::id::sourceSend[index]);
             addKnob ("In Bal", fem::id::sourcePan[index], 0.0);
 
@@ -134,6 +134,7 @@ public:
                                                 std::memory_order_release);
             };
             addAndMakeVisible (learnButton);
+            updateEnablement();      // open in the right state, not a tick later
             startTimerHz (10);
         }
 
@@ -232,6 +233,8 @@ private:
             return;
         }
 
+        updateEnablement();
+
         // Polled rather than driven from onClick, so that the button also
         // clears when the audio thread captures a note, and when something
         // else disarms it.
@@ -241,9 +244,38 @@ private:
         learnButton.setButtonText (armed ? "listening..." : "MIDI learn");
     }
 
-    void addKnob (const juce::String& label, const char* paramId,
-                  std::optional<double> centre = {},
-                  std::function<juce::String (double)> textFn = {})
+    /** Greys out the half of a mapping its controller is not using. A max end
+        means nothing while its control is Off (the value sits at the min), and
+        the velocity curve means nothing unless something actually reads
+        velocity: a CC arrives already shaped by the player's hardware.
+
+        Polled from the timer rather than driven from the controls' onChange,
+        so a controller moved by host automation greys them too. */
+    void updateEnablement()
+    {
+        const auto value = [this] (const char* id)
+        { return processor.apvts.getRawParameterValue (id)->load(); };
+
+        const int posCtl = (int) value (fem::id::sourcePosCtl[pointIndex]);
+        const int hamCtl = (int) value (fem::id::sourceHammerCtl[pointIndex]);
+        const int frcCtl = (int) value (fem::id::sourceForceCtl[pointIndex]);
+
+        const bool readsVelocity = posCtl == fem::ctlVelocity
+                                || hamCtl == fem::ctlVelocity
+                                || frcCtl == fem::ctlVelocity;
+
+        if (x2Box     != nullptr) x2Box    ->setEnabled (posCtl != fem::ctlOff);
+        if (y2Box     != nullptr) y2Box    ->setEnabled (posCtl != fem::ctlOff);
+        if (hamMaxBox != nullptr) hamMaxBox->setEnabled (hamCtl != fem::ctlOff);
+        if (frcMaxBox != nullptr) frcMaxBox->setEnabled (frcCtl != fem::ctlOff);
+        if (curveBox  != nullptr) curveBox ->setEnabled (readsVelocity);
+    }
+
+    /** Returns the box, so a caller that needs to grey it out later can keep a
+        handle rather than indexing into `knobs` by position. */
+    fxme::FxmeNumberBox* addKnob (const juce::String& label, const char* paramId,
+                                  std::optional<double> centre = {},
+                                  std::function<juce::String (double)> textFn = {})
     {
         auto s = std::make_unique<fxme::FxmeNumberBox>();
         fem::theme::styleBox (*s, label, accent);
@@ -255,6 +287,7 @@ private:
         attachments.push_back (std::make_unique<
             juce::AudioProcessorValueTreeState::SliderAttachment> (processor.apvts, paramId, *s));
         knobs.push_back (std::move (s));
+        return knobs.back().get();
     }
 
     static constexpr int pad = 8, headerH = 22, rowH = 42, footerH = 40, knobW = 62,
@@ -276,6 +309,14 @@ private:
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> attachments;
     std::unique_ptr<fxme::FxmeButton> onButton;
     std::unique_ptr<fxme::FxmeNumberBox> noteBox;   // sources only
+
+    // Non-owning handles into `knobs`, for the ends and the curve a controller
+    // can supersede. Null on a pickup panel, which has no mappings.
+    fxme::FxmeNumberBox* x2Box = nullptr;
+    fxme::FxmeNumberBox* y2Box = nullptr;
+    fxme::FxmeNumberBox* hamMaxBox = nullptr;
+    fxme::FxmeNumberBox* frcMaxBox = nullptr;
+    fxme::FxmeNumberBox* curveBox = nullptr;
     juce::TextButton learnButton { "MIDI learn" };
     fxme::VuMeterComponent meter;          // pickups only
 
