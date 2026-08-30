@@ -523,4 +523,16 @@ JSON parser); the rest are JUCE-free.
 | `lib/FxmeTools/FxmeTools/acoustics/` | the contour view component |
 | `Tests/FemTests.cpp` | numerical validation vs analytic plates, and sparse vs dense storage |
 
-(c) 2026 Olivier Doaré — LGPL-3.0-or-later
+## License
+
+AGPL-3.0-or-later, or commercial terms for holders of a commercial JUCE
+licence - see [LICENSE.md](LICENSE.md) for the details and the four
+framework-free files that stay LGPL-3.0-or-later.
+
+The finite-element mesher and the Morley plate eigensolver are not in this
+repository: they live in the framework-free half of
+[FxmeTools](https://github.com/odoare/FxmeTools) under LGPL-3.0-or-later, and
+can be used without JUCE.
+
+---
+Author: Olivier Doaré · FX-Mechanics · AGPL-3.0-or-later OR LicenseRef-FXME-Commercial
