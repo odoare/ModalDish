@@ -40,96 +40,6 @@ namespace
     // 128 points and an ellipse 96, which are handles to drag, not a shape to
     // edit; this is the count they get reduced to on the way in.
     constexpr int maxPolygonVertices = 20;
-
-    /** Douglas-Peucker over the open chain p[first..last], flagging the
-        vertices that have to stay for the chain to stay within `tol`. */
-    void simplifyChain (const std::vector<fxme::acoustics::Point2>& p,
-                        size_t first, size_t last, double tol, std::vector<char>& keep)
-    {
-        if (last <= first + 1)
-            return;
-
-        const auto& a = p[first];
-        const auto& b = p[last];
-        const double dx = b.x - a.x, dy = b.y - a.y;
-        const double len2 = dx * dx + dy * dy;
-
-        double worst = -1.0;
-        size_t worstAt = first;
-        for (size_t i = first + 1; i < last; ++i)
-        {
-            double d2;
-            if (len2 <= 0.0)
-            {
-                const double ex = p[i].x - a.x, ey = p[i].y - a.y;
-                d2 = ex * ex + ey * ey;
-            }
-            else
-            {
-                // Squared distance to the segment's infinite line: the cross
-                // product over the segment length.
-                const double cross = (p[i].x - a.x) * dy - (p[i].y - a.y) * dx;
-                d2 = cross * cross / len2;
-            }
-            if (d2 > worst)
-            {
-                worst = d2;
-                worstAt = i;
-            }
-        }
-
-        if (worst > tol * tol)
-        {
-            keep[worstAt] = 1;
-            simplifyChain (p, first, worstAt, tol, keep);
-            simplifyChain (p, worstAt, last, tol, keep);
-        }
-    }
-
-    /** One Douglas-Peucker pass over a closed polygon at a given tolerance. */
-    std::vector<fxme::acoustics::Point2>
-    simplifyClosed (const std::vector<fxme::acoustics::Point2>& pts, double tol)
-    {
-        const size_t n = pts.size();
-        if (n < 4)
-            return pts;
-
-        // A closed ring has no endpoints, so anchor it on vertex 0 and the
-        // vertex furthest from it, and simplify the two chains between them.
-        size_t far = 0;
-        double best = -1.0;
-        for (size_t i = 1; i < n; ++i)
-        {
-            const double ex = pts[i].x - pts[0].x, ey = pts[i].y - pts[0].y;
-            const double d2 = ex * ex + ey * ey;
-            if (d2 > best) { best = d2; far = i; }
-        }
-
-        std::vector<char> keep (n, 0);
-        keep[0] = 1;
-        keep[far] = 1;
-        simplifyChain (pts, 0, far, tol, keep);
-
-        // Second chain wraps past the end, so walk it in a rotated copy.
-        std::vector<fxme::acoustics::Point2> tail;
-        tail.reserve (n - far + 1);
-        for (size_t i = far; i < n; ++i)
-            tail.push_back (pts[i]);
-        tail.push_back (pts[0]);
-        std::vector<char> tailKeep (tail.size(), 0);
-        tailKeep.front() = 1;
-        tailKeep.back() = 1;
-        simplifyChain (tail, 0, tail.size() - 1, tol, tailKeep);
-        for (size_t i = 1; i + 1 < tail.size(); ++i)
-            if (tailKeep[i])
-                keep[far + i] = 1;
-
-        std::vector<fxme::acoustics::Point2> out;
-        for (size_t i = 0; i < n; ++i)
-            if (keep[i])
-                out.push_back (pts[i]);
-        return out;
-    }
 }
 
 ShapeCanvas::ShapeCanvas()
@@ -376,19 +286,9 @@ void ShapeCanvas::adoptOutlineAsPolygon()
     if ((int) outlinePts.size() <= maxPolygonVertices)
         return;
 
-    // Raise the tolerance until the vertex count is manageable. Starting
-    // small and growing keeps the shape as faithful as it can be at that
-    // count, and Douglas-Peucker spends its budget on the corners, which is
-    // where a plate outline carries its character.
-    double tol = 0.002;
-    auto reduced = outlinePts;
-    for (int pass = 0; pass < 32; ++pass)
-    {
-        reduced = simplifyClosed (outlinePts, tol);
-        if ((int) reduced.size() <= maxPolygonVertices)
-            break;
-        tol *= 1.4;
-    }
+    // Douglas-Peucker spends its budget on the corners, which is where a
+    // plate outline carries its character (see simplifyPolygonTo in FemMesh).
+    auto reduced = fxme::acoustics::simplifyPolygonTo (outlinePts, maxPolygonVertices);
 
     if (reduced.size() >= 3)
     {

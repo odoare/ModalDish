@@ -2,6 +2,8 @@
 
 Revisions:
 
+- 2026-08-30, fifth pass: H3 and H5 applied (both in the submodule). H4
+  declined, with a note on when it would become worth doing.
 - 2026-08-30, fourth pass: H1 and H2 applied, both verified bit-identical.
 - 2026-08-30, third pass: R2 applied except the cascade column (declined, see
   below) and R3 applied. R1 declined for now.
@@ -183,8 +185,26 @@ exactly as before, so this one really is a no-op swap.
 
 ### H3 — the polygon simplifier belongs in `core/` — **decision**
 
-- [ ] `simplifyChain` and `simplifyClosed`, in the anonymous namespace of
-      [../Source/Components/ShapeCanvas.cpp:44](../Source/Components/ShapeCanvas.cpp#L44).
+- [x] Done, in the submodule. The two functions are now
+      `fxme::acoustics::simplifyPolygon` (Douglas-Peucker to a tolerance) and
+      `simplifyPolygonTo` (the tolerance search to a vertex budget), declared
+      in `core/FxmeTools/acoustics/FemMesh.h` beside `polygonArea` and
+      `pointInPolygon` and implemented in the matching `.cpp`.
+      `ShapeCanvas::adoptOutlineAsPolygon` is now three lines calling the
+      second.
+
+      The point of the move was testability, so it came with tests:
+      `core/tests/CoreGeometryTests.cpp`, seventeen assertions registered as
+      `FxmeCoreGeometryTests`. They cover what the throwaway harness covered
+      (corners kept exactly, a straight-edged outline reproduced to 1.1e-16,
+      the spike in the wrapped chain surviving) plus the cases it did not: the
+      tolerance actually being honoured, the budget floor at a triangle, an
+      absurd tolerance still not going below one, and a spike just *past*
+      vertex 0, which is the other side of the same wrap-around bug.
+
+      Licence checked: both halves of the pair carry `LGPL-3.0-or-later`,
+      which is core's identifier, and nothing added names a JUCE type even in
+      a comment, so `FxmeCoreGuard` is satisfied.
 
 Douglas-Peucker over a closed polygon is generic computational geometry. It
 names no `juce::` type (only `fxme::acoustics::Point2`, already a core type) and
@@ -196,9 +216,12 @@ than a suite.
 
 Decision because it edits the shared library.
 
-### H4 — `ShapeFile` sits at the plugin level — **decision, and probably decline**
+### H4 — `ShapeFile` sits at the plugin level — **declined**
 
-- [ ] [../Source/ShapeFile.h](../Source/ShapeFile.h) and its `.cpp`.
+- [x] ~~Move it.~~ Declined 2026-08-30, and recorded so a later audit does not
+      re-raise it. Worth revisiting only if a second plugin grows a sketch-based
+      designer, at which point the plate-coordinate convention it hard-codes
+      becomes a shared convention rather than this plugin's.
 
 Listed for completeness because a JSON geometry reader looks generic. It is not:
 it hard-codes ModalDish's plate-coordinate convention (the 0.08 canvas margin,
@@ -209,8 +232,15 @@ re-raise it.
 
 ### H5 — `api-changes.md` still calls this project FemPlate — **decision**
 
-- [ ] `lib/FxmeTools/doc/api-changes.md`, the per-project table and the
-      per-project notes.
+- [x] Done, in the submodule. The table row reads `ModalDish (was FemPlate)`
+      so the old name is still greppable; the per-project note is rewritten in
+      the past tense (the two by-path sources are gone and all four test
+      targets link `FxmeCore`), and the auxiliary-target roll call now says
+      the case is fixed rather than outstanding. The narrative mentions
+      elsewhere are renamed in place.
+
+      The note also records what the project has since contributed back:
+      `simplifyPolygon` / `simplifyPolygonTo` and their tests, from H3.
 
 The project was renamed in commit `365e3ce`. The submodule doc still lists
 `FemPlate`, including a note about its `FemTests` target compiling two FxmeTools
