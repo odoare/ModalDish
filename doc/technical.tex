@@ -14,6 +14,8 @@
 \usepackage{booktabs}
 \usepackage{hyperref}
 \usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{positioning,calc,arrows}
 \hypersetup{colorlinks=true, linkcolor=blue!50!black, citecolor=blue!50!black,
             urlcolor=blue!50!black}
 
@@ -36,8 +38,9 @@
 ModalDish is an audio plugin that simulates the linear and weakly nonlinear
 vibration of a thin plate (or tensioned membrane) of arbitrary user-drawn
 shape, with mixed boundary conditions. The plate eigenmodes are computed by
-a non-conforming (Morley) finite-element discretisation and a dense subspace
-eigensolver, both implemented in the reusable, JUCE-free library
+a non-conforming (Morley) finite-element discretisation and a subspace
+eigensolver over sparse operators in a bandwidth-reducing ordering, both
+implemented in the reusable, JUCE-free library
 \code{FxmeTools/acoustics}. Sound is produced by a bank of resonant
 band-pass filters, one per mode, following the modal-synthesis approach of
 the MechanOdd project. A first-order tension law allows audio-rate retuning
@@ -279,7 +282,8 @@ classical \emph{subspace iteration with Rayleigh--Ritz projection}
 \item Form $A = K + T_0 G$ and the shifted operator $P = A + \sigma M$ with
   $\sigma = 10^{-5}\,\mathrm{tr}(A)/\mathrm{tr}(M)$. The shift keeps $P$
   positive definite when free (Neumann-type) boundaries leave rigid-body
-  modes in $A$'s null space. $P$ is Cholesky-factored once ($O(n^3/3)$).
+  modes in $A$'s null space. $P$ is Cholesky-factored once, in the profile
+  storage described below rather than densely.
 \item Iterate on a block of $p = m + \max(8, m/2)$ vectors:
   $Z \leftarrow P^{-1} M X$ (one inverse-power step towards the low
   spectrum), followed by Rayleigh--Ritz on $\mathrm{span}(Z)$: project
@@ -475,6 +479,106 @@ fast-moving $T$.
 \section{Modal synthesis with resonant filter banks}
 \label{sec:filterbank}
 
+Figure~\ref{fig:signalpath} shows where everything in this section and
+the next sits in the running plugin, from a note arriving to a sample
+leaving.
+
+\begin{figure}[tbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+  >=stealth, font=\footnotesize,
+  blk/.style={draw=black!55, rounded corners=2pt, align=center,
+              inner sep=3pt, text width=32mm, minimum height=8mm},
+  wide/.style={blk, text width=46mm},
+  mdl/.style={blk, fill=black!7},
+  exc/.style={blk, fill=orange!14},
+  tun/.style={blk, fill=blue!11},
+  bnk/.style={wide, fill=blue!16},
+  fbk/.style={blk, fill=red!9},
+  outb/.style={wide, fill=green!13},
+  term/.style={blk, fill=white, rounded corners=8pt, minimum height=6mm},
+  ar/.style={->, thick, black!65},
+  pub/.style={->, thick, dashed, black!50},
+  lbl/.style={font=\scriptsize, black!55, inner sep=1.5pt}
+]
+
+% ---- left column: the model, its tuning, and the Berger driver --------
+\node[mdl] (shape) at (-5.2,-1.0) {Shape\\outline $+$ boundary segments};
+\node[mdl] (mesh)  at (-5.2,-2.7) {Delaunay mesh\\\emph{Grid}~(\S\ref{sec:mesh})};
+\node[mdl] (solve) at (-5.2,-4.4) {Morley FEM eigensolve\\\emph{Modes}~(\S\ref{sec:eig})};
+\node[mdl] (tail)  at (-5.2,-6.0) {Statistical tail~(\S\ref{sec:tail})};
+\node[mdl] (model) at (-5.2,-7.4) {Modal model\\$\lambda_k,\ \bm\varphi_k,\ g_k$};
+\node[tun] (omega) at (-5.2,-9.2) {$\omega_k$\\\emph{Frequency}, MIDI pitch,\\\emph{Glide}, \emph{Tension}~(\S\ref{sec:tension})};
+\node[tun] (zeta)  at (-5.2,-10.9) {$\zeta_k$\\\emph{Viscous}, \emph{Material},\\\emph{Overlap} floor~(\S\ref{sec:damping})};
+\node[fbk] (berger) at (-5.2,-12.7) {Berger driver\\$\gamma$ from plate stretching~(\S\ref{sec:berger})};
+
+\draw[ar] (shape) -- (mesh);
+\draw[ar] (mesh) -- (solve);
+\draw[ar] (solve) -- (tail);
+\draw[ar] (tail) -- (model);
+\draw[ar] (berger.west) -- ++(-0.55,0) |- node[lbl,pos=0.25,rotate=90,above] {dynamic tension} (omega.west);
+
+% ---- excitation -------------------------------------------------------
+\node[term] (midi)  at (0,-1.0) {MIDI in: notes, CC};
+\node[term] (audin) at (3.6,-1.0) {Audio in};
+\node[exc] (route)  at (0,-2.7) {Note routing\\\emph{Src Chan} / \emph{Freq Chan}~(\S\ref{sec:notes})};
+\node[exc] (ingain) at (3.6,-2.7) {\emph{In Gain}};
+\node[exc] (map)    at (0,-4.6) {Source mapping\\$\min + a\,(\max-\min)$\\position, hammer, force};
+\node[exc] (sends)  at (3.6,-4.6) {Per-source\\\emph{In Vol} / \emph{In Bal}};
+\node[exc,wide] (drive) at (1.8,-6.6) {Modal drive: half-sine pulses and input, weighted by $\bm\varphi_k(\mathbf{x})$~(\S\ref{sec:excitation})};
+
+\draw[ar] (midi) -- (route);
+\draw[ar] (audin) -- (ingain);
+\draw[ar] (route) -- (map);
+\draw[ar] (ingain) -- (sends);
+\draw[ar] (map.south) -- ++(0,-0.45) -| (drive.north);
+\draw[ar] (sends.south) -- ++(0,-0.45) -| (drive.north);
+
+% ---- the bank ---------------------------------------------------------
+\node[bnk] (bank) at (1.8,-8.4) {Modal filter bank\\one constant-peak band-pass per mode~(\S\ref{sec:filterbank})};
+\draw[ar] (drive) -- (bank);
+\draw[pub] (model.east) -- ++(0.7,0) |- node[lbl,pos=0.72,above] {publish} (bank.north west);
+\draw[ar] (omega.east) -- ++(0.5,0) |- (bank.west);
+\draw[ar] (zeta.east)  -- ++(0.3,0) |- ([yshift=-2.5mm]bank.west);
+
+% ---- feedback ---------------------------------------------------------
+\node[fbk] (casc) at (7.6,-8.4) {Cascade ladder\\8 bands, $\tanh^3$ carrier,\\gate, \emph{Window}~(\S\ref{sec:cascade})};
+\node[fbk] (depl) at (7.6,-10.2) {\emph{Deplete}\\loss on the pumping bands};
+
+\draw[ar] (bank.east) -- (casc.west);
+\draw[ar] (bank.south west) -- ++(-1.15,0) |- (berger.east);
+\draw[ar] (casc) -- (depl);
+\draw[ar] (casc.north) -- ++(0,0.30) -- (4.9,-7.45) -- (4.9,-6.6) -- (drive.east);
+\draw[pub] (depl.west) -- ++(-0.55,0) |- node[lbl,pos=0.3,left,align=center] {state\\decay} ([yshift=-1mm]bank.east);
+
+% ---- output -----------------------------------------------------------
+\node[outb] (pmix)   at (1.8,-10.3) {Pickup mix: $\bm\varphi_k(\mathbf{y}_p)$, \emph{Level}, \emph{Pan}, tail spread~(\S\ref{sec:tailspread})};
+\node[outb] (og)     at (1.8,-11.9) {\emph{Out Gain}};
+\node[outb] (hpf)    at (1.8,-13.2) {20\,Hz Butterworth highpass};
+\node[term] (stereo) at (1.8,-14.5) {Stereo out};
+\node[mdl]  (field)  at (7.6,-11.9) {Plate view\\displacement / velocity};
+\node[outb,blk] (meters) at (7.6,-13.2) {Peak meters};
+
+\draw[ar] (bank) -- (pmix);
+\draw[ar] (pmix) -- (og);
+\draw[ar] (og) -- (hpf);
+\draw[ar] (hpf) -- (stereo);
+\draw[pub] ([yshift=2mm]bank.east) -- (4.4,-8.2) -- (4.4,-11.9) -- (field.west);
+\draw[ar] (hpf.east) -- (meters.west);
+
+\end{tikzpicture}
+}
+\caption{The complete signal path. Grey: the model, built on the message and
+background threads once per plate. Orange: excitation. Blue: the filter bank
+and what tunes it. Red: the two nonlinear feedback paths. Green: output.
+Dashed arrows carry state rather than signal. Everything but the grey column
+runs per sample on the audio thread. Italics name the control as it is
+labelled in the interface.}
+\label{fig:signalpath}
+\end{figure}
+
+
 \subsection{Modal decomposition}
 
 Expanding $w(\bm{x},t) = \sum_k q_k(t)\, \varphi_k(\bm{x})$ in
@@ -502,6 +606,7 @@ return silence. The bank is
 allocation-free and retunable on the audio thread.
 
 \subsection{Frequency and damping laws}
+\label{sec:damping}
 
 The user selects the fundamental in hertz and the bank plays at
 %
@@ -1305,6 +1410,9 @@ the FEM sensitivities $g_k$ of \S\ref{sec:tension}, so it costs one scalar
 per audio block on any drawn shape.
 
 \section{Implementation summary}
+
+Figure~\ref{fig:signalpath} collects the whole chain in one place;
+the table below says which thread each stage runs on.
 
 \begin{center}
 \begin{tabular}{llp{7.2cm}}
