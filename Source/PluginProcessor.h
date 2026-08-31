@@ -94,6 +94,45 @@ public:
         return first;
     }
 
+    /** How the editor window was left, so that reopening it does not reset it.
+
+        The editor is destroyed when the window closes and built again from
+        scratch when it reopens, so everything it holds by itself — which mode
+        it was in, which view was selected, where the 3D camera was pointing —
+        is lost every time unless something that outlives the window keeps it.
+        This is that something, for the same reason claimSplash() lives here.
+
+        None of it is serialised, and deliberately so: it describes a window
+        and not a sound, so it has no business in a preset (where it would
+        move the interface about every time a preset was recalled) nor in the
+        session state. A reopened plugin therefore starts from these defaults,
+        which is the right answer for a state whose whole purpose is to
+        survive a window closing rather than a host quitting.
+
+        `everOpened` separates the first window of a run from a rebuilt one.
+        The first derives its mode from whether a model exists; later ones
+        restore what the user left.
+
+        The 3D camera defaults repeat FemView3DComponent's own, so a window
+        opened before the 3D view was ever shown restores it unchanged. */
+    struct EditorState
+    {
+        bool everOpened = false;
+
+        bool designMode = true;
+        bool advanced   = false;
+        int  viewId     = 1;      // viewBox item id, 1..5
+        int  toolId     = 5;      // toolBox item id (5 = Edit boundary)
+        int  displayMode = 0;     // the Mode knob, when a mode is displayed
+        double aspect   = 1.2;
+
+        float azimuth   = 0.6f;
+        float elevation = 0.9f;
+        float zoom      = 1.0f;
+    };
+
+    EditorState editorState;
+
     /** MIDI learn, editor <-> audio thread.
 
         `midiLearnArmed` is the source index the editor is waiting to map, or
@@ -194,7 +233,13 @@ private:
         way in. The computed modes are deliberately *not* included: they are
         megabytes of mode shapes, and recomputing them from the geometry is
         what Compute already does. */
-    void storeShapeInState();
+    /** Folds the geometry and the modal cache into `tree`, replacing any
+        already there, so that a preset and a session save the same three
+        things by the same route. The preset path passes apvts.state itself
+        (PresetManager copies the tree after this runs); the session path
+        passes a copy, so that a host calling getStateInformation off the
+        message thread does not mutate the live tree. */
+    void foldExtrasInto (juce::ValueTree tree) const;
     void loadShapeFromState();
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -205,6 +250,7 @@ private:
     void shapeFromTree (const juce::ValueTree& tree);
     juce::ValueTree modesToTree() const;             // serialise currentModel
     bool modesFromTree (const juce::ValueTree&);     // rebuild + publish model
+
     static ShapeData makeDefaultShape();
 
     // --- message-thread state -----------------------------------------------

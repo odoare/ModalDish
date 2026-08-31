@@ -108,6 +108,15 @@ void ShapeCanvas::setAspect (double a)
     }
 }
 
+void ShapeCanvas::restoreToolAndAspect (Tool t, double a)
+{
+    tool = t;
+    aspect = juce::jlimit (0.2, 5.0, a);
+    rawStroke.clear();
+    draggedVertex = -1;
+    repaint();
+}
+
 void ShapeCanvas::makeStandardShape (bool rectangle)
 {
     const double maxDim = 1.0 - 2.0 * margin;

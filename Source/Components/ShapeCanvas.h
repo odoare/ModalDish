@@ -58,6 +58,16 @@ public:
     /** Aspect ratio (width / height) of the standard shapes; regenerates the
         current shape when it is an ellipse or a rectangle. */
     void setAspect (double a);
+    double getAspect() const noexcept                   { return aspect; }
+
+    /** Reinstates a tool and an aspect without touching the geometry.
+
+        setTool and setAspect rebuild the outline for Ellipse and Rectangle,
+        which is exactly what picking one of them should do. It is exactly
+        what reopening the editor must not do: the shape on screen is the one
+        the user left, and restoring the tool it was left under would
+        regenerate a fresh ellipse over the top of it. */
+    void restoreToolAndAspect (Tool t, double a);
 
     /** Number of border points Ns (= number of segments). Segment positions
         are redistributed uniformly; each new segment inherits the condition

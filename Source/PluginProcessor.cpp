@@ -116,17 +116,30 @@ ModalDishAudioProcessor::ModalDishAudioProcessor()
                      BinaryData::namedResourceListSize,
                      BinaryData::getNamedResource)
 {
-    // A preset only carries apvts.state, so the geometry has to travel inside
-    // it. Saving folds the shape in; loading takes it back out, rebuilds the
-    // mesh and starts a modal computation — the same background job Compute
-    // runs, so the plate keeps sounding the previous model until the new one
-    // is ready rather than falling silent.
-    presetManager.onBeforeSave = [this] { storeShapeInState(); };
+    // A preset carries apvts.state and nothing else, so everything that is
+    // not a parameter has to travel inside it: the geometry, and the modal
+    // data computed from it (see foldExtrasInto).
+    //
+    // The modes are worth their megabytes. Without them a preset arrives as a
+    // shape and nothing else, and the plate stays silent for as long as the
+    // eigensolve takes — seconds at a modest Grid, tens of seconds at the top
+    // of the range — which is a long wait for a preset being auditioned
+    // rather than chosen, and it is silence rather than merely a delay,
+    // because there is no previous model to go on sounding. The solve stays
+    // as the fallback: for a preset saved before its plate was ever computed,
+    // and for one whose cached modes do not match the mesh the shape rebuilds
+    // to.
+    //
+    // This one folds into the live tree because PresetManager copies
+    // apvts.state itself, just after. That is safe only because it runs on
+    // the message thread, from the Save button; getStateInformation, which a
+    // host may call from a thread of its own, folds into a copy instead.
+    presetManager.onBeforeSave = [this] { foldExtrasInto (apvts.state); };
     presetManager.onAfterLoad  = [this]
     {
         loadShapeFromState();
         invalidateShape();
-        if (buildMesh())
+        if (buildMesh() && ! modesFromTree (apvts.state.getChildWithName ("MODES")))
             computeModes();
         sendChangeMessage();
     };
@@ -935,11 +948,28 @@ namespace
 }
 
 /*  The computed modal data (eigenvalues, tension coefficients, FEM shapes,
-    statistical tail) is cached inside the plugin state, so loading a session
-    or preset publishes the model immediately instead of re-running the
-    eigensolver. The mesh itself is NOT serialised: generateMesh is a pure
-    deterministic function of the outline and density, so it is rebuilt on
-    load and only the vertex count is stored as a consistency check. */
+    statistical tail) is cached inside apvts.state, next to the shape it was
+    computed from, so that loading a session or a preset publishes the model
+    immediately instead of re-running the eigensolver.
+
+    Both live in apvts.state rather than beside it because a preset carries
+    that tree and nothing else: putting them anywhere else would give sessions
+    a cache and leave presets without one.
+
+    The mesh itself is NOT serialised. generateMesh is a deterministic
+    function of the outline and the density, both of which the state already
+    carries, so it is rebuilt on load and only its vertex count is stored, as
+    a consistency check on what the shapes are indexed against.
+
+    Size, since it is the reason this could have gone either way: the cache is
+    numFemModes x numVertices floats, which is 0.10 MB for the shipped plate
+    at Grid 16, 1.4 MB for it at Grid 48, and 2.2 MB for the largest plate the
+    canvas holds at Grid 48. juce::var stores the blocks as base64 and
+    copyXmlToBinary gzips the result, and the two cancel almost exactly, so
+    what reaches the disk is those figures. Against that, an eigensolve at the
+    top of the Grid range is tens of seconds during which the plate is silent
+    (on a fresh load there is no previous model to go on sounding), so the
+    megabytes buy something a listener actually notices. */
 juce::ValueTree ModalDishAudioProcessor::modesToTree() const
 {
     if (currentModel == nullptr || currentModel->mesh == nullptr
@@ -1016,11 +1046,18 @@ bool ModalDishAudioProcessor::modesFromTree (const juce::ValueTree& t)
     return true;
 }
 
-void ModalDishAudioProcessor::storeShapeInState()
+void ModalDishAudioProcessor::foldExtrasInto (juce::ValueTree tree) const
 {
-    auto state = apvts.state;
-    state.removeChild (state.getChildWithName ("SHAPE"), nullptr);
-    state.appendChild (shapeToTree(), nullptr);
+    // Both children are removed first and unconditionally. A stale cache left
+    // behind by a plate that has since been edited would be offered to the
+    // next load as though it described the shape saved beside it, and the
+    // vertex-count check is not certain to catch that.
+    tree.removeChild (tree.getChildWithName ("SHAPE"), nullptr);
+    tree.appendChild (shapeToTree(), nullptr);
+
+    tree.removeChild (tree.getChildWithName ("MODES"), nullptr);
+    if (auto modes = modesToTree(); modes.isValid())
+        tree.appendChild (modes, nullptr);
 }
 
 void ModalDishAudioProcessor::loadShapeFromState()
@@ -1030,12 +1067,16 @@ void ModalDishAudioProcessor::loadShapeFromState()
 
 void ModalDishAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
+    // Folded into the copy, not into apvts.state: a host may call this from
+    // a thread of its own, and mutating the live parameter tree from there
+    // would race the message thread reading it. The result is byte for byte
+    // the tree a preset saves, so both restore by the same path.
+    auto params = apvts.copyState();
+    foldExtrasInto (params);
+
     juce::ValueTree root ("ModalDishState");
     root.setProperty ("version", stateVersion, nullptr);
-    root.appendChild (apvts.copyState(), nullptr);
-    root.appendChild (shapeToTree(), nullptr);
-    if (auto modes = modesToTree(); modes.isValid())
-        root.appendChild (modes, nullptr);
+    root.appendChild (params, nullptr);
 
     if (auto xml = root.createXml())
         copyXmlToBinary (*xml, destData);
@@ -1051,12 +1092,15 @@ void ModalDishAudioProcessor::setStateInformation (const void* data, int sizeInB
     if (! root.hasType ("ModalDishState"))
         return;
 
+    // The shape and the modal cache live inside this child, so there is
+    // nothing to restore without it.
     const auto params = root.getChildWithName (apvts.state.getType());
-    if (params.isValid())
-        apvts.replaceState (params);
+    if (! params.isValid())
+        return;
+    apvts.replaceState (params);
 
-    shapeFromTree (root.getChildWithName ("SHAPE"));
-    pendingModesTree = root.getChildWithName ("MODES").createCopy();
+    loadShapeFromState();
+    pendingModesTree = apvts.state.getChildWithName ("MODES").createCopy();
 
     // Rebuild mesh + modes on the message thread.
     triggerAsyncUpdate();

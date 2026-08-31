@@ -214,7 +214,8 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
     // odd ids stay "velocity" and selectedQuantity() needs no special case.
     viewBox.addItem ("Displacement 3D", 4);
     viewBox.addItem ("Velocity 3D", 5);
-    viewBox.setSelectedId (1, juce::dontSendNotification);
+    viewBox.setSelectedId (juce::jlimit (1, 5, processor.editorState.viewId),
+                           juce::dontSendNotification);
     viewBox.onChange = [this]
     {
         // The Mode knob picks a shape to display; it means nothing while the
@@ -229,7 +230,10 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
 
     fem::theme::styleBox (modeViewKnob, "Mode", fem::theme::accent);
     modeViewKnob.setRange (0, fem::maxModes, 1);
-    modeViewKnob.setValue (0, juce::dontSendNotification);
+    modeViewKnob.setValue (processor.editorState.displayMode, juce::dontSendNotification);
+    // Normally set by viewBox.onChange, which a restored selection does not
+    // fire: the Mode knob means nothing while the view shows live motion.
+    modeViewKnob.setEnabled (! showingLiveField());
     modeViewKnob.onValueChange = [this] { refreshField(); refreshStatus(); };
     addAndMakeVisible (modeViewKnob);
 
@@ -244,7 +248,8 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
     toolBox.addItem ("Rectangle", 3);
     toolBox.addItem ("Rotate", 4);
     toolBox.addItem ("Edit boundary", 5);
-    toolBox.setSelectedId (5, juce::dontSendNotification);
+    toolBox.setSelectedId (juce::jlimit (1, 6, processor.editorState.toolId),
+                           juce::dontSendNotification);
     toolBox.onChange = [this]
     {
         canvas.setTool ((fem::ShapeCanvas::Tool) (toolBox.getSelectedId() - 1));
@@ -259,9 +264,16 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
     fem::theme::styleBox (aspectKnob, "Aspect", fem::theme::geomAccent);
     aspectKnob.setRange (0.25, 4.0, 0.01);
     aspectKnob.setSkewFactorFromMidPoint (1.0);
-    aspectKnob.setValue (1.2, juce::dontSendNotification);
+    aspectKnob.setValue (processor.editorState.aspect, juce::dontSendNotification);
     aspectKnob.onValueChange = [this] { canvas.setAspect (aspectKnob.getValue()); };
     addAndMakeVisible (aspectKnob);
+
+    // Both restored together, and quietly: the canvas rebuilds its outline
+    // when it is given Ellipse or Rectangle, and the shape on screen when a
+    // window reopens is the one that was left there, not a fresh one.
+    canvas.restoreToolAndAspect (
+        (fem::ShapeCanvas::Tool) (toolBox.getSelectedId() - 1),
+        processor.editorState.aspect);
 
     fem::theme::styleBox (pointsKnob, "Points", fem::theme::geomAccent);
     pointsKnob.setRange (1, 12, 1);
@@ -392,14 +404,22 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
                         juce::String::charToString ((juce::juce_wchar) fem::sourceLabel (i)),
                         fem::id::sourceOn[i], fem::theme::sourceAccent);
 
+    plateView3D.setOrientation (processor.editorState.azimuth,
+                                processor.editorState.elevation);
+    plateView3D.setZoom (processor.editorState.zoom);
+
     processor.addChangeListener (this);
     refreshMeshAndField();
     refreshStatus();
-    // Reopening on an already-computed plate lands on the playable view.
-    setDesignMode (processor.getCurrentModel() == nullptr);
+    // The first window of a run lands on the playable view if there is
+    // already something to play; a reopened one goes back to whichever side
+    // it was closed on, which is what makes closing the window a no-op.
+    setDesignMode (processor.editorState.everOpened
+                       ? processor.editorState.designMode
+                       : processor.getCurrentModel() == nullptr);
     startTimerHz (30);
 
-    setAdvancedVisible (false);   // also sets the window size
+    setAdvancedVisible (processor.editorState.advanced);   // also sets the window size
 
     // First window of this run only: reopening the editor must not replay the
     // splash, which is why the flag lives on the processor.
@@ -409,8 +429,32 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
 
 ModalDishAudioProcessorEditor::~ModalDishAudioProcessorEditor()
 {
+    saveEditorState();
     processor.removeChangeListener (this);
     setLookAndFeel (nullptr);
+}
+
+void ModalDishAudioProcessorEditor::saveEditorState()
+{
+    // Written once, here, rather than at each control: the destructor runs
+    // whenever the window closes, it is the only moment that matters, and the
+    // 3D camera has no change callback to hang a write on anyway.
+    auto& st = processor.editorState;
+    st.designMode  = designMode;
+    st.advanced    = advancedVisible;
+    st.viewId      = viewBox.getSelectedId();
+    st.toolId      = toolBox.getSelectedId();
+    st.displayMode = (int) modeViewKnob.getValue();
+    st.aspect      = aspectKnob.getValue();
+    st.azimuth     = plateView3D.projection().getAzimuth();
+    st.elevation   = plateView3D.projection().getElevation();
+    st.zoom        = plateView3D.getZoom();
+    st.everOpened  = true;
+
+    // The two overlays are not restored. A preset browser or a marker panel
+    // that reappeared over the plate on its own would be a window doing
+    // something nobody asked it to, where a view selector coming back is a
+    // window remembering.
 }
 
 //==============================================================================

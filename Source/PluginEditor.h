@@ -63,6 +63,10 @@ private:
         filter bank, and raising it mid-performance can produce a very loud
         transient. Putting it behind a mode change is the point. */
     void setDesignMode (bool design);
+    /** Copies the window's own state onto the processor, which outlives it,
+        so that closing and reopening the editor is not a reset. Called from
+        the destructor; see ModalDishAudioProcessor::EditorState. */
+    void saveEditorState();
     void updateWindowSize();
     void setAdvancedVisible (bool shouldShow);
     void syncShapeToProcessor (bool geometryChanged);

@@ -1426,9 +1426,72 @@ Model publication & message $\to$ audio & atomic pointer, generation-acknowledge
 Note routing \S\ref{sec:notes} & audio & per-channel; strike and tune are separate calls \\
 Filter bank \eqref{eq:modal} & audio & allocation-free; one bank, retunes throttled \\
 Nonlinearities \eqref{eq:gamma}, \eqref{eq:cascade} & audio & decimated $\gamma$ update; bounded feedback \\
+State save / restore \S\ref{sec:persistence} & message & parameters, geometry and the modal cache \\
 \bottomrule
 \end{tabular}
 \end{center}
+
+\subsection{Persistence: what a saved plate carries}
+\label{sec:persistence}
+
+A saved state --- a preset file or a host session, which are written by the
+same route and therefore carry the same things --- holds three items:
+
+\begin{enumerate}
+\item the parameters;
+\item the \emph{geometry}: the outline and the arc-parameterised boundary
+  segments of \S\ref{sec:bc}, a few kilobytes;
+\item the \emph{modal data}: $\lambda_k$, the tension sensitivities $g_k$ of
+  \S\ref{sec:tension}, the mass-normalised FEM shapes $\bm\varphi_k$ and the
+  parameters of the statistical tail of \S\ref{sec:tail}.
+\end{enumerate}
+
+The mesh is deliberately \emph{not} stored. Mesh generation
+(\S\ref{sec:mesh}) is a deterministic function of the outline and the target
+element size, both of which are stored, so rebuilding it on load costs less
+than reading it would. Only its vertex count travels, as a check that the
+stored shapes are indexed against the mesh that comes back.
+
+The modal data is stored, and it is the only part large enough for the
+decision to be interesting. Its size is one float per mesh vertex per FEM
+mode,
+%
+\begin{equation}
+  4\, m\, N_v \ \text{bytes},
+  \qquad m = \min\!\left(256,\ \max\!\left(8,\ \tfrac{n}{6}\right)\right),
+  \label{eq:cachesize}
+\end{equation}
+%
+everything else (the $2 \times 1024$ scalars of $\lambda$ and $g$, four floats
+per tail mode) being under $30$\,kB at any setting. Measured on the meshes the
+Grid control actually produces:
+
+\begin{center}
+\begin{tabular}{rrrrr}
+\toprule
+& \multicolumn{2}{c}{shipped plate} & \multicolumn{2}{c}{largest plate in the canvas} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Grid & $N_v$ / $m$ & cache & $N_v$ / $m$ & cache \\
+\midrule
+$16$ & $149$ / $92$   & $0.10$\,MB & $227$ / $142$  & $0.18$\,MB \\
+$24$ & $326$ / $207$  & $0.33$\,MB & $497$ / $256$  & $0.58$\,MB \\
+$32$ & $569$ / $256$  & $0.66$\,MB & $858$ / $256$  & $0.98$\,MB \\
+$48$ & $1258$ / $256$ & $1.42$\,MB & $1915$ / $256$ & $2.15$\,MB \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The blocks are written as base64 inside the state's XML and the whole is then
+gzipped, and the two very nearly cancel, so the figures above are also what
+reaches the disk.
+
+Those megabytes buy the elimination of an eigensolve on every load. The times
+of \S\ref{sec:eig} are the cost avoided: seconds at a moderate mesh, tens of
+seconds at the top of the Grid range. That wait would be silence rather than
+merely a delay, because the model publication of \S\ref{sec:filterbank} keeps
+the \emph{previous} plate sounding while a new one is computed, and on a fresh
+load there is no previous plate. The solve remains as the fallback, taken when
+the cache is absent or when its vertex count disagrees with the rebuilt mesh.
 
 The numerical core is pure C++17 with no JUCE dependency and is validated
 by a console test suite; it lives in the \code{FxmeTools} submodule, split

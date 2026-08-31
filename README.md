@@ -243,6 +243,13 @@ The split is not cosmetic. *Modes* reallocates and retunes the entire filter
 bank, and raising it while the plate is ringing can produce a very loud
 transient, so it lives on the design side where you are not playing.
 
+Closing the plugin window and reopening it is a no-op: the mode you were in,
+the view you had selected, the tool, the Cascade column and the angle you had
+turned the 3D plate to all come back as you left them. None of that is in the
+preset or in the session, on purpose. It describes a window rather than a
+sound, so recalling a preset never moves the interface about, and a reloaded
+session opens on the defaults.
+
 ### Modal design
 
 ![Modal design mode](doc/img/design.png)
@@ -431,6 +438,8 @@ plate used to run out of spectrum well below Nyquist.
 
 ### FREQUENCY CONTROL
 
+![The frequncy controls](doc/img/frequency-controls.png)
+
 | Control | Range | Default | What it does |
 | --- | --- | --- | --- |
 | **Frequency** | 1 - 2000 Hz | 110 Hz | where mode 1 lands. Everything else follows the ratios the geometry gives it. |
@@ -453,6 +462,8 @@ in samples, so it lasts as long at 96 kHz as at 48.
 > Technical paper: *Playing the plate: notes, channels and glide*.
 
 ### DYNAMICS
+
+![The dynamics controls](doc/img/dynamics-controls.png)
 
 | Control | Range | Default | What it does |
 | --- | --- | --- | --- |
@@ -491,6 +502,8 @@ pumped.
 
 ### CASCADE (the **A >** column)
 
+![The advanced cascad controls](doc/img/cascad-controls.png)
+
 These voice the ladder rather than sizing it. Useful workflow: set them with
 *Cascade* already up, then bring *Cascade* to where you want it.
 
@@ -518,6 +531,8 @@ in seconds and converted when the rate is known.
 
 ### HAMMER CONTROL
 
+![The mouse hammer controls](doc/img/hammer-controls.png)
+
 | Control | Range | Default | What it does |
 | --- | --- | --- | --- |
 | **Duration** | 0.1 - 50 ms | 3 ms | length of the half-sine shock |
@@ -537,6 +552,8 @@ depletion, not more level.
 > Technical paper: *Excitation, pickup, gain compensation*.
 
 ### IO
+
+![The IO controls](doc/img/io-controls.png)
 
 | Control | Range | Default | What it does |
 | --- | --- | --- | --- |
@@ -761,13 +778,43 @@ Linux, `~/Library/Application Support/ModalDish/Presets` on macOS,
 `%APPDATA%\ModalDish\Presets` on Windows), and any `.xml` dropped into
 [`Source/Presets/`](Source/Presets/) is embedded as a factory preset.
 
-A preset carries the parameters **and the plate geometry**: the outline,
-segment positions and boundary conditions are folded into the state on save
-and read back on load. It does *not* carry the computed modes, which are
-megabytes of mode shapes. Loading a preset rebuilds the mesh and starts the
-same background computation the *Compute* button runs, so the plate goes on
-sounding the previous model until the new one is ready rather than falling
-silent.
+### What a preset, and a session, actually contain
+
+Three things, and they are the same three whether the state is being written
+into a preset file or into a DAW session. Both travel by the same route, so
+neither can carry something the other does not.
+
+| | Stored | Restored |
+| --- | --- | --- |
+| **Parameters** | every knob, switch and mapping | directly, on load |
+| **Geometry** | the outline, the segment positions and their boundary conditions | the mesh is rebuilt from it (fast, milliseconds) |
+| **Modal data** | the eigenvalues, the tension sensitivities, the mode shapes and the statistical tail | published straight to the audio thread, with no eigensolve |
+
+The **mesh is not stored**, because it does not need to be: it is a
+deterministic function of the outline and *Grid*, both of which are, so
+rebuilding it costs less than reading it would. Only its vertex count travels,
+as a check that the stored mode shapes are indexed against the mesh that comes
+back.
+
+The **modal data is stored**, which is the part worth knowing about, because
+it is what a plate costs to compute. It is one float per mesh vertex per mode:
+about 0.1 MB for the shipped plate at *Grid* 16, 1.4 MB for it at *Grid* 48,
+and 2.2 MB for the largest plate the canvas holds at *Grid* 48. The state is
+gzipped on the way out, which almost exactly cancels the base64 the blocks are
+written as, so those are also the figures that reach the disk.
+
+That is a large preset by the standards of a plugin whose parameters would fit
+in a few kilobytes, and it is worth it: without the cache, loading a preset
+means waiting out an eigensolve, which is seconds at a modest *Grid* and tens
+of seconds at the top of the range. There is no previous model to go on
+sounding on a fresh load, so that wait is silence. With the cache the plate
+sounds as soon as the preset lands.
+
+The eigensolve is still there as the fallback, and runs in the background the
+way the *Compute* button does, when the cache is missing (a preset saved
+before its plate was ever computed) or does not match the mesh the geometry
+rebuilds to. That is the one case where a loaded plate is briefly silent, and
+the progress bar says so.
 
 ## Building
 
