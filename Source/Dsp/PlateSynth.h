@@ -281,6 +281,7 @@ public:
         float cascOverlap   = 0.1f;    // target bandwidth floor, x local spacing
         int   cascWindow    = 4;       // source window, bands below each rung
         float cascDeplete   = 0.07f;   // source-band energy loss while pumping
+        bool  cascModalInject = false;   // see updateCascadeWeights
 
         Pickup pickups[fem::maxPickups];
         Source sources[fem::maxSources];
@@ -570,6 +571,9 @@ private:
     float cascEff = 0.0f;                // the cascade amount, as the DSP sees it
     int bandStart[numCascadeBands + 1] {};        // mode-index range of each band
     float cascadeW[fem::maxModes] {};    // injection weights (bands >= 1 only)
+    // Fixed per-mode injection weights, the alternative to phi_k(x_h) above.
+    // Regenerated with the plate (they carry srcAmp), never with the hit.
+    float cascInjRand[fem::maxModes] {};
     float prevBandOut[numCascadeBands] {};        // per-band output, last sample
     float gateEnv[numCascadeBands] {};   // per-band injection envelope (0..1)
     float attackCoef[numCascadeBands] {};// per-band attack one-pole coefficient

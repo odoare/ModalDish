@@ -162,6 +162,7 @@ ModalDishAudioProcessor::ModalDishAudioProcessor()
     pCascOverlap = apvts.getRawParameterValue (fem::id::cascOverlap);
     pCascWindow  = apvts.getRawParameterValue (fem::id::cascWindow);
     pCascDeplete = apvts.getRawParameterValue (fem::id::cascDeplete);
+    pCascModalInject = apvts.getRawParameterValue (fem::id::cascModalInject);
     pNumModes = apvts.getRawParameterValue (fem::id::numModes);
     for (int i = 0; i < fem::maxPickups; ++i)
     {
@@ -325,6 +326,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout ModalDishAudioProcessor::cre
     p.push_back (std::make_unique<FloatParam> (
         juce::ParameterID (fem::id::cascDeplete, 1), "Casc Depl",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.0f, 0.5f), 0.07f));
+
+    // Defaults off, which is the injection every existing patch was voiced
+    // against. On is the more physical of the two (see
+    // PlateSynth::updateCascadeWeights) and is deliberately not the default,
+    // because it changes the sound of a shimmer that is already tuned.
+    p.push_back (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID (fem::id::cascModalInject, 1), "Casc Modal Inj", false));
 
     // Default high enough that the statistical tail (above the FEM modes)
     // takes part out of the box.
@@ -562,6 +570,7 @@ void ModalDishAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     params.cascOverlap   = pCascOverlap->load();
     params.cascWindow    = (int) pCascWindow->load();
     params.cascDeplete   = pCascDeplete->load();
+    params.cascModalInject = pCascModalInject->load() > 0.5f;
     for (int i = 0; i < fem::maxPickups; ++i)
     {
         auto& pk = params.pickups[i];

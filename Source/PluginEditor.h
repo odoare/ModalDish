@@ -255,6 +255,11 @@ private:
     std::unique_ptr<SliderAttachment> cascDriveAtt, cascAttAtt, cascRelAtt,
                                       cascOverAtt, cascWinAtt;
 
+    /** Cascade injection point: off is the hit point, on is the fixed
+        per-mode weighting. A button rather than a sixth number box, because
+        it chooses between two behaviours rather than setting an amount. */
+    std::unique_ptr<fxme::FxmeButton> cascModalInjButton;
+
     // Right column — output. The pickup positions used to live here; they are
     // on the plate now, where they belong, and the room went to metering.
     fxme::FxmeNumberBox inGainKnob, outGainKnob;

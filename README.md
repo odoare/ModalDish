@@ -521,6 +521,38 @@ These voice the ladder rather than sizing it. Useful workflow: set them with
 | **Attack** | 1 - 1000 ms/band | 30 | gate attack, growing with the band's height |
 | **Release** | 20 - 4000 ms | 2000 | gate release: how the pumping tails off |
 | **Overlap** | 0 - 1 | 0.1 | bandwidth floor on the receiving modes |
+| **Modal inject** | off / on | off | where the ladder's output re-enters the plate |
+
+**Modal inject** chooses where the ladder puts its output back into the
+plate. Off, the default, injects it at the hit point, through the same mode
+shapes a hammer strike uses. On, it injects through a fixed per-mode
+weighting instead.
+
+On is the more physical of the two. The nonlinear coupling of a real plate is
+an integral over the whole plate and contains no strike position at all; the
+strike matters only because it decides which modes are ringing for the
+coupling to work on. It is also the choice the cascade's *input* side already
+makes, for the same reason: the ladder is driven by the plate's motion rather
+than by what a pickup hears, because the plate does not know where the
+microphone is either. Off applies position a second time, on the way back in.
+
+You do not lose the hit point either way. It still decides which modes ring,
+so it still reaches the ladder. What changes is how much: measured on the
+plate's motion across five strike positions, the shimmer varies by 11 dB with
+the default injection and by 2.9 dB with *Modal inject* on, the remainder
+being the honest part that comes through the modes.
+
+Both are worth having, which is why this is a switch and not a correction.
+Off ties the shimmer's character tightly to where you play, which is
+expressive even though it is not what a plate does. On is steadier and more
+even across the plate. One case is worth knowing about: a strike on a
+symmetric plate's exact centre is a node of most modes, so few of them ring
+and the cascade is much weaker — with *Modal inject* on that is audible, and
+with it off the injection partly hides it.
+
+It ships off, so every existing patch sounds as it did. The two have the same
+injection strength on average, so *Drive*, the gate times and the voiced
+defaults carry across unchanged.
 
 Two things about **Drive**. It is not gradual: at *Cascade* 1 and the shipped
 *Force*, everything from 0.1 to 4 is silent and 4 to 16 covers 76 dB. And

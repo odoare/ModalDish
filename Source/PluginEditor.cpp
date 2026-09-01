@@ -362,6 +362,10 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
     addCasc (cascRelKnob, "Release", fem::id::cascRelease, cascRelAtt);
     addCasc (cascOverKnob, "Overlap", fem::id::cascOverlap, cascOverAtt);
 
+    cascModalInjButton = std::make_unique<fxme::FxmeButton> (
+        apvts, fem::id::cascModalInject, "Modal inject", fem::theme::dynGroup);
+    addAndMakeVisible (*cascModalInjButton);
+
     // --- right: I/O --------------------------------------------------------------
     auto addIo = [&] (fxme::FxmeNumberBox& s, const char* text, const char* id,
                       std::unique_ptr<SliderAttachment>& att)
@@ -471,6 +475,8 @@ void ModalDishAudioProcessorEditor::setAdvancedVisible (bool shouldShow)
     for (auto* k : { &cascDriveKnob, &cascWinKnob, &cascAttKnob,
                      &cascRelKnob, &cascOverKnob })
         k->setVisible (shouldShow && ! designMode);
+    if (cascModalInjButton != nullptr)
+        cascModalInjButton->setVisible (shouldShow && ! designMode);
     updateWindowSize();
     repaint();
 }
@@ -508,6 +514,8 @@ void ModalDishAudioProcessorEditor::setDesignMode (bool design)
     for (auto* k : { &cascDriveKnob, &cascWinKnob, &cascAttKnob,
                      &cascRelKnob, &cascOverKnob })
         k->setVisible (advancedVisible && ! design);
+    if (cascModalInjButton != nullptr)
+        cascModalInjButton->setVisible (advancedVisible && ! design);
 
     // The switches follow the plate: in modal design there are no markers on
     // screen for them to refer to.
@@ -1415,7 +1423,11 @@ void ModalDishAudioProcessorEditor::resized()
 
     if (advancedVisible && ! designMode)
     {
-        cascPanel = colB.removeFromTop (2 * padding + titleH + 5 * boxH + 4 * gap);
+        // Five boxes, then the injection switch under them: it is the odd
+        // one out in this column, so it sits apart from the numbers rather
+        // than in the middle of them.
+        const int injectH = 26;
+        cascPanel = colB.removeFromTop (2 * padding + titleH + 5 * boxH + 5 * gap + injectH);
         auto r = cascPanel.reduced (padding);
         r.removeFromTop (titleH);
         for (auto* k : { &cascDriveKnob, &cascWinKnob, &cascAttKnob,
@@ -1424,6 +1436,8 @@ void ModalDishAudioProcessorEditor::resized()
             k->setBounds (r.removeFromTop (boxH));
             r.removeFromTop (gap);
         }
+        if (cascModalInjButton != nullptr)
+            cascModalInjButton->setBounds (r.removeFromTop (injectH).reduced (2, 0));
     }
 
     // Left: action strip at the bottom, views above. In design mode the

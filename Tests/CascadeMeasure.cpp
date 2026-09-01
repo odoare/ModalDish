@@ -160,6 +160,9 @@ namespace
         float force    = 6.0f;
         float outX     = 0.5f;
         float outY     = 0.47f;
+        float hitX     = 0.38f;
+        float hitY     = 0.45f;
+        bool  modalInject = false;
     };
 
     /** Renders one strike. When `modalProbe` is given it receives the modal
@@ -183,8 +186,9 @@ namespace
         p.pickups[0].x = patch.outX;
         p.pickups[0].y = patch.outY;
         p.pickups[0].on = true;
+        p.cascModalInject = patch.modalInject;
         synth.update (&model, p);
-        synth.strike (0.38f, 0.45f, 1.0f);
+        synth.strike (patch.hitX, patch.hitY, 1.0f);
 
         const int n = (int) (renderSeconds * sampleRate);
         const int probeAt = (int) (probeSeconds * sampleRate);
@@ -424,6 +428,46 @@ int main()
     }
     std::printf ("  spread %.2f dB\n", spread (byPickup));
     check (spread (byPickup) < 0.5, "the cascade drive ignores the output point");
+
+    // ---- 2b. Where the ladder re-enters the plate --------------------------
+    // The von Karman coupling is an overlap integral over the whole plate and
+    // contains no strike position, so the physical answer is that moving the
+    // hammer must not change how much shimmer is made — only which modes are
+    // ringing to feed it. "Modal inject" is the option that does that; the
+    // default injects at the hit point instead, and is expected to vary.
+    //
+    // Both are measured on the plate's motion, so what is compared is what
+    // the cascade *does*, not what one pickup hears of it.
+    std::printf ("\n== Hit-point dependence of the shimmer (high-mode motion, dB) ==\n");
+    // Deliberately off-centre. A hit exactly on the plate's symmetry centre
+    // is a degenerate case: it is a node of most modes, so few of them ring
+    // and the cascade is legitimately far weaker whichever injection is
+    // chosen. Including it would measure that, not the injection.
+    const float hitX[] = { 0.38f, 0.44f, 0.30f, 0.60f, 0.55f };
+    const float hitY[] = { 0.45f, 0.56f, 0.60f, 0.38f, 0.62f };
+    std::vector<double> byHitPoint, byHitModal;
+    for (int i = 0; i < 5; ++i)
+    {
+        std::vector<float> a, b;
+        Patch hp; hp.hitX = hitX[i]; hp.hitY = hitY[i]; hp.modalInject = false;
+        render (model, hp, &a);
+        Patch mp = hp; mp.modalInject = true;
+        render (model, mp, &b);
+        byHitPoint.push_back (highModeMotionDb (a));
+        byHitModal.push_back (highModeMotionDb (b));
+        std::printf ("  hit (%.2f, %.2f)   hit-point %8.1f   modal %8.1f\n",
+                     (double) hitX[i], (double) hitY[i],
+                     byHitPoint.back(), byHitModal.back());
+    }
+    std::printf ("  spread: hit-point %.2f dB, modal %.2f dB\n",
+                 spread (byHitPoint), spread (byHitModal));
+    // Not zero the way the pickup test is: the hit still decides which modes
+    // ring, so it still reaches the ladder through the band sums it drives.
+    // What must go is the second, artificial dependence — the injection being
+    // re-localised at the hammer — so modal has to be markedly the flatter of
+    // the two.
+    check (spread (byHitModal) < 0.6 * spread (byHitPoint),
+           "modal injection depends far less on the hit point (< 60% of the spread)");
 
     // ---- 3. ...but must still follow the Cascade knob ----------------------
     std::printf ("\n== Cascade knob (4 kHz and up, dB at 300 ms) ==\n");

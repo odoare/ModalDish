@@ -10,6 +10,8 @@
 
 #include "PlateSynth.h"
 
+#include <FxmeTools/dsp/DeterministicRandom.h>
+
 namespace fem
 {
 
@@ -337,9 +339,15 @@ void PlateSynth::update (const ModalModel* newModel, const Params& params)
            ! juce::approximatelyEqual (params.cascAttackMs,  current.cascAttackMs)
         || ! juce::approximatelyEqual (params.cascReleaseMs, current.cascReleaseMs);
 
+    const bool injectChanged = params.cascModalInject != current.cascModalInject;
+
     current = params;
     if (envChanged)
         updateCascadeEnvelopes();
+    // Cheap enough here: the weights are one multiply per mode, where a
+    // retune (which also rebuilds them) is far more than this needs.
+    if (injectChanged)
+        updateCascadeWeights();
 
     // The knob sets the pitch outright (glide belongs to played notes), and
     // so does a model swap.
@@ -401,6 +409,28 @@ void PlateSynth::retune()
                                   - (c.x - a.x) * (b.y - a.y));
         }
     srcAmp = (float) (1.0 / std::sqrt (juce::jmax (1.0e-6, area)));
+
+    // Fixed injection weights for the modal option, drawn from the same
+    // distribution the hit point produces: a tail mode's shape is
+    // sqrt(2/A) cos(kappa.x + psi), so at any one point it is an arcsine
+    // variable of rms 1/sqrt(A). Drawing psi per mode instead of reading it
+    // off the hammer's position is the whole change. Matching the rms is
+    // what lets Drive, the gate thresholds and the voiced defaults survive
+    // the switch, and keeping the values incoherent between modes is what
+    // stops a band's worth of injection arriving as one in-phase push.
+    //
+    // The seed is a constant, so a plate sounds the same every time it is
+    // loaded, and every plate gets the same phase sequence -- the modes it
+    // multiplies are what differ.
+    constexpr std::uint64_t cascInjectSeed = 0x5eedca5cade1ull;
+    for (int k = 0; k < fem::maxModes; ++k)
+    {
+        const float psi = juce::MathConstants<float>::twoPi
+                            * fxme::detrand::u01 (cascInjectSeed, (std::uint64_t) k);
+        // sqrt(2) as a literal: PlateSynth builds against the JUCE stub for
+        // the offline tests, which carries only the constants it needs to.
+        cascInjRand[k] = 1.41421356f * srcAmp * std::cos (psi);
+    }
 
     computeOutputWeights();
     computeSourceShapes();
@@ -779,15 +809,36 @@ void PlateSynth::updateSourceMix() noexcept
 
 void PlateSynth::updateCascadeWeights() noexcept
 {
-    // Target (high) modes receive the distorted low-mode signal at the hit
-    // point, weighted by cascadeInjectionGain (see there for why that rule is
-    // deliberately not the output gain rule). Source modes get zero, so the
-    // low -> high transfer graph stays acyclic and is unconditionally stable
-    // with no gain restriction.
+    // Where the ladder's output re-enters the bank. Either way the weight is
+    // scaled by cascadeInjectionGain (see there for why that rule is
+    // deliberately not the output gain rule), and either way the source modes
+    // get zero, so the low -> high transfer graph stays acyclic and is
+    // unconditionally stable with no gain restriction.
     //
+    // What the switch chooses is the spatial part:
+    //
+    //   hit point (default)  phi_k(x_h). Injecting a_k = phi_k(x_h) g is a
+    //     point force at the hit: sum_k phi_k(x_h) phi_k(x) is a band-limited
+    //     delta there. It ties the shimmer's character to where the plate was
+    //     struck, which is playable, but it is not what the nonlinearity
+    //     does.
+    //
+    //   modal  a fixed per-mode weight of the same rms. The von Karman cubic
+    //     coupling Gamma_kpqr is an overlap integral over the whole plate; it
+    //     contains no strike position at all, and the strike enters only by
+    //     setting the modal amplitudes it runs on. This is the option that
+    //     matches that, and it is the same choice the cascade *source*
+    //     already makes for the same reason (see the header on why the drive
+    //     uses 1/sqrt(A) rather than phi_k at the pickup).
+    //
+    // Position sensitivity survives either way: the hit still decides which
+    // modes ring, hence the band sums, hence the cubic carrier. The modal
+    // option stops position being applied a second time, not the first.
+    const float* const w = current.cascModalInject ? cascInjRand : hitWeights;
+
     for (int k = 0; k < fem::maxModes; ++k)
         cascadeW[k] = (k >= cascadeSplit && k < activeModes && compensation[k] > 0.0f)
-                        ? hitWeights[k] * cascInjW[k]
+                        ? w[k] * cascInjW[k]
                         : 0.0f;
 }
 

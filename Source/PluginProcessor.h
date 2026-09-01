@@ -327,6 +327,7 @@ private:
     std::atomic<float>* pCascOverlap = nullptr;
     std::atomic<float>* pCascWindow = nullptr;
     std::atomic<float>* pCascDeplete = nullptr;
+    std::atomic<float>* pCascModalInject = nullptr;
     std::atomic<float>* pNumModes = nullptr;
     std::atomic<float>* pPickupX[fem::maxPickups] {};
     std::atomic<float>* pPickupY[fem::maxPickups] {};

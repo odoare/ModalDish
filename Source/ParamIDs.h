@@ -56,6 +56,14 @@ namespace fem::id
     inline constexpr const char* cascOverlap = "cascover";  // target bandwidth floor
     inline constexpr const char* cascWindow  = "cascwin";   // source window, bands
     inline constexpr const char* cascDeplete = "cascdepl";  // source-band energy loss
+
+    // Where the ladder's output re-enters the plate. Off (the default) is the
+    // historical behaviour, injecting through the mode shapes at the hit
+    // point; on injects through fixed per-mode weights instead, which is
+    // what the von Karman coupling actually does -- it is an overlap integral
+    // over the whole plate and knows nothing about where the hammer landed.
+    // See PlateSynth::updateCascadeWeights.
+    inline constexpr const char* cascModalInject = "cascmodalinj";
     inline constexpr const char* numModes  = "nmodes";    // active modes
     // Pickups. Up to eight listening points, each with its own level and pan;
     // the plate sums into a stereo pair through them. Indexed 0..7 for
