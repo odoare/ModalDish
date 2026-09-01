@@ -289,9 +289,12 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
     densityKnob.setValue (processor.shape().meshDensity, juce::dontSendNotification);
     densityKnob.onValueChange = [this]
     {
+        // The density is taken now so a deferred rebuild uses the value the
+        // knob ended on; the rebuild itself waits for the timer, because a
+        // drag from 8 to 48 walks through every density in between and the
+        // ones near the top are milliseconds each.
         processor.shape().meshDensity = (int) densityKnob.getValue();
-        processor.invalidateShape();
-        processor.buildMesh();
+        meshDirty = true;
     };
     addAndMakeVisible (densityKnob);
 
@@ -1113,6 +1116,22 @@ void ModalDishAudioProcessorEditor::drawPlateOverlay (juce::Graphics& g,
 //==============================================================================
 void ModalDishAudioProcessorEditor::timerCallback()
 {
+    // Everything that changes the grid mid-gesture is remeshed here rather
+    // than where it happens: a dragged vertex, a rotation, a swept Grid knob.
+    // One remesh runs from 0.4 ms at Grid 16 to 7.6 ms at Grid 48, and both
+    // the mouse and a knob drag deliver values faster than the screen can
+    // show them, so rebuilding per event would spend most of a fast gesture
+    // on grids nobody sees. Polled at 30 Hz it is at most one remesh a frame,
+    // and the grid follows the shape while it is being dragged.
+    //
+    // Both flags are read before the test, never inside it: a short-circuited
+    // || would leave one of them set and the rebuild owing.
+    const bool outlineMoved = canvas.takeGeometryDirty();
+    const bool densityMoved = meshDirty;
+    meshDirty = false;
+    if (designMode && (outlineMoved || densityMoved))
+        syncShapeToProcessor (true);
+
     // Glide only means something once a channel is tuning the plate: with
     // Freq Chan Off nothing ever calls glideToNote, so the time it would take
     // is not a setting the player can hear. Polled here rather than driven

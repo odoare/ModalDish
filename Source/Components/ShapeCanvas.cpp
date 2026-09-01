@@ -11,6 +11,7 @@
 #include "ShapeCanvas.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace fem
 {
@@ -494,6 +495,7 @@ void ShapeCanvas::mouseDrag (const juce::MouseEvent& e)
                 p = { 0.5 + ca * x - sa * y, 0.5 + sa * x + ca * y };
             }
             rebuildArcTable();
+            geometryDirty = true;
             repaint();
             break;
         }
@@ -538,6 +540,7 @@ void ShapeCanvas::mouseDrag (const juce::MouseEvent& e)
             outlinePts[(size_t) draggedVertex] = { juce::jlimit (0.0, 1.0, p.x),
                                                    juce::jlimit (0.0, 1.0, p.y) };
             rebuildArcTable();
+            geometryDirty = true;
             repaint();
             break;
         }
@@ -578,8 +581,9 @@ void ShapeCanvas::mouseUp (const juce::MouseEvent&)
             if (draggedVertex >= 0)
             {
                 draggedVertex = -1;
-                // Only now: remeshing on every drag step would rebuild the
-                // grid a hundred times across one gesture.
+                // The drag itself has been remeshing at the frame rate
+                // (takeGeometryDirty); this is the settling update, which
+                // also carries the boundary.
                 notifyShape();
                 notifyBoundary();
             }
@@ -669,24 +673,6 @@ void ShapeCanvas::paint (juce::Graphics& g)
 {
     g.fillAll (juce::Colour (0xff141a24));
 
-    // The mesh, faintly, underneath everything else: in design mode the grid
-    // is what is being designed, so it is always on screen rather than behind
-    // a button press. Interior edges only — the boundary is drawn below in
-    // its own per-segment colours.
-    if (mesh != nullptr && ! mesh->empty())
-    {
-        g.setColour (juce::Colour (0xff4a5670).withAlpha (0.45f));
-        for (int e = 0; e < mesh->numEdges(); ++e)
-        {
-            if (mesh->isBoundaryEdge (e))
-                continue;
-            const auto& ed = mesh->edges[(size_t) e];
-            const auto a = plateToScreen (mesh->vertices[(size_t) ed.v0]);
-            const auto b = plateToScreen (mesh->vertices[(size_t) ed.v1]);
-            g.drawLine (a.x, a.y, b.x, b.y, 0.6f);
-        }
-    }
-
     const auto border = getLocalBounds().toFloat().reduced (0.5f);
     g.setColour (juce::Colour (0xff35415a));
     g.drawRoundedRectangle (border, 4.0f, 1.0f);
@@ -739,6 +725,37 @@ void ShapeCanvas::paint (juce::Graphics& g)
     shape.closeSubPath();
     g.setColour (juce::Colour (0xff232d3d));
     g.fillPath (shape);
+
+    // The mesh, over the fill rather than under it. Under it, which is where
+    // this used to be, the fill is opaque and hides the grid completely —
+    // the thing being designed, invisible on the one screen that exists to
+    // design it. Interior edges only; the boundary is drawn below in its own
+    // per-segment colours.
+    //
+    // Clipped to the shape so that a grid one frame behind a dragged vertex
+    // stays inside the outline instead of poking through it.
+    if (mesh != nullptr && ! mesh->empty())
+    {
+        juce::Graphics::ScopedSaveState clip (g);
+        g.reduceClipRegion (shape);
+
+        // Thinned as the mesh gets dense, so that a fine grid reads as
+        // texture on the plate rather than as a second, paler fill. Smooth in
+        // the element count, because the Grid knob is swept and a threshold
+        // would pop as it crossed.
+        const float alpha = juce::jlimit (0.14f, 0.32f,
+                                          6.0f / std::sqrt ((float) mesh->numTriangles()));
+        g.setColour (juce::Colours::white.withAlpha (alpha));
+        for (int e = 0; e < mesh->numEdges(); ++e)
+        {
+            if (mesh->isBoundaryEdge (e))
+                continue;
+            const auto& ed = mesh->edges[(size_t) e];
+            const auto a = plateToScreen (mesh->vertices[(size_t) ed.v0]);
+            const auto b = plateToScreen (mesh->vertices[(size_t) ed.v1]);
+            g.drawLine (a.x, a.y, b.x, b.y, 0.6f);
+        }
+    }
 
     // Boundary segments, colour-coded by condition.
     const size_t ns = segStarts.size();

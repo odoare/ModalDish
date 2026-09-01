@@ -69,6 +69,22 @@ public:
         regenerate a fresh ellipse over the top of it. */
     void restoreToolAndAspect (Tool t, double a);
 
+    /** True once if the outline has moved since the last call, then clears.
+
+        A gesture still in progress deliberately does not call onShapeChanged:
+        one remesh is several milliseconds at the top of the Grid range, and
+        the mouse delivers events faster than there are frames to show them
+        in. The drag sets this instead and the editor polls it from its 30 Hz
+        timer, so the grid follows the shape at the frame rate rather than at
+        the mouse rate, and a fast drag coalesces into one remesh per frame
+        rather than a queue of them. */
+    bool takeGeometryDirty() noexcept
+    {
+        const bool was = geometryDirty;
+        geometryDirty = false;
+        return was;
+    }
+
     /** Number of border points Ns (= number of segments). Segment positions
         are redistributed uniformly; each new segment inherits the condition
         found at its midpoint. */
@@ -131,11 +147,18 @@ private:
     int hitTestHandle (juce::Point<float> screenPos) const;
     int segmentOfParam (double t) const;
     void normalizeSegments();   // restore ascending order after a wrap-around drag
-    void notifyShape()    { if (onShapeChanged) onShapeChanged(); repaint(); }
+    void notifyShape()
+    {
+        geometryDirty = false;   // this is the settling update
+        if (onShapeChanged)
+            onShapeChanged();
+        repaint();
+    }
     void notifyBoundary() { if (onBoundaryChanged) onBoundaryChanged(); repaint(); }
 
     Tool tool = Tool::Boundary;
     double aspect = 1.2;
+    bool geometryDirty = false;   // outline moved mid-gesture; see takeGeometryDirty
 
     std::vector<Point2> outlinePts;      // closed outline, unit square, y up
     std::vector<double> segStarts;       // sorted arc params in [0,1)

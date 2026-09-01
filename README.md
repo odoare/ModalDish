@@ -1,21 +1,21 @@
 # ModalDish
 
-FX-Mechanics plugin: a physical model of a **plate of arbitrary shape**,
-solved by finite elements and played as an instrument (strike it) or used as
-an effect (feed it audio).
+ModalDish is an audio plugin based on a physical model of a **plate of arbitrary shape**, solved by finite elements and played as an instrument (strike it) or used as an effect (feed it audio).
 
+![ModalDish in Perform mode](Source/Assets/splash.png)
 ![ModalDish in Perform mode](doc/img/perform.png)
 
-Draw a shape, cut its border into segments and give each one a boundary
-condition, press *Compute*, and the plugin solves the plate's eigenmodes and
-turns them into a bank of resonant filters. From there it is an instrument:
-hit it with the mouse, play it from MIDI, or send a signal through it.
+The principle is to draw a shape, cut its border into segments and give each one a boundary condition, press *Compute*, and the plugin solves the plate's
+eigenmodes and turns them into a bank of resonant filters. From there it is
+an instrument: hit it with the mouse, play it from MIDI, or send a signal
+through it.
 
 Nothing is sampled and nothing is convolved. The plate exists as a set of
 modes that the geometry actually produced, so moving the strike point, the
 pickup, the tension or the damping changes the sound the way it would change
-a real plate, and two geometric nonlinearities give it the pitch glide and
-the shimmer that a linear filter bank cannot.
+a real plate.
+
+ModalDish adds two geometric nonlinearities to the modal bank: a dynamic tension that bends the pitch up on a hard hit, and an eight-band cubic cascade that carries energy up the spectrum into shimmer. Both run as cheap real-time surrogates for nonlinear-plate effects that are normally computed offline, and the cascade runs on whatever shape you drew rather than a fixed geometry. How this sits against other nonlinear plate synthesis is spelled out in the "Relation to other nonlinear plate synthesis" section of [doc/technical.pdf](doc/technical.pdf).
 
 ---
 
@@ -255,9 +255,16 @@ session opens on the defaults.
 ![Modal design mode](doc/img/design.png)
 
 The MODAL DESIGN panel holds a tool selector, a *Load* button, and four
-controls. The mesh is rebuilt as you edit and drawn under the outline, so the
-grid is always in front of you, and the boundary-condition key sits in the
-corner of the sketch itself.
+controls. The mesh is drawn under the outline and rebuilt while you edit, so
+the grid follows a vertex as it is dragged, a shape as it is rotated and the
+*Grid* knob as it is swept, rather than appearing when you let go. The
+boundary-condition key sits in the corner of the sketch itself.
+
+A shape that cannot be meshed (a polygon dragged until it crosses itself) simply
+shows no grid until it can be, which is the quickest way to see that it is not
+a plate yet. The freehand tool is the one exception to the live grid: an
+unfinished stroke is an open curve with no interior to mesh, so its grid
+appears when the stroke closes.
 
 | Tool | What it does |
 | --- | --- |

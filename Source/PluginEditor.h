@@ -290,6 +290,9 @@ private:
     // "Advanced" toggle, in the Dynamics panel next to what it extends:
     // shows the cascade tuning column and widens the window.
     juce::TextButton advancedButton { "A >" };
+    /** A grid rebuild is owed, from the Grid knob. The canvas keeps its own
+        flag for an outline being dragged; both are drained by the timer. */
+    bool meshDirty = false;
     bool advancedVisible = false;
     bool designMode = true;
 
