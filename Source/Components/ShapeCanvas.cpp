@@ -55,6 +55,14 @@ namespace
     // resolution is the natural limit: no more handles than freehand itself
     // produces.
     constexpr int maxPolygonVertices = splineResolution;
+
+    // Boundary-condition key. A fixed text column rather than a measured one:
+    // the four names are short and known, and measuring would pull in a Font
+    // API that has moved twice. Shared with legendBounds(), so that a host
+    // placing controls beside the key and the paint that draws it cannot
+    // disagree about where it is.
+    constexpr int legendItemH = 14, legendSwatch = 9, legendPadX = 8,
+                  legendPadY = 6, legendTextW = 54, legendInset = 10;
 }
 
 ShapeCanvas::ShapeCanvas()
@@ -83,28 +91,37 @@ ShapeCanvas::Point2 ShapeCanvas::screenToPlate (juce::Point<float> p) const
     return { (double) ((p.x - ox) / s), (double) (1.0f - (p.y - oy) / s) };
 }
 
+juce::Rectangle<int> ShapeCanvas::legendBounds() const
+{
+    const int boxW = legendSwatch + 6 + legendTextW + 2 * legendPadX;
+    const int boxH = 4 * legendItemH + 2 * legendPadY;
+    return { getWidth() - boxW - legendInset, getHeight() - boxH - legendInset,
+             boxW, boxH };
+}
+
 //==============================================================================
 void ShapeCanvas::setTool (Tool t)
 {
     tool = t;
     rawStroke.clear();
     draggedVertex = -1;
-    if (t == Tool::Ellipse || t == Tool::Rectangle)
-    {
-        makeStandardShape (t == Tool::Rectangle);
-        notifyShape();
-        notifyBoundary();
-    }
-    else if (t == Tool::Polygon)
+    if (t == Tool::Polygon)
     {
         // Pick up whatever shape is on screen, so that a freehand blob or an
         // ellipse can be taken over and edited rather than started again.
         // Only a dense outline is touched; a shape already made of a few
         // vertices is adopted exactly as it stands.
         const size_t before = outlinePts.size();
+        const bool wasGenerated = outlineIsGenerated();
         adoptOutlineAsPolygon();
         if (outlinePts.size() != before)
         {
+            // Adoption changes the representation, not the shape: an ellipse
+            // reduced to draggable vertices is still the ellipse the Aspect
+            // knob describes, so the knob goes on working here and stops at
+            // the first vertex that actually moves.
+            if (wasGenerated)
+                standardOutline = outlinePts;
             notifyShape();
             notifyBoundary();
         }
@@ -115,12 +132,50 @@ void ShapeCanvas::setTool (Tool t)
 void ShapeCanvas::setAspect (double a)
 {
     aspect = juce::jlimit (0.2, 5.0, a);
-    if (tool == Tool::Ellipse || tool == Tool::Rectangle)
+
+    // Follow the knob for as long as the shape is still the one that was
+    // generated, and no longer. That is what makes the knob live for the
+    // common case (press Ellipse, then dial the proportions until it looks
+    // right) without it ever being able to overwrite work: the first vertex
+    // moved, the first stroke drawn, the first file loaded takes the outline
+    // out of the set this test accepts.
+    if (outlineIsGenerated())
+        generateStandardShape (standardIsRect);
+}
+
+void ShapeCanvas::generateStandardShape (bool rectangle)
+{
+    makeStandardShape (rectangle);
+
+    // The polygon tool drags the outline points themselves, so the 96 points
+    // of an ellipse would arrive as 96 handles. Reduce it the way the tool
+    // reduces anything else it takes over, and record that as the generated
+    // shape: it is what is on screen, and the aspect ratio still describes it.
+    if (tool == Tool::Polygon)
     {
-        makeStandardShape (tool == Tool::Rectangle);
-        notifyShape();
-        notifyBoundary();
+        adoptOutlineAsPolygon();
+        standardOutline = outlinePts;
     }
+
+    notifyShape();
+    notifyBoundary();
+}
+
+bool ShapeCanvas::outlineIsGenerated() const noexcept
+{
+    if (standardOutline.size() != outlinePts.size() || standardOutline.empty())
+        return false;
+
+    // The kept copy is untouched, so an unedited outline is bit-identical to
+    // it and the tolerance is only here to keep -Wfloat-equal quiet. It can be
+    // this small because nothing that edits a shape moves a point by less than
+    // a screen pixel, which is 1e-3 of the plate.
+    constexpr double eps = 1.0e-12;
+    for (size_t i = 0; i < outlinePts.size(); ++i)
+        if (std::abs (outlinePts[i].x - standardOutline[i].x) > eps
+             || std::abs (outlinePts[i].y - standardOutline[i].y) > eps)
+            return false;
+    return true;
 }
 
 void ShapeCanvas::restoreToolAndAspect (Tool t, double a)
@@ -159,6 +214,9 @@ void ShapeCanvas::makeStandardShape (bool rectangle)
     rebuildArcTable();
     resetSegmentsUniform (juce::jmax (1, (int) segStarts.size() > 0 ? (int) segStarts.size() : 4),
                           rectangle);
+
+    standardOutline = outlinePts;
+    standardIsRect = rectangle;
 }
 
 void ShapeCanvas::resetSegmentsUniform (int ns, bool atCorners)
@@ -485,10 +543,6 @@ void ShapeCanvas::mouseDown (const juce::MouseEvent& e)
             }
             break;
         }
-
-        case Tool::Ellipse:
-        case Tool::Rectangle:
-            break;
     }
 }
 
@@ -569,10 +623,6 @@ void ShapeCanvas::mouseDrag (const juce::MouseEvent& e)
             repaint();
             break;
         }
-
-        case Tool::Ellipse:
-        case Tool::Rectangle:
-            break;
     }
 }
 
@@ -612,10 +662,6 @@ void ShapeCanvas::mouseUp (const juce::MouseEvent&)
                 notifyShape();
                 notifyBoundary();
             }
-            break;
-
-        case Tool::Ellipse:
-        case Tool::Rectangle:
             break;
     }
 }
@@ -839,8 +885,6 @@ void ShapeCanvas::paint (juce::Graphics& g)
     switch (tool)
     {
         case Tool::Draw:      hint = "draw a closed shape with the mouse"; break;
-        case Tool::Ellipse:   hint = "ellipse from the Aspect knob"; break;
-        case Tool::Rectangle: hint = "rectangle from the Aspect knob"; break;
         case Tool::Rotate:    hint = "drag to rotate the shape"; break;
         case Tool::Boundary:  hint = "drag border points - click a segment to change its condition"; break;
         case Tool::Polygon:   hint = "click to add a vertex - drag to move - alt-click to delete"; break;
@@ -853,28 +897,20 @@ void ShapeCanvas::paint (juce::Graphics& g)
     // *over* the sketch instead of under a child component that paints last.
     if (bcColour != nullptr && bcName != nullptr)
     {
-        // Fixed text column rather than a measured one: the four names are
-        // short and known, and measuring would pull in a Font API that has
-        // moved twice.
-        constexpr int itemH = 14, swatch = 9, padX = 8, padY = 6, textW = 54;
         g.setFont (juce::Font (juce::FontOptions (11.0f)));
-
-        const int boxW = swatch + 6 + textW + 2 * padX;
-        const int boxH = 4 * itemH + 2 * padY;
-        auto box = juce::Rectangle<int> (getWidth() - boxW - 10,
-                                         getHeight() - boxH - 10, boxW, boxH);
+        const auto box = legendBounds();
 
         g.setColour (juce::Colour (0xff1d2430).withAlpha (0.82f));
         g.fillRoundedRectangle (box.toFloat(), 5.0f);
         g.setColour (juce::Colour (0xff35415a));
         g.drawRoundedRectangle (box.toFloat().reduced (0.5f), 5.0f, 1.0f);
 
-        auto r = box.reduced (padX, padY);
+        auto r = box.reduced (legendPadX, legendPadY);
         for (int bc = 0; bc < 4; ++bc)
         {
-            auto line = r.removeFromTop (itemH);
-            const auto sw = line.removeFromLeft (swatch)
-                                .withSizeKeepingCentre (swatch, swatch);
+            auto line = r.removeFromTop (legendItemH);
+            const auto sw = line.removeFromLeft (legendSwatch)
+                                .withSizeKeepingCentre (legendSwatch, legendSwatch);
             g.setColour (bcColour (bc));
             g.fillRect (sw);
             g.setColour (juce::Colour (0xff97a1b4));

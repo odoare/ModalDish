@@ -240,15 +240,15 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
     // --- right: geometry panel -------------------------------------------------
     fem::theme::styleCombo (toolBox, fem::theme::geomAccent);
     // Ids are positions in ShapeCanvas::Tool (id - 1), so Place points keeps
-    // id 6 wherever it sits in the list; it reads next to Draw shape because
-    // the two are the same job by different means.
+    // id 4 wherever it sits in the list; it reads next to Draw shape because
+    // the two are the same job by different means. Every entry here is a
+    // lasting mode of the mouse: making an ellipse or a rectangle is a single
+    // act, so it is a button on the canvas rather than a mode to be left.
     toolBox.addItem ("Draw shape", 1);
-    toolBox.addItem ("Place points", 6);
-    toolBox.addItem ("Ellipse", 2);
-    toolBox.addItem ("Rectangle", 3);
-    toolBox.addItem ("Rotate", 4);
-    toolBox.addItem ("Edit boundary", 5);
-    toolBox.setSelectedId (juce::jlimit (1, 6, processor.editorState.toolId),
+    toolBox.addItem ("Place points", 4);
+    toolBox.addItem ("Rotate", 2);
+    toolBox.addItem ("Edit boundary", 3);
+    toolBox.setSelectedId (juce::jlimit (1, 4, processor.editorState.toolId),
                            juce::dontSendNotification);
     toolBox.onChange = [this]
     {
@@ -266,6 +266,19 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
     loadShapeButton.onClick = [this] { loadShapeFile(); };
     saveShapeButton.onClick = [this] { saveShapeFile(); };
 
+    // Added after the canvas, so they sit on top of it. Neither one changes
+    // the tool: the shape appears under whatever the mouse is already doing,
+    // ready to have points placed in it, its boundary re-cut, a fresh outline
+    // drawn over it or the modes computed from it.
+    for (auto* b : { &ellipseButton, &rectangleButton })
+    {
+        fem::theme::styleButton (*b, fem::theme::geomAccent);
+        b->setMouseClickGrabsKeyboardFocus (false);
+        addAndMakeVisible (*b);
+    }
+    ellipseButton.onClick   = [this] { canvas.generateStandardShape (false); };
+    rectangleButton.onClick = [this] { canvas.generateStandardShape (true); };
+
     fem::theme::styleBox (aspectKnob, "Aspect", fem::theme::geomAccent);
     aspectKnob.setRange (0.25, 4.0, 0.01);
     aspectKnob.setSkewFactorFromMidPoint (1.0);
@@ -273,9 +286,8 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
     aspectKnob.onValueChange = [this] { canvas.setAspect (aspectKnob.getValue()); };
     addAndMakeVisible (aspectKnob);
 
-    // Both restored together, and quietly: the canvas rebuilds its outline
-    // when it is given Ellipse or Rectangle, and the shape on screen when a
-    // window reopens is the one that was left there, not a fresh one.
+    // Both restored together, and quietly: the shape on screen when a window
+    // reopens is the one that was left there, not a fresh one.
     canvas.restoreToolAndAspect (
         (fem::ShapeCanvas::Tool) (toolBox.getSelectedId() - 1),
         processor.editorState.aspect);
@@ -517,7 +529,7 @@ void ModalDishAudioProcessorEditor::setDesignMode (bool design)
     // considering the derived-to-base conversion that would unify them.
     juce::Component* const designOnly[] = {
         &toolBox, &aspectKnob, &pointsKnob, &densityKnob, &modesKnob,
-        &loadShapeButton, &saveShapeButton
+        &loadShapeButton, &saveShapeButton, &ellipseButton, &rectangleButton
     };
     for (auto* c : designOnly)
         c->setVisible (design);
@@ -640,7 +652,7 @@ void ModalDishAudioProcessorEditor::loadShapeFile()
         }
 
         setDesignMode (true);
-        toolBox.setSelectedId (5, juce::dontSendNotification);   // Edit boundary
+        toolBox.setSelectedId (3, juce::dontSendNotification);   // Edit boundary
         canvas.setTool (fem::ShapeCanvas::Tool::Boundary);
         syncShapeToProcessor (true);
     });
@@ -1537,6 +1549,21 @@ void ModalDishAudioProcessorEditor::resized()
     canvas.setBounds (area);
     plateView.setBounds (area);
     plateView3D.setBounds (area);
+
+    // The two generators go directly above the key, in the corner of the
+    // sketch: they belong with the drawing rather than with the panel, and
+    // that corner is the one part of the canvas a centred shape never reaches.
+    // Laid out from the key's own bounds so the two cannot drift apart.
+    if (designMode)
+    {
+        constexpr int bw = 76, bh = 24, bgap = 6;
+        const auto key = canvas.legendBounds().translated (canvas.getX(), canvas.getY());
+        auto row = juce::Rectangle<int> (key.getRight() - (2 * bw + bgap),
+                                         key.getY() - bh - bgap,
+                                         2 * bw + bgap, bh);
+        ellipseButton.setBounds (row.removeFromLeft (bw));
+        rectangleButton.setBounds (row.removeFromRight (bw));
+    }
 }
 
 

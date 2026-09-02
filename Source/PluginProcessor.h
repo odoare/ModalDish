@@ -122,7 +122,7 @@ public:
         bool designMode = true;
         bool advanced   = false;
         int  viewId     = 1;      // viewBox item id, 1..5
-        int  toolId     = 5;      // toolBox item id (5 = Edit boundary)
+        int  toolId     = 3;      // toolBox item id (3 = Edit boundary)
         int  displayMode = 0;     // the Mode knob, when a mode is displayed
         double aspect   = 1.2;
 

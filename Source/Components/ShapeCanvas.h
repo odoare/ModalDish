@@ -7,8 +7,6 @@
 
       * Draw tool      — freehand outline, smoothed on release with a closed
                          Catmull-Rom spline and refitted into the canvas.
-      * Ellipse /      — standard shapes generated from the current aspect
-        Rectangle        ratio (width / height).
       * Rotate tool    — click-drag rotates the shape about its centre.
       * Polygon tool   — click to add a vertex, drag one to move it, alt-click
                          one to delete it. Fewer than three points is an open
@@ -17,6 +15,12 @@
                          segments; clicking a segment cycles its boundary
                          condition, cycling stiffest-first (Clamped /
                          SimplySupported / Sliding / Free, colour-coded).
+
+    An ellipse or a rectangle of the current aspect ratio is not one of those
+    modes but a one-shot action (generateStandardShape): it replaces the
+    outline and hands it straight back to whichever tool is selected, so a
+    generated shape can be edited, drawn over or meshed without having to
+    leave a mode first.
 
     The shape lives in plate coordinates in the unit square (y up); segment
     positions are arc-length parameters in [0,1) along the outline — the
@@ -47,26 +51,33 @@ public:
 
     // Appended, never reordered: the editor's tool combo maps its item ids
     // to these by position.
-    enum class Tool { Draw = 0, Ellipse, Rectangle, Rotate, Boundary, Polygon };
+    enum class Tool { Draw = 0, Rotate, Boundary, Polygon };
 
     ShapeCanvas();
 
-    /** Ellipse / Rectangle regenerate the shape immediately. */
     void setTool (Tool t);
     Tool getTool() const noexcept                       { return tool; }
 
-    /** Aspect ratio (width / height) of the standard shapes; regenerates the
-        current shape when it is an ellipse or a rectangle. */
+    /** Replaces the outline with an ellipse (or a rectangle) of the current
+        aspect ratio, keeping the boundary conditions and leaving the selected
+        tool alone, so the shape that appears is immediately editable. */
+    void generateStandardShape (bool rectangle);
+
+    /** Aspect ratio (width / height) of the standard shapes.
+
+        Regenerates the shape while the outline is still exactly the one
+        generateStandardShape produced, and leaves it alone from the first
+        edit onwards: a drawn blob or a polygon with points moved in it has no
+        aspect ratio to impose, and imposing one would discard the edit. */
     void setAspect (double a);
     double getAspect() const noexcept                   { return aspect; }
 
     /** Reinstates a tool and an aspect without touching the geometry.
 
-        setTool and setAspect rebuild the outline for Ellipse and Rectangle,
-        which is exactly what picking one of them should do. It is exactly
-        what reopening the editor must not do: the shape on screen is the one
-        the user left, and restoring the tool it was left under would
-        regenerate a fresh ellipse over the top of it. */
+        setAspect rebuilds the outline when the shape is still a generated
+        one, which is exactly what turning the knob should do and exactly what
+        reopening the editor must not do: the shape on screen is the one the
+        user left. */
     void restoreToolAndAspect (Tool t, double a);
 
     /** True once if the outline has moved since the last call, then clears.
@@ -98,6 +109,11 @@ public:
     const std::vector<Point2>& outline() const noexcept  { return outlinePts; }
     const std::vector<double>& segmentStarts() const noexcept { return segStarts; }
     const std::vector<int>& segmentBcs() const noexcept  { return segBcs; }
+
+    /** Where the boundary-condition key is drawn, in this component's own
+        coordinates, so a host can put controls beside it instead of guessing
+        where the corner ends. */
+    juce::Rectangle<int> legendBounds() const;
 
     /** Colour code for boundary condition `bc` (same values as
         fxme::acoustics::BoundaryCondition), shared with legends. */
@@ -134,6 +150,14 @@ private:
 
     void makeStandardShape (bool rectangle);
 
+    /** True while the outline is, point for point, the one the last call to
+        generateStandardShape left behind. Comparing against a kept copy is
+        the whole mechanism: anything that moves a point at all — a drag, a
+        rotation, a redraw, a shape handed in by the host — fails the test,
+        and that is exactly the set of cases where the aspect ratio has
+        stopped describing what is on screen. */
+    bool outlineIsGenerated() const noexcept;
+
     /** Reduce the outline to a handful of draggable vertices, so that a
         freehand or ellipse shape can be picked up by the Polygon tool. A
         shape that is already sparse enough is left exactly as it is. */
@@ -158,6 +182,8 @@ private:
 
     Tool tool = Tool::Boundary;
     double aspect = 1.2;
+    std::vector<Point2> standardOutline;   // outline as generated; see outlineIsGenerated
+    bool standardIsRect = false;
     bool geometryDirty = false;   // outline moved mid-gesture; see takeGeometryDirty
 
     std::vector<Point2> outlinePts;      // closed outline, unit square, y up

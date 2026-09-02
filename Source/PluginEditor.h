@@ -232,6 +232,10 @@ private:
     juce::ComboBox toolBox;
     juce::TextButton loadShapeButton { "Load" };
     juce::TextButton saveShapeButton { "Save" };
+    // Shape generators, laid out over the sketch beside the boundary-condition
+    // key rather than in the panel: they are not tools and not settings, they
+    // are two ways of starting a shape, and what they replace is on the canvas.
+    juce::TextButton ellipseButton { "Ellipse" }, rectangleButton { "Rectangle" };
     fxme::FxmeNumberBox aspectKnob, pointsKnob, densityKnob, modesKnob;
 
     // Held as a member because the chooser runs asynchronously and must
