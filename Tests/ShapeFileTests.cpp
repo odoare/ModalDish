@@ -22,6 +22,7 @@
 #include "ShapeFile.h"
 #include <cstdio>
 #include <cmath>
+#include <algorithm>
 
 static int failures = 0;
 static void check (bool ok, const char* what)
@@ -130,6 +131,69 @@ int main (int argc, char** argv)
         std::printf ("  %-32s -> %s\n", b.what,
                      r.ok ? "ACCEPTED (wrong)" : r.error.toRawUTF8());
         check (! r.ok, b.what);
+    }
+
+    // ---- Round trip --------------------------------------------------------
+    // Save then load must give back the same plate. Dividers that already sit
+    // on vertices — which is every divider in a file that was itself loaded —
+    // survive exactly; the writer's only lossy step is snapping ones that do
+    // not, and that is checked separately below.
+    std::printf ("\n== Round trip ==\n");
+    {
+        const char* src = R"({
+            "name": "Trapezoid gong",
+            "meshDensity": 20,
+            "points": [[-0.85,-0.55],[0.85,-0.55],[0.55,0.75],[-0.55,0.75]],
+            "boundary": { "0": "clamp", "2": "free" }
+        })";
+        const auto in = fem::shapefile::parse (src);
+        check (in.ok, "the source file parses");
+
+        const auto text = fem::shapefile::write (in.shape.outline, in.shape.segStarts,
+                                                 in.shape.segBcs, in.shape.meshDensity,
+                                                 "Trapezoid gong");
+        const auto out = fem::shapefile::parse (text);
+        check (out.ok, "what write() produced parses back");
+
+        bool samePoints = out.shape.outline.size() == in.shape.outline.size();
+        double worst = 0.0;
+        for (size_t i = 0; samePoints && i < in.shape.outline.size(); ++i)
+            worst = std::max (worst,
+                              std::hypot (out.shape.outline[i].x - in.shape.outline[i].x,
+                                          out.shape.outline[i].y - in.shape.outline[i].y));
+        std::printf ("  %d points, worst drift %.2e\n",
+                     (int) out.shape.outline.size(), worst);
+        check (samePoints && worst < 1.0e-4, "the outline comes back where it went in");
+
+        check (out.shape.segStarts.size() == in.shape.segStarts.size(),
+               "the same number of boundary segments");
+        bool sameBcs = out.shape.segBcs.size() == in.shape.segBcs.size();
+        for (size_t i = 0; sameBcs && i < in.shape.segBcs.size(); ++i)
+            sameBcs = out.shape.segBcs[i] == in.shape.segBcs[i];
+        check (sameBcs, "and the same conditions on them");
+        check (out.shape.meshDensity == in.shape.meshDensity, "mesh density survives");
+    }
+
+    // A shape with no boundary map at all still writes and reads: the reader
+    // supplies one simply supported segment, and the writer has one to emit.
+    {
+        const auto in = fem::shapefile::parse (
+            R"({"points":[[-0.8,-0.8],[0.8,-0.8],[0.8,0.8],[-0.8,0.8]]})");
+        const auto out = fem::shapefile::parse (
+            fem::shapefile::write (in.shape.outline, in.shape.segStarts,
+                                   in.shape.segBcs, 0, {}));
+        check (out.ok && out.shape.segBcs.size() == 1 && out.shape.segBcs[0] == 1,
+               "a shape with no boundary map round-trips as simply supported");
+    }
+
+    // A name with characters JSON has to escape must not break the file.
+    {
+        const auto in = fem::shapefile::parse (
+            R"({"points":[[-0.8,-0.8],[0.8,-0.8],[0.8,0.8]]})");
+        const auto out = fem::shapefile::parse (
+            fem::shapefile::write (in.shape.outline, in.shape.segStarts,
+                                   in.shape.segBcs, 16, "quote\" back\\slash"));
+        check (out.ok, "a name needing JSON escapes still produces a valid file");
     }
 
     std::printf ("\n%s (%d failures)\n", failures ? "FAILURES" : "ALL TESTS PASSED", failures);

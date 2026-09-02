@@ -50,6 +50,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <vector>
+#include <algorithm>
 
 using namespace fxme::acoustics;
 
@@ -211,6 +212,22 @@ namespace
 
     /** RMS of the upper half of the bank: how much high-mode motion there is
         in the plate, whatever the pickup happens to see of it. */
+    /** RMS of the lower half of the bank: the modal velocity the cascade's
+        cubic is actually built from. This, not the audible shimmer, is the
+        quantity the construction claims is free of damping. */
+    double lowModeMotionDb (const std::vector<float>& modal)
+    {
+        const int n = (int) modal.size();
+        double sum = 0.0;
+        int count = 0;
+        for (int k = 0; k < n / 2; ++k)
+        {
+            sum += (double) modal[(size_t) k] * modal[(size_t) k];
+            ++count;
+        }
+        return 20.0 * std::log10 (std::sqrt (sum / juce::jmax (1, count)) + 1.0e-30);
+    }
+
     double highModeMotionDb (const std::vector<float>& modal)
     {
         const int n = (int) modal.size();
@@ -372,41 +389,71 @@ int main()
     // within the render (zetaV 1e-2, zetaM 1e-3): there the shimmer *should*
     // collapse, and does.
     std::printf ("== Cascade drive vs damping (4 kHz and up, dB) ==\n");
-    std::printf ("  %-14s %8s %8s %8s\n", "", "100ms", "300ms", "600ms");
+    std::printf ("  %-14s %8s %8s %8s   %8s %8s\n", "",
+                 "100ms", "300ms", "600ms", "drive", "adds");
 
-    std::vector<double> viscAt300;
+    // Each setting is rendered twice, with the ladder on and off, and probed
+    // for its modal velocity on the way past. The three quantities answer
+    // three different questions and only the first is a claim about the drive.
+    std::vector<double> driveDb, cascadeAddsDb;
+
+    const auto sweep = [&] (const char* label, Patch p)
+    {
+        std::vector<float> modal;
+        const auto on  = render (model, p, &modal, 0.03);
+        Patch q = p; q.cascade = 0.0f;
+        const auto off = render (model, q);
+
+        std::printf ("  %-14s", label);
+        for (double t : probes)
+            std::printf (" %8.1f", shimmerDb (on, t));
+        const double adds = shimmerDb (on, 0.3) - shimmerDb (off, 0.3);
+        std::printf ("   %8.1f %8.1f\n", lowModeMotionDb (modal), adds);
+
+        driveDb.push_back (lowModeMotionDb (modal));
+        cascadeAddsDb.push_back (adds);
+    };
+
     for (float zv : { 1.0e-5f, 1.0e-4f, 1.0e-3f })
     {
         Patch p; p.viscDamp = zv;
-        const auto x = render (model, p);
-        std::printf ("  Viscous %-6g", (double) zv);
-        for (double t : probes)
-            std::printf (" %8.1f", shimmerDb (x, t));
-        std::printf ("\n");
-        viscAt300.push_back (shimmerDb (x, 0.3));
+        char label[32]; std::snprintf (label, sizeof label, "Viscous %g", (double) zv);
+        sweep (label, p);
     }
-
-    std::vector<double> matAt300;
     for (float zm : { 7.0e-6f, 3.0e-5f, 1.0e-4f, 3.0e-4f })
     {
         Patch p; p.matDamp = zm;
-        const auto x = render (model, p);
-        std::printf ("  Material %-5g", (double) zm);
-        for (double t : probes)
-            std::printf (" %8.1f", shimmerDb (x, t));
-        std::printf ("\n");
-        matAt300.push_back (shimmerDb (x, 0.3));
+        char label[32]; std::snprintf (label, sizeof label, "Material %g", (double) zm);
+        sweep (label, p);
     }
 
-    std::printf ("\n  viscous spread %.1f dB, material spread %.1f dB\n",
-                 spread (viscAt300), spread (matAt300));
-    // What is left here is not drive: the ladder's own targets ring for
-    // longer or shorter with the damping, and the middle rungs are sources
-    // for the upper ones, so a few dB of variation is the physics doing its
-    // job. The bar is set to catch a damping term creeping back into the
-    // drive, which would be several times larger, not to pin the sound down.
-    check (spread (viscAt300) < 10.0, "shimmer barely tracks the Viscous knob (< 10 dB)");
-    check (spread (matAt300) < 10.0, "shimmer barely tracks the Material knob (< 10 dB)");
+    std::printf ("\n  drive spread %.1f dB, cascade contribution %.1f to %.1f dB\n",
+                 spread (driveDb),
+                 *std::min_element (cascadeAddsDb.begin(), cascadeAddsDb.end()),
+                 *std::max_element (cascadeAddsDb.begin(), cascadeAddsDb.end()));
+
+    // The claim is about the DRIVE, so the drive is what is measured: the
+    // modal velocity of the source half, sampled early enough that nothing
+    // has decayed anywhere. velScale_k removes the zeta and the omega tilt
+    // from y_k, so this should be flat to a fraction of a dB, and a damping
+    // term returning to the drive would show up here immediately.
+    check (spread (driveDb) < 1.0, "the cascade drive ignores both damping knobs (< 1 dB)");
+
+    // What must NOT be asserted, and used to be: that the audible shimmer at
+    // 300 ms is damping-independent. It cannot be. The ladder's own target
+    // modes decay too, and material damping's zeta ~ nu law kills the top of
+    // the bank fastest of all, so by 300 ms at Material 3e-4 there is
+    // essentially nothing up there left to hear. Rendering the same sweep
+    // with the ladder switched off shows the whole collapse happening anyway:
+    // about 50 dB of it, with no cascade in the signal at all. The old check
+    // read that as a leak in the drive and failed on the plate behaving
+    // correctly.
+    //
+    // The honest companion claim is this one: whatever the damping, switching
+    // the ladder on still puts a great deal of energy up there.
+    for (size_t i = 0; i < cascadeAddsDb.size(); ++i)
+        check (cascadeAddsDb[i] > 20.0,
+               "the cascade still adds > 20 dB of shimmer at this damping");
 
     // ---- 2. The drive must not depend on where the plate is listened to ----
     // Measured on the plate's own motion, not on the output: moving the
