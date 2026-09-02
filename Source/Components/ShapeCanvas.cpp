@@ -37,10 +37,24 @@ namespace
         return n[juce::jlimit (0, 3, bc)];
     }
 
-    // Most vertices the Polygon tool will show at once. A freehand outline is
-    // 128 points and an ellipse 96, which are handles to drag, not a shape to
-    // edit; this is the count they get reduced to on the way in.
-    constexpr int maxPolygonVertices = 20;
+    // How faithfully the Polygon tool reproduces a shape it takes over, as a
+    // fraction of the canvas: Douglas-Peucker keeps every vertex whose
+    // removal would move the outline further than this. Set to one screen
+    // pixel at the canvas's own size, so what the tool adopts looks like what
+    // was drawn rather than like a coarse tracing of it.
+    //
+    // Fitting the count to the shape is the whole point. A fixed budget
+    // cannot: 20 vertices costs a gently drawn blob about 5 px of flattening
+    // and a busy outline 9 px, both plainly visible, while a rectangle only
+    // ever needed 4. At one pixel a drawn shape keeps 40 to 90 vertices, a
+    // rectangle still keeps 4, and nothing looks approximated.
+    constexpr double adoptTolerancePixels = 1.0;
+
+    // Ceiling, for a shape that arrives from somewhere other than the drawing
+    // tools -- a file with a thousand points, say. The drawing tools' own
+    // resolution is the natural limit: no more handles than freehand itself
+    // produces.
+    constexpr int maxPolygonVertices = splineResolution;
 }
 
 ShapeCanvas::ShapeCanvas()
@@ -293,14 +307,25 @@ double ShapeCanvas::nearestParam (const Point2& pt) const
 
 void ShapeCanvas::adoptOutlineAsPolygon()
 {
-    if ((int) outlinePts.size() <= maxPolygonVertices)
+    if (outlinePts.size() < 3)
         return;
 
-    // Douglas-Peucker spends its budget on the corners, which is where a
-    // plate outline carries its character (see simplifyPolygonTo in FemMesh).
-    auto reduced = fxme::acoustics::simplifyPolygonTo (outlinePts, maxPolygonVertices);
+    // Tolerance first, budget only as a backstop. Douglas-Peucker drops a
+    // vertex when the outline would not visibly move without it, so the count
+    // that comes back is the count the shape actually needs: four for a
+    // rectangle, dozens for something drawn by hand, and no straight run of
+    // handles down an edge that has no detail on it.
+    const int side = juce::jmax (1, juce::jmin (getWidth(), getHeight()));
+    const double tolerance = adoptTolerancePixels / (double) side;
 
-    if (reduced.size() >= 3)
+    auto reduced = fxme::acoustics::simplifyPolygon (outlinePts, tolerance);
+
+    // Only a shape from outside the drawing tools can still be over the
+    // ceiling here; a loaded file with a thousand points is the case in mind.
+    if ((int) reduced.size() > maxPolygonVertices)
+        reduced = fxme::acoustics::simplifyPolygonTo (reduced, maxPolygonVertices);
+
+    if (reduced.size() >= 3 && reduced.size() < outlinePts.size())
     {
         outlinePts = std::move (reduced);
         rebuildArcTable();
