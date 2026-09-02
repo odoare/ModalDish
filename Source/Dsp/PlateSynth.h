@@ -282,6 +282,12 @@ public:
         int   cascWindow    = 4;       // source window, bands below each rung
         float cascDeplete   = 0.07f;   // source-band energy loss while pumping
         bool  cascModalInject = false;   // see updateCascadeWeights
+        
+        // Global trims over every source's resolved hammer time and force. Read
+        // at strike time, so they need no diff branch in update(): nothing is
+        // derived from them ahead of a hit.
+        float srcHammerScale = 1.0f;
+        float srcForceScale  = 1.0f;
 
         Pickup pickups[fem::maxPickups];
         Source sources[fem::maxSources];

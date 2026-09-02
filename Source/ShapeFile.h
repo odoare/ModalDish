@@ -69,6 +69,31 @@ Result parse (const juce::String& json);
     other. */
 Result load (const juce::File& file);
 
+/** Serialises a shape back to the format above.
+
+    The one lossy step is the boundary. The file keys conditions by *point
+    index*, while the editor carries them as arc-length fractions that a
+    dragged segment divider can put anywhere along an edge, so each divider is
+    written at the vertex nearest to it. A file that was loaded and saved
+    again round-trips exactly, because its dividers are on vertices already;
+    one whose dividers were dragged in the editor moves them to the nearest
+    vertex, which on a drawn outline is a fraction of a percent of the
+    perimeter and on a four-point rectangle can be a whole corner. */
+juce::String write (const std::vector<fxme::acoustics::Point2>& outline,
+                    const std::vector<double>& segStarts,
+                    const std::vector<int>& segBcs,
+                    int meshDensity,
+                    const juce::String& name);
+
+/** Writes `write()`'s output to a file, creating or replacing it. False when
+    the file could not be written. */
+bool save (const juce::File& file,
+           const std::vector<fxme::acoustics::Point2>& outline,
+           const std::vector<double>& segStarts,
+           const std::vector<int>& segBcs,
+           int meshDensity,
+           const juce::String& name);
+
 /** The condition names a file may use, stiffest first. Index is the
     BoundaryCondition value; each also accepts the aliases documented in the
     .cpp (so "clamped" works as well as "clamp"). */

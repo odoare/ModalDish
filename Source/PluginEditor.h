@@ -231,22 +231,26 @@ private:
     // Right column — modal design (shape, mesh, bank size).
     juce::ComboBox toolBox;
     juce::TextButton loadShapeButton { "Load" };
+    juce::TextButton saveShapeButton { "Save" };
     fxme::FxmeNumberBox aspectKnob, pointsKnob, densityKnob, modesKnob;
 
     // Held as a member because the chooser runs asynchronously and must
     // outlive the call that launches it.
     std::unique_ptr<juce::FileChooser> shapeChooser;
     void loadShapeFile();
+    void saveShapeFile();
     std::unique_ptr<SliderAttachment> modesAtt;
 
     // Right column — dynamics.
     fxme::FxmeNumberBox f1Knob, tensionKnob, hammerKnob, forceKnob,
                         nonlinKnob, cascadeKnob, viscKnob, matKnob, deplKnob,
-                        glideKnob, srcChanKnob, freqChanKnob;
+                        glideKnob, srcChanKnob, freqChanKnob,
+                        srcDurScaleKnob, srcForceScaleKnob;
     std::unique_ptr<SliderAttachment> f1Att, tensionAtt, hammerAtt,
                                       forceAtt, nonlinAtt, cascadeAtt, viscAtt,
                                       glideAtt, srcChanAtt, freqChanAtt,
-                                      matAtt, deplAtt;
+                                      matAtt, deplAtt,
+                                      srcDurScaleAtt, srcForceScaleAtt;
 
     // Right column — cascade tuning (Advanced). Deplete moved out to the
     // Dynamics panel: it is a voicing control, not a tuning constant.

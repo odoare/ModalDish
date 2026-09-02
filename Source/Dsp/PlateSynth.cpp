@@ -955,10 +955,17 @@ void PlateSynth::strikeSource (int s, float velocity) noexcept
     // to hit softer the harder it is played.
     const float hamT = controlAmount (src, src.hammerCtl, velocity);
     const float frcT = controlAmount (src, src.forceCtl, velocity);
-    const float hammerMs = src.hammerMs + hamT * (src.hammerMsMax - src.hammerMs);
-    const float force    = src.force    + frcT * (src.forceMax    - src.force);
+    const float hammerMs = (src.hammerMs + hamT * (src.hammerMsMax - src.hammerMs))
+                             * current.srcHammerScale;
+    const float force    = (src.force    + frcT * (src.forceMax    - src.force))
+                             * current.srcForceScale;
 
-    fireHammer (x, y, juce::jmax (0.0f, force), juce::jmax (0.01f, hammerMs));
+    // Clamped to the range a source's own knobs span, so the trim can only
+    // reach settings that could have been dialled in one at a time: a scale
+    // of ten over an already-long hammer would otherwise produce a contact
+    // time no control in the plugin can express.
+    fireHammer (x, y, juce::jlimit (0.0f, 20.0f, force),
+                juce::jlimit (0.1f, 50.0f, hammerMs));
 }
 
 int PlateSynth::strikeSourcesForNote (int note, float velocity) noexcept

@@ -163,6 +163,8 @@ ModalDishAudioProcessor::ModalDishAudioProcessor()
     pCascWindow  = apvts.getRawParameterValue (fem::id::cascWindow);
     pCascDeplete = apvts.getRawParameterValue (fem::id::cascDeplete);
     pCascModalInject = apvts.getRawParameterValue (fem::id::cascModalInject);
+    pSrcHammerScale = apvts.getRawParameterValue (fem::id::srcHammerScale);
+    pSrcForceScale  = apvts.getRawParameterValue (fem::id::srcForceScale);
     pNumModes = apvts.getRawParameterValue (fem::id::numModes);
     for (int i = 0; i < fem::maxPickups; ++i)
     {
@@ -263,6 +265,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout ModalDishAudioProcessor::cre
     p.push_back (std::make_unique<FloatParam> (
         juce::ParameterID (fem::id::glide, 1), "Glide", logRange (0.1f, 100.0f), 0.1f,
         juce::AudioParameterFloatAttributes().withLabel ("ms")));
+
+    // Multipliers, so the useful range is geometric and 1 sits in the middle
+    // of the travel rather than a tenth of the way along it.
+    p.push_back (std::make_unique<FloatParam> (
+        juce::ParameterID (fem::id::srcHammerScale, 1), "Src Dur Scale",
+        logRange (0.1f, 10.0f), 1.0f));
+    p.push_back (std::make_unique<FloatParam> (
+        juce::ParameterID (fem::id::srcForceScale, 1), "Src Force Scale",
+        logRange (0.1f, 10.0f), 1.0f));
 
     // Which MIDI channel does what. A note triggers sources and a note sets
     // the pitch, and these decide whether the same note does both: leave them
@@ -571,6 +582,8 @@ void ModalDishAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     params.cascWindow    = (int) pCascWindow->load();
     params.cascDeplete   = pCascDeplete->load();
     params.cascModalInject = pCascModalInject->load() > 0.5f;
+    params.srcHammerScale = pSrcHammerScale->load();
+    params.srcForceScale  = pSrcForceScale->load();
     for (int i = 0; i < fem::maxPickups; ++i)
     {
         auto& pk = params.pickups[i];

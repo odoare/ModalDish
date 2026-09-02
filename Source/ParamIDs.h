@@ -25,6 +25,14 @@ namespace fem::id
     inline constexpr const char* force     = "force";     // hammer force amplitude
     inline constexpr const char* glide     = "glide";     // portamento time between notes (ms)
 
+    // Global trims over all eight sources, in the Hammer Control panel beside
+    // the global hammer they resemble. Each multiplies whatever a source's
+    // own min/max mapping resolved to, so a kit of eight can be made harder
+    // or softer, shorter or longer, without touching sixteen knobs. They do
+    // not touch the global hammer above, which is already one control.
+    inline constexpr const char* srcHammerScale = "srchammerscale";
+    inline constexpr const char* srcForceScale  = "srcforcescale";
+
     // MIDI channel routing. Notes do two independent things -- they trigger
     // sources and they set the plate's pitch -- and these say which channel
     // does which, so the two can be split across a keyboard split or a second

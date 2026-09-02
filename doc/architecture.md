@@ -4,12 +4,25 @@ What runs on which thread, what crosses between them and by what mechanism,
 and which invariants a change must not break. Written to be read cold, by a
 person or by an assistant, before touching `Source/`.
 
-The physics and the numerics are not here. They are in the technical paper
-(separate repository). This file is only about the machinery that carries
-them.
+## What belongs here, and what does not
+
+This file and the technical paper divide the plugin between them, and neither
+should restate the other:
+
+| | Lives in | Status |
+| --- | --- | --- |
+| Model, discretisation, eigensolver, nonlinear approximations | the paper (separate repository) | settled; not expected to change |
+| Threads, ownership, publication, parameter plumbing, persistence | **here** | changes whenever the code does |
+
+The paper's implementation section is **derived from this file** rather than
+written alongside it. That is the whole point of the split: the physics is
+now fixed, so the only thing that can drift is the description of the
+machinery, and there is one place to correct it.
 
 **Keep this file current.** A new cross-thread channel, a new parameter, or a
-change to how the model is published belongs here on the same commit.
+change to how the model is published belongs here on the same commit as the
+change itself. If a paragraph here stops matching the code, the paper is
+wrong too, one revision later.
 
 ---
 
@@ -163,6 +176,7 @@ the least work that covers the difference:
 | source send / balance / on | `updateSourceMix()` |
 | cascade attack / release | `updateCascadeEnvelopes()` |
 | injection switch | `updateCascadeWeights()` |
+| source hammer / force trims | none — read in `strikeSource()` at strike time |
 
 **Adding a parameter — the whole checklist:**
 
@@ -171,8 +185,12 @@ the least work that covers the difference:
 3. `atomic<float>*` member in `PluginProcessor.h`, bound in the constructor
 4. read into `Params` in `processBlock`
 5. field on `PlateSynth::Params`
-6. **a diff branch in `PlateSynth::update()`** — miss this and the parameter
-   is read but never acted on, which looks like a dead control
+6. **a diff branch in `PlateSynth::update()`**, *if anything is derived from
+   it ahead of time*. Miss it for a parameter that feeds cached weights or
+   filter coefficients and the control looks dead: read every block, acted on
+   never. A parameter consumed directly at the point of use needs none —
+   `srcHammerScale` and `srcForceScale` are read inside `strikeSource()` and
+   have no branch, correctly
 7. a control in the editor, added to the `designOnly` / `performOnly`
    visibility lists
 8. the parameter table in `README.md`
@@ -270,7 +288,8 @@ publication.
 
 - [ ] No allocation, lock, or I/O reachable from `processBlock`
 - [ ] Parameters read once per block, not per sample
-- [ ] Every new `Params` field has a diff branch in `update()`
+- [ ] Every new `Params` field either has a diff branch in `update()` or is
+      consumed directly at the point of use
 - [ ] A published model is freed only after a **newer** generation is acknowledged
 - [ ] Release/acquire pairing on `publishedModel` and `audioSeenGeneration`
 - [ ] New durations stored in seconds, converted in `prepare()`

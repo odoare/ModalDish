@@ -201,6 +201,118 @@ Result parse (const juce::String& json)
     return r;
 }
 
+juce::String write (const std::vector<fxme::acoustics::Point2>& outline,
+                    const std::vector<double>& segStarts,
+                    const std::vector<int>& segBcs,
+                    int meshDensity,
+                    const juce::String& name)
+{
+    const size_t n = outline.size();
+    if (n < 3)
+        return {};
+
+    // Written by hand rather than through juce::JSON::toString: the format is
+    // documented in the header with one point per line, and a generic
+    // serialiser puts every coordinate of every pair on a line of its own.
+    // Only the name goes through JSON, which is where escaping matters.
+    juce::String out;
+    out << "{\n";
+    out << "  \"modaldish_shape\": 1,\n";
+    if (name.isNotEmpty())
+        out << "  \"name\": " << juce::JSON::toString (juce::var (name)) << ",\n";
+    if (meshDensity > 0)
+        out << "  \"meshDensity\": " << meshDensity << ",\n";
+
+    // Inverse of the read: plate coordinates sit in the margin box, so the
+    // full [-1, 1] of the file maps onto halfSpan either side of centre.
+    auto toFile = [] (double v)
+    {
+        return juce::jlimit (-1.0, 1.0, (v - 0.5) / halfSpan);
+    };
+
+    out << "  \"points\": [\n";
+    for (size_t i = 0; i < n; ++i)
+    {
+        out << "    [" << juce::String (toFile (outline[i].x), 5)
+            << ", "    << juce::String (toFile (outline[i].y), 5) << "]"
+            << (i + 1 < n ? "," : "") << "\n";
+    }
+    out << "  ]";
+
+    // Boundary: arc parameters back to point indices (see the header on what
+    // this costs). Cumulative arc length first, the same walk the reader does.
+    const size_t ns = std::min (segStarts.size(), segBcs.size());
+    if (ns > 0)
+    {
+        std::vector<double> cum (n, 0.0);
+        double perimeter = 0.0;
+        for (size_t i = 0; i < n; ++i)
+        {
+            cum[i] = perimeter;
+            const auto& a = outline[i];
+            const auto& b = outline[(i + 1) % n];
+            perimeter += std::hypot (b.x - a.x, b.y - a.y);
+        }
+
+        if (perimeter > 1.0e-9)
+        {
+            // Nearest vertex to each divider, measured the short way round so
+            // that a divider just before vertex 0 snaps to 0 rather than to
+            // the last vertex.
+            std::vector<std::pair<int, int>> entries;   // (index, condition)
+            for (size_t sIdx = 0; sIdx < ns; ++sIdx)
+            {
+                const double target = segStarts[sIdx] * perimeter;
+                size_t best = 0;
+                double bestDist = 1.0e30;
+                for (size_t i = 0; i < n; ++i)
+                {
+                    double d = std::abs (cum[i] - target);
+                    d = std::min (d, perimeter - d);
+                    if (d < bestDist) { bestDist = d; best = i; }
+                }
+                entries.push_back ({ (int) best, segBcs[sIdx] });
+            }
+
+            // Two dividers can land on one vertex when a segment is shorter
+            // than the vertex spacing. The later one wins, which matches how
+            // bcAt reads a duplicated key back.
+            std::sort (entries.begin(), entries.end(),
+                       [] (const auto& a, const auto& b) { return a.first < b.first; });
+
+            out << ",\n  \"boundary\": {";
+            const auto names = conditionNames();
+            bool first = true;
+            for (size_t e = 0; e < entries.size(); ++e)
+            {
+                if (e + 1 < entries.size() && entries[e].first == entries[e + 1].first)
+                    continue;
+                out << (first ? "\n" : ",\n");
+                first = false;
+                out << "    \"" << entries[e].first << "\": \""
+                    << names[juce::jlimit (0, 3, entries[e].second)] << "\"";
+            }
+            out << "\n  }";
+        }
+    }
+
+    out << "\n}\n";
+    return out;
+}
+
+bool save (const juce::File& file,
+           const std::vector<fxme::acoustics::Point2>& outline,
+           const std::vector<double>& segStarts,
+           const std::vector<int>& segBcs,
+           int meshDensity,
+           const juce::String& name)
+{
+    const auto text = write (outline, segStarts, segBcs, meshDensity, name);
+    if (text.isEmpty())
+        return false;
+    return file.replaceWithText (text);
+}
+
 Result load (const juce::File& file)
 {
     if (! file.existsAsFile())

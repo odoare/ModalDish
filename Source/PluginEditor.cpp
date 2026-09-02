@@ -257,9 +257,14 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
     };
     addAndMakeVisible (toolBox);
 
-    fem::theme::styleButton (loadShapeButton, fem::theme::geomAccent);
+    for (auto* b : { &loadShapeButton, &saveShapeButton })
+    {
+        fem::theme::styleButton (*b, fem::theme::geomAccent);
+        b->setMouseClickGrabsKeyboardFocus (false);
+        addAndMakeVisible (*b);
+    }
     loadShapeButton.onClick = [this] { loadShapeFile(); };
-    addAndMakeVisible (loadShapeButton);
+    saveShapeButton.onClick = [this] { saveShapeFile(); };
 
     fem::theme::styleBox (aspectKnob, "Aspect", fem::theme::geomAccent);
     aspectKnob.setRange (0.25, 4.0, 0.01);
@@ -340,6 +345,20 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
     // Group 3, Hammer control.
     addBox (hammerKnob, "Duration", fem::id::hammerMs, hammerAtt, fem::theme::hammerGroup);
     addBox (forceKnob, "Force", fem::id::force, forceAtt, fem::theme::hammerGroup);
+
+    // Trims over the eight sources, under the global hammer they sit beside.
+    // Shown as a multiplier rather than a bare number: "Src Dur 2.5" could be
+    // milliseconds, and "x2.50" cannot.
+    addBox (srcDurScaleKnob, "Src Dur", fem::id::srcHammerScale,
+            srcDurScaleAtt, fem::theme::hammerGroup);
+    addBox (srcForceScaleKnob, "Src Force", fem::id::srcForceScale,
+            srcForceScaleAtt, fem::theme::hammerGroup);
+    for (auto* k : { &srcDurScaleKnob, &srcForceScaleKnob })
+    {
+        k->textFromValueFunction = [] (double v)
+            { return "x" + juce::String (v, v < 10.0 ? 2 : 1); };
+        k->updateText();
+    }
 
     // Modes belongs with the design, not the performance: it reallocates and
     // retunes the whole bank, and raising it while the plate is ringing can
@@ -497,7 +516,8 @@ void ModalDishAudioProcessorEditor::setDesignMode (bool design)
     // boxes and buttons, and a braced list deduces one element type without
     // considering the derived-to-base conversion that would unify them.
     juce::Component* const designOnly[] = {
-        &toolBox, &aspectKnob, &pointsKnob, &densityKnob, &modesKnob
+        &toolBox, &aspectKnob, &pointsKnob, &densityKnob, &modesKnob,
+        &loadShapeButton, &saveShapeButton
     };
     for (auto* c : designOnly)
         c->setVisible (design);
@@ -506,6 +526,7 @@ void ModalDishAudioProcessorEditor::setDesignMode (bool design)
         &f1Knob, &tensionKnob, &hammerKnob, &forceKnob, &nonlinKnob, &cascadeKnob,
         &viscKnob, &matKnob, &deplKnob, &advancedButton, &inGainKnob, &outGainKnob,
         &glideKnob, &srcChanKnob, &freqChanKnob, unmappedHitButton.get(),
+        &srcDurScaleKnob, &srcForceScaleKnob,
         &outMeter[0], &outMeter[1], &viewBox, &modeViewKnob
     };
     for (auto* c : performOnly)
@@ -532,7 +553,12 @@ void ModalDishAudioProcessorEditor::updateWindowSize()
     // The cascade column only exists in Perform with Advanced up, so the
     // window must not stay wide when design mode hides it. It is narrower
     // than the main column because it is a single stack of number boxes.
-    setSize ((advancedVisible && ! designMode) ? 1142 : 1022, 760);
+    // 800 rather than 760 since the Hammer panel took a second row: the
+    // perform column needs 710 px of panels and the window has to hold them,
+    // or the Transducers row at the bottom is laid out past the edge and
+    // simply is not there. The left side gets the extra height too, which the
+    // plate view can only use well.
+    setSize ((advancedVisible && ! designMode) ? 1142 : 1022, 800);
 }
 
 void ModalDishAudioProcessorEditor::setPresetPanelVisible (bool shouldBeVisible)
@@ -545,15 +571,47 @@ void ModalDishAudioProcessorEditor::setPresetPanelVisible (bool shouldBeVisible)
     resized();
 }
 
+void ModalDishAudioProcessorEditor::saveShapeFile()
+{
+    shapeChooser = std::make_unique<juce::FileChooser> (
+        "Save this plate geometry", juce::File(), "*.json");
+
+    const auto chooserFlags = juce::FileBrowserComponent::saveMode
+                     | juce::FileBrowserComponent::warnAboutOverwriting;
+
+    shapeChooser->launchAsync (chooserFlags, [this] (const juce::FileChooser& fc)
+    {
+        auto file = fc.getResult();
+        if (file == juce::File())
+            return;                       // cancelled
+        if (file.getFileExtension().isEmpty())
+            file = file.withFileExtension ("json");
+
+        // Saved from the canvas rather than from the processor's copy: the
+        // canvas is what is on screen, and a gesture that has not settled yet
+        // has reached it but not the processor.
+        const bool ok = fem::shapefile::save (file, canvas.outline(),
+                                              canvas.segmentStarts(),
+                                              canvas.segmentBcs(),
+                                              processor.shape().meshDensity,
+                                              file.getFileNameWithoutExtension());
+        if (! ok)
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::MessageBoxIconType::WarningIcon,
+                "Could not save " + file.getFileName(),
+                "The file could not be written. Check the folder is writable.");
+    });
+}
+
 void ModalDishAudioProcessorEditor::loadShapeFile()
 {
     shapeChooser = std::make_unique<juce::FileChooser> (
         "Load a plate geometry", juce::File(), "*.json");
 
-    const auto flags = juce::FileBrowserComponent::openMode
+    const auto chooserFlags = juce::FileBrowserComponent::openMode
                      | juce::FileBrowserComponent::canSelectFiles;
 
-    shapeChooser->launchAsync (flags, [this] (const juce::FileChooser& fc)
+    shapeChooser->launchAsync (chooserFlags, [this] (const juce::FileChooser& fc)
     {
         const auto file = fc.getResult();
         if (file == juce::File())
@@ -1322,20 +1380,26 @@ void ModalDishAudioProcessorEditor::resized()
 
     if (designMode)
     {
-        designPanel = colA.removeFromTop (2 * padding + titleH + 26 + gap + 2 * boxH + gap);
+        // Tool selector across the full width, then the knobs that shape what
+        // it draws, then the file row. Load and Save are not tools and not
+        // shape parameters — they move a whole geometry in or out — so they
+        // sit under both rather than competing with the selector for a row.
+        const int fileH = 24;
+        designPanel = colA.removeFromTop (2 * padding + titleH + 26 + gap
+                                          + 2 * boxH + 2 * gap + fileH);
         auto r = designPanel.reduced (padding);
         r.removeFromTop (titleH);
-        {
-            // Load shares the tool row: it is another way of getting a shape
-            // in, so it belongs beside the tools rather than among the knobs
-            // that shape one once it is there.
-            auto toolRow = r.removeFromTop (26);
-            loadShapeButton.setBounds (toolRow.removeFromRight (62).reduced (0, 1));
-            toolRow.removeFromRight (gap);
-            toolBox.setBounds (toolRow);
-        }
+
+        toolBox.setBounds (r.removeFromTop (26));
         r.removeFromTop (gap);
+
         twoColumns (r, { &aspectKnob, &pointsKnob, &densityKnob, &modesKnob });
+        r.removeFromTop (2 * boxH + 2 * gap);
+
+        auto fileRow = r.removeFromTop (fileH);
+        const int half = (fileRow.getWidth() - gap) / 2;
+        loadShapeButton.setBounds (fileRow.removeFromLeft (half));
+        saveShapeButton.setBounds (fileRow.removeFromRight (half));
     }
     else
     {
@@ -1367,11 +1431,15 @@ void ModalDishAudioProcessorEditor::resized()
 
         // Group 3: Hammer control.
         colA.removeFromTop (10);
-        excitePanel = colA.removeFromTop (2 * padding + titleH + boxH);
+        // Two rows: the global hammer, then the trims that scale what the
+        // eight sources resolved for themselves. Same column each time, so a
+        // duration sits over a duration and a force over a force.
+        excitePanel = colA.removeFromTop (2 * padding + titleH + 2 * boxH + gap);
         {
             auto r = excitePanel.reduced (padding);
             r.removeFromTop (titleH);
-            twoColumns (r, { &hammerKnob, &forceKnob });
+            twoColumns (r, { &hammerKnob,      &forceKnob,
+                             &srcDurScaleKnob, &srcForceScaleKnob });
         }
 
         // Group 4: IO.
