@@ -34,7 +34,11 @@ namespace fem::theme
 
     inline const juce::Colour panel     { 0xff1d2430 };
     inline const juce::Colour panelLine { 0xff35415a };
-    inline const juce::Colour text      { 0xffd8dce4 };
+    // Near-white, cool-tinted to match the backdrop. Control names, combo
+    // text and button captions all come from here, and they are read against
+    // panel and control bodies dark enough that a mid grey disappears into
+    // them.
+    inline const juce::Colour text      { 0xfff0f3f8 };
     inline const juce::Colour dimText   { 0xff97a1b4 };
     inline const juce::Colour topBarBg  { 0xff10141c };
 
