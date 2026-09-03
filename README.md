@@ -104,7 +104,7 @@ rescan. Nothing else is needed.
 
 The window has three parts: the top bar, the plate area on the left, and the control panels on the right.
 
-The plugin has **two modes**, and the panels on screen are the ones belonging to the mode you are in. *Modal design* is what the plate **is**; *Perform* is how you play it. The buttons for both are in the strip under the plate, along with *Compute*, the progress bar and the status line.
+The plugin has two modes, and the panels on screen are the ones belonging to the mode you are in. *Modal design* is what the plate is and *Perform* is how you play it. The buttons for both are in the strip under the plate, along with *Compute*, the progress bar and the status line.
 
 The split is not cosmetic. *Modes* reallocates and retunes the entire filter bank, and raising it while the plate is ringing can produce a very loud transient, so it lives on the design side where you are not playing.
 
@@ -114,10 +114,12 @@ Closing the plugin window and reopening it is a no-op: the mode you were in, the
 
 ![Modal design mode](doc/img/design.png)
 
-The modale design panel holds a tool selector across the top, four controls under it, and *Load* and *Save* on a row of their own at the bottom.
+The modal design panel holds a tool selector across the top, four controls under it, and *Load* and *Save* on a row of their own at the bottom.
 
 Tools description:
 
+| | |
+| --- | --- |
 | **Draw shape** | Freehand. Drag a closed curve; it is smoothed with a closed spline and resampled to 128 points. |
 | **Place points** | A polygon, vertex by vertex. See below. |
 | **Rotate** | Drag to turn the shape inside the canvas. |
@@ -133,8 +135,6 @@ Segments are stored as fractions of the perimeter, so they follow the outline wh
 
 A polygon edited vertex by vertex, for when a shape wants exact corners
 rather than a drawn curve.
-
-![The Place points tool](doc/img/points.png)
 
 - **Click** adds a vertex. Below three points you are building an open chain
   and the third closes it; once closed, a click inserts the new vertex into
