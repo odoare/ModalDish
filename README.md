@@ -42,10 +42,10 @@ The overall workflow of ModalDish can be sketched like this:
 
 ```mermaid
 flowchart LR
-  A["Draw or load<br>a shape"] --> B["Mesh it into<br>triangles"]
-  B --> C["Solve for the<br>eigenmodes"]
-  C --> D["One resonant filter<br>per mode"]
-  D --> E["Strike it,<br>or feed it audio"]
+  A["A. Draw or load<br>a shape"] --> B["B. Mesh it into<br>triangles"]
+  B --> C["C. Solve for the<br>eigenmodes"]
+  C --> D["D. One resonant filter<br>per mode"]
+  D --> E["E. Strike it,<br>or feed it audio"]
 ```
 
 A. **The shape** is a closed outline with a boundary condition on each part of its edge: clamped, simply supported, sliding, or free.
