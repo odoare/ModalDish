@@ -1,21 +1,18 @@
 # ModalDish
 
-ModalDish is an audio plugin based on a physical model of a **plate of arbitrary shape**, solved by finite elements and played as an instrument (strike it) or used as an effect (feed it audio).
+ModalDish is an audio plugin based on a physical model of a plate of arbitrary shape, solved by finite elements. It played as an instrument (strike it) or used as an effect (feed it audio).
 
-![ModalDish in Perform mode](Source/Assets/splash.png)
+<div align="center">
+<img src="Source/Assets/splash.png" alt="ModalDish splashscreen" width="50%">
+</div>
+
 ![ModalDish in Perform mode](doc/img/perform.png)
 
-The principle is to draw a shape, cut its border into segments and give each one a boundary condition, press *Compute*, and the plugin solves the plate's
-eigenmodes and turns them into a bank of resonant filters. From there it is
-an instrument: hit it with the mouse, play it from MIDI, or send a signal
-through it.
+The principle is to draw a shape, cut its border into segments and give each one a boundary condition, press *Compute*, and the plugin solves the plate's eigenmodes and turns them into a bank of resonant filters. From there it is an instrument or effect: hit it with the mouse, play it from MIDI, or send a signal through it.
 
-Nothing is sampled and nothing is convolved. The plate exists as a set of
-modes that the geometry actually produced, so moving the strike point, the
-pickup, the tension or the damping changes the sound the way it would change
-a real plate.
+This is a physically modelled structure. Nothing is sampled and nothing is convolved. The plate exists as a set of modes that the geometry actually produced, so moving the strike point, the pickup, the tension or the damping changes the sound the way it would change a real plate.
 
-ModalDish adds two geometric nonlinearities to the modal bank: a dynamic tension that bends the pitch up on a hard hit, and an eight-band cubic cascade that carries energy up the spectrum into shimmer. Both run as cheap real-time surrogates for nonlinear-plate effects that are normally computed offline, and the cascade runs on whatever shape you drew rather than a fixed geometry. How this sits against other nonlinear plate synthesis is spelled out in the "Relation to other nonlinear plate synthesis" section of [doc/technical.pdf](doc/technical.pdf).
+ModalDish adds two geometric nonlinearities to the modal bank: a dynamic tension that bends the pitch up on a hard hit, and an eight-band cubic cascade that carries energy up the spectrum into shimmer. A full physical model of the nonlinearities would consume too much CPU to be reasonnably implemented in an audio plugin. Both run as cheap real-time surrogates for nonlinear-plate effects that are normally computed offline, and the cascade runs on whatever shape you drew rather than a fixed geometry. The result is a plugin that consumes at most a few percent of CPU on current computers with all parameters at max quality.
 
 ---
 
@@ -27,7 +24,7 @@ ModalDish adds two geometric nonlinearities to the modal bank: a dynamic tension
 - [The interface](#the-interface)
 - [Parameters](#parameters)
 - [Playing it](#playing-it)
-- [Loading a geometry from a file](#loading-a-geometry-from-a-file)
+- [Geometry files](#geometry-files)
 - [Presets](#presets)
 - [Building](#building)
 - [Repo layout](#repo-layout)
@@ -37,16 +34,11 @@ ModalDish adds two geometric nonlinearities to the modal bank: a dynamic tension
 
 ## How it works
 
-A plate does not vibrate in one piece. It vibrates in **modes**: standing
-patterns, each with its own frequency and its own map of where the plate
-moves and where it stays still. Strike a plate and you excite every mode that
-happens to be moving at the point you struck; listen at a point and you hear
-every mode that is moving *there*. That is the whole instrument, and it is
-why hitting a cymbal near the rim and near the bell give two different
-sounds.
+As any structural object the plate vibrations can be decomposed along its modes, which are standing patterns, each with its own frequency and its own map of where the plate moves and where it stays still. Strike a plate and you excite every mode that happens to be moving at the point you struck. Listen at a point and you hear every mode that is moving *there*. That is the whole instrument, and it is why hitting a cymbal near the rim and near the bell give two different sounds.
 
-For a circle or a rectangle those modes have closed-form answers. For a shape
-you drew by hand they do not, so ModalDish computes them:
+For a circle or a rectangle those modes have closed-form answers. For any shape drawn by hand they do not, so ModalDish computes them using a standard mathematical method calle the *Finite Elements Method*.
+
+The overall workflow of ModalDish can be sketched like this:
 
 ```mermaid
 flowchart LR
@@ -56,46 +48,23 @@ flowchart LR
   D --> E["Strike it,<br>or feed it audio"]
 ```
 
-1. **The shape** is a closed outline with a boundary condition on each part of
-   its edge: clamped, simply supported, sliding, or free. The edge matters as
-   much as the outline does, because it is what the modes have to satisfy.
-2. **The mesh** cuts the interior into triangles (the *Grid* control sets how
-   fine). Straight edges stay straight, corners stay corners.
-3. **The eigensolve** finds the first N modes of that mesh: for each one a
-   frequency and a shape (how much each point of the plate moves). This is the
-   slow step, a few seconds, and it runs in the background while the previous
-   plate keeps sounding.
-4. **The filter bank** is one constant-peak band-pass per mode. Mode *k* gets
-   its centre frequency from the eigenvalue and its bandwidth from the damping
-   controls. A strike at point **x** feeds every filter in proportion to how
-   much mode *k* moves at **x**; a pickup at point **y** sums every filter in
-   proportion to how much mode *k* moves at **y**. Position is not an effect
-   bolted on afterwards, it is the two weightings.
-5. **Above the computed modes**, the bank is filled out to as many as 1024
-   with a *statistical tail*: synthetic modes with the spacing a plate of that
-   area really has and randomised shapes. It costs nothing to solve and it
-   gives the nonlinearities somewhere to put their energy up to Nyquist.
+A. **The shape** is a closed outline with a boundary condition on each part of its edge: clamped, simply supported, sliding, or free.
 
-Two things then make it behave like a plate rather than like a filter bank.
+B. **The mesh** cuts the interior into triangles (the *Grid* control sets how fine).
 
-**Dynamic tension.** A real plate that is bending hard is also being
-stretched, which stiffens it and raises its pitch. The *Nonlinear* control
-turns that on: the whole spectrum glides up on a hard hit and settles back
-down as the plate rings out. It is the gong and floor-tom bend.
+C. **The eigensolve** finds the first N eigenmodes and normalized eigenfrequencies of the meshed plate. This is a max few seconds step, and it runs in the background while the previous plate keeps sounding.
 
-**Mode cascade.** A hard-driven plate also moves energy *upwards* through its
-spectrum, which is where a crash cymbal's shimmer comes from. The *Cascade*
-control runs an eight-band ladder in which each band is pumped by a cubic of
-the bands below it, so loud hits brighten progressively and the effect
-vanishes at low level. *Deplete* is the other half of the trade: while a band
-pumps the ones above it, it loses that energy itself, so the lows audibly
-hand over rather than ringing on underneath.
+D. **The filter bank** is one constant-peak band-pass per mode. Mode *k* gets its centre frequency from the eigenvalue and its bandwidth from the damping controls. A strike at point **A** feeds every filter in proportion to how much mode *k* moves at **A**. A pickup at point **B** sums every filter in proportion to how much mode *k* moves at **B**.
 
-The full derivation (the Kirchhoff plate with tension, the Morley element,
-the shift-invert subspace eigensolver, the Berger approximation, the cascade
-ladder and the statistical tail) is in
-[**doc/technical.pdf**](doc/technical.pdf). Every section below points at the
-part of it that goes deeper.
+E. **Above the computed modes**, the bank is filled out to as many as 1024 with a *statistical tail*: synthetic modes with the spacing a plate of that area really has and randomised shapes. Solving cost is very small compared to the eigenmodes calculation and it gives the nonlinearities somewhere to put their energy up to the Nyquist frequency.
+
+Two things then make it behave like a real nonlinear plate rather than like a linear filter bank:
+
+**Dynamic tension.** A plate bent hard is also stretched, which stiffens it and raises its pitch. The *Nonlinear* parameter controls this effect such that the whole spectrum glides up on a hard hit and settles back down as the plate rings out..
+
+**Mode cascade.** A hard-driven plate also sees its eigenmodes coupled, that that there is and energy exchange between them. This induces and energy cascade from lower to higher frequencies, which is where a crash cymbal's shimmer comes from. The *Cascade* parameter quantifies the effect of an eight-band ladder in which each band is pumped by a cubic of the bands below it, so loud hits brighten progressively and the effect vanishes at low level. *Deplete* is the other half of the trade: while a band pumps the ones above it, it loses that energy itself, so the lows audibly hand over rather than ringing on underneath.
+
+The full derivation (the Kirchhoff plate with tension, the Morley element, the shift-invert subspace eigensolver, the Berger approximation, the cascade ladder and the statistical tail) will be found in the [technical doc repo](https://github.com/odoare/ModalDishPaper).
 
 ## Signal path
 
@@ -103,97 +72,8 @@ The detailed path, from a note or a sample arriving to a sample leaving. The
 grey block runs once per plate, off the audio thread; everything else runs
 per sample.
 
-```mermaid
-flowchart TB
+![ModalDish in Perform mode](doc/img/signalpath.svg)
 
-  subgraph DESIGN["Design — message and background threads"]
-    SHAPE["Shape<br>outline + boundary segments"]
-    MESH["Delaunay mesh<br>(Grid)"]
-    SOLVE["Morley FEM eigensolve<br>(Modes)"]
-    TAILGEN["Statistical tail<br>Weyl spacing, Berry shapes"]
-    MODEL[("Modal model<br>frequencies, mode shapes,<br>tension sensitivities")]
-    SHAPE --> MESH --> SOLVE --> MODEL
-    SOLVE --> TAILGEN --> MODEL
-  end
-
-  subgraph EXC["Excitation"]
-    MIDIIN(["MIDI in"])
-    CCTAB["CC values<br>held per controller"]
-    ROUTE["Note routing<br>Src Chan / Freq Chan"]
-    MAPPING["Source mapping<br>value = min + amount x (max - min)<br>position, hammer time, force"]
-    SPREAD["Spread<br>random offset per hit"]
-    PULSE["Half-sine force pulse"]
-    MOUSE(["Mouse hit"])
-    AUDIN(["Audio in"])
-    INGAIN["In Gain"]
-    SENDS["Per-source In Vol / In Bal"]
-    MIDIIN --> CCTAB --> MAPPING
-    MIDIIN --> ROUTE --> MAPPING --> SPREAD --> PULSE
-    MOUSE --> PULSE
-    AUDIN --> INGAIN --> SENDS
-  end
-
-  DRIVE["Modal drive<br>weighted by the mode shape<br>at the strike / send point"]
-  BANK["Modal filter bank<br>one constant-peak band-pass per mode"]
-
-  PULSE --> DRIVE
-  SENDS --> DRIVE
-  DRIVE --> BANK
-  MODEL -. published atomically .-> BANK
-  MODEL -. mode shapes .-> DRIVE
-
-  subgraph TUNING["Tuning and damping"]
-    OMEGA["Centre frequencies<br>Frequency, MIDI pitch, Glide, Tension"]
-    ZETA["Bandwidths<br>Viscous, Material, Overlap floor"]
-  end
-  OMEGA --> BANK
-  ZETA --> BANK
-
-  subgraph FEEDBACK["Nonlinear feedback"]
-    BANDS["Band-mean modal velocity<br>8 bands"]
-    CUBIC["Cubic carrier<br>tanh(Drive x sum of the Window bands below)"]
-    GATE["Attack / Release gate<br>per band"]
-    AMOUNT["Cascade amount"]
-    DEPLETE["Deplete<br>extra loss on the pumping bands"]
-    BERGER["Berger driver<br>plate stretching -> pitch glide"]
-    BANDS --> CUBIC --> GATE --> AMOUNT
-    GATE --> DEPLETE
-  end
-  BANK --> BANDS
-  BANK --> BERGER
-  AMOUNT --> DRIVE
-  DEPLETE -. state decay .-> BANK
-  BERGER -. dynamic tension .-> OMEGA
-
-  subgraph OUTPUT["Output"]
-    PMIX["Pickup mix<br>mode shape at each pickup,<br>Level, Pan, tail stereo spread"]
-    OUTGAIN["Out Gain"]
-    HPF["20 Hz Butterworth highpass"]
-    STEREO(["Stereo out"])
-    METERS["Peak meters"]
-    PMIX --> OUTGAIN --> HPF --> STEREO
-    HPF --> METERS
-  end
-  BANK --> PMIX
-
-  FIELD["Plate view<br>displacement or velocity, 30 Hz"]
-  BANK -. snapshot .-> FIELD
-```
-
-The same diagram is in the technical paper (figure 1), where each block is
-labelled with the section that derives it.
-
-Three details worth reading off it:
-
-- The cascade is driven by the plate's **motion over the whole plate**, not by
-  what the pickups hear. A mode that is silent at a pickup is not silent on
-  the plate, and the ladder should not think it is. The consequence is that
-  moving a pickup changes what you hear of the shimmer without changing how
-  much shimmer is made.
-- **Out Gain comes before the highpass**, so nothing downstream of the plate
-  can put subsonic energy back, and the meters read what actually leaves.
-- The plate view is a snapshot of the same filter states the audio comes from,
-  not a separate simulation.
 
 ## Installing
 
@@ -230,61 +110,32 @@ rescan. Nothing else is needed.
 
 ## The interface
 
-The window is 1022 by 760 (1142 with the Cascade column open) and has three
-parts: the FX-Mechanics top bar, the plate area on the left, and the control
-panels on the right.
+The window has three parts: the top bar, the plate area on the left, and the control panels on the right.
 
-The plugin has **two modes**, and the panels on screen are the ones belonging
-to the mode you are in. *Modal design* is what the plate **is**; *Perform* is
-how you play it. The buttons for both are in the strip under the plate, along
-with *Compute*, the progress bar and the status line.
+The plugin has **two modes**, and the panels on screen are the ones belonging to the mode you are in. *Modal design* is what the plate **is**; *Perform* is how you play it. The buttons for both are in the strip under the plate, along with *Compute*, the progress bar and the status line.
 
-The split is not cosmetic. *Modes* reallocates and retunes the entire filter
-bank, and raising it while the plate is ringing can produce a very loud
-transient, so it lives on the design side where you are not playing.
+The split is not cosmetic. *Modes* reallocates and retunes the entire filter bank, and raising it while the plate is ringing can produce a very loud transient, so it lives on the design side where you are not playing.
 
-Closing the plugin window and reopening it is a no-op: the mode you were in,
-the view you had selected, the tool, the Cascade column and the angle you had
-turned the 3D plate to all come back as you left them. None of that is in the
-preset or in the session, on purpose. It describes a window rather than a
-sound, so recalling a preset never moves the interface about, and a reloaded
-session opens on the defaults.
+Closing the plugin window and reopening it is a no-op: the mode you were in, the view you had selected, the tool, the Cascade column and the angle you had turned the 3D plate to all come back as you left them. None of that is in the preset or in the session, on purpose. It describes a window rather than a sound, so recalling a preset never moves the interface about, and a reloaded session opens on the defaults.
 
 ### Modal design
 
 ![Modal design mode](doc/img/design.png)
 
-The MODAL DESIGN panel holds a tool selector, a *Load* button, and four
-controls. The mesh is drawn under the outline and rebuilt while you edit, so
-the grid follows a vertex as it is dragged, a shape as it is rotated and the
-*Grid* knob as it is swept, rather than appearing when you let go. The
-boundary-condition key sits in the corner of the sketch itself.
+The modale design panel holds a tool selector across the top, four controls under it, and *Load* and *Save* on a row of their own at the bottom.
 
-A shape that cannot be meshed (a polygon dragged until it crosses itself) simply
-shows no grid until it can be, which is the quickest way to see that it is not
-a plate yet. The freehand tool is the one exception to the live grid: an
-unfinished stroke is an open curve with no interior to mesh, so its grid
-appears when the stroke closes.
+Tools description:
 
-| Tool | What it does |
-| --- | --- |
 | **Draw shape** | Freehand. Drag a closed curve; it is smoothed with a closed spline and resampled to 128 points. |
 | **Place points** | A polygon, vertex by vertex. See below. |
-| **Ellipse** / **Rectangle** | A standard shape from the *Aspect* control. |
 | **Rotate** | Drag to turn the shape inside the canvas. |
 | **Edit boundary** | Drag the segment dividers (*Points* sets how many) and click a segment to cycle its condition. |
 
-Boundary conditions are ordered stiffest first, and colour-coded in the key:
+There are two additionnal buttons *Ellipse* and *Rectagle* that produce a shape with the aspect ratio fixed by the right panel control.
 
-| Condition | The edge is | Sounds |
-| --- | --- | --- |
-| **Clamp** | held flat and still | tight, high, short |
-| **Support** | held still but free to tilt | the default, the drum-head case |
-| **Slide** | free to move but held flat | low and hollow |
-| **Free** | unconstrained | gong-like, the lowest modes of all |
+Boundary conditions are ordered stiffest first, and colour-coded in the key: clamp, support, slide, free. The stiffer the boundary condition, the higher the frequency separation. Note that with the maximum of 1024 modes, it is not possible to cover the full audible range in the less constrained case of a free plate.
 
-Segments are stored as fractions of the perimeter, so they follow the outline
-when you reshape it rather than sliding off it.
+Segments are stored as fractions of the perimeter, so they follow the outline when you reshape it rather than sliding off it.
 
 #### Place points
 
@@ -305,13 +156,11 @@ rather than a drawn curve.
   start over.
 
 Switching to this tool **adopts whatever shape is already on screen**, so a
-freehand blob or an ellipse can be taken over and edited. A dense outline is
-first reduced to at most 20 vertices by Douglas-Peucker, which spends its
-budget on the corners: a dense-sampled rectangle comes back as exactly its
-four corners, while an ellipse holds its area to within 2%. Shapes already
-made of a few vertices (a rectangle, or one loaded from a file) are adopted
-untouched. Boundary conditions are carried as arc-length fractions, so they
-survive the reduction.
+freehand blob or an ellipse can be taken over and edited.
+
+Shapes already sparse enough (a rectangle, or one loaded from a file) are
+adopted untouched. Boundary conditions are carried as arc-length fractions,
+so they survive the reduction.
 
 ### Compute
 
@@ -319,13 +168,9 @@ survive the reduction.
 and drops you into Perform when it finishes. The plate goes on sounding the
 previous model until the new one is ready, so editing never cuts the audio.
 
-*Perform* on its own goes back to the last model computed, keeping the shape,
-so a shape can be worked on across several passes without the plate ever
-falling silent.
+*Perform* on its own goes back to the last model computed, keeping the shape,so a shape can be worked on across several passes without the plate ever falling silent.
 
-What a solve costs is set by the **mode count**, not by the *Grid* setting:
-the matrices are sparse and the solver is not quadratic in mesh size. The
-status line shows the projected memory footprint once it passes 48 MB.
+What a solve costs depends both on mode count and the grid setting.
 
 ### Perform
 
@@ -343,27 +188,18 @@ the plate area shows:
 
 ![The plate as a lit 3D surface](doc/img/view3d.png)
 
-The colour scale is held across frames, so a ring visibly cools as it decays
-rather than being renormalised each frame: hard hits stay bright longer, and
-heavy damping fades out in a second.
-
 Velocity only looks different from displacement when high modes are actually
 ringing. With the default 3 ms hammer the two are indistinguishable; at
 0.3 ms the velocity field carries about twice the spatial detail. Neither
-shows the cascade, whose shimmer lives in the statistical tail, and tail modes
-have no mesh shape to draw.
+shows the cascade, whose shimmer lives in the statistical tail, and tail modes have no mesh shape to draw.
 
 ### Markers: pickups and sources
 
-The plate carries up to eight **pickups** (orchid circles, labelled 1-8) and
-up to eight **sources** (teal circles, labelled a-h). Pickups are where you
-listen; sources are where the plate gets hit and where the input goes in. A
-disabled one is drawn as a faint ring rather than removed, so it can still be
-found.
+The plate carries up to eight **pickups** (magenta circles, labelled 1-8) and up to eight **sources** (teal circles, labelled a-h). Pickups are where you listen. Sources are where the plate gets hit and where the input goes in. A disabled one is drawn as a faint ring.
 
-Out of the box, pickup 1 is on and centred at unity gain, and source *a* is on
-and centred at full send: a single mono listening point and a single injection
-point, which is what the plugin was before either became plural.
+Out of the box, pickup 1 is on and centred at unity gain, and source *a* is on and centred at full send: a single mono listening point and a single injection point.
+
+This table gives the implemented gestures for the source and pickup design:
 
 | Gesture | Effect |
 | --- | --- |
@@ -374,15 +210,7 @@ point, which is what the plugin was before either became plural.
 | click anywhere else | hit the plate there, with the global *Duration* and *Force* |
 | right-click / ctrl-drag | move pickup 1 |
 
-A hit flashes a white ring where it actually landed, sized by how hard the
-plate was struck. A source with *Spread* visibly scatters, and a note firing
-several sources flashes each.
-
-The **TRANSDUCERS** panel repeats those sixteen markers as two rows of
-switches, pickups above and sources below, drawn as the very markers they
-control so the rows read as a picture of what is currently on. They are the
-same parameters as the *On* button in a marker's own panel and as alt-click on
-the plate, so all three always agree.
+The **TRANSDUCERS** panel repeats those sixteen markers as two rows of switches, pickups above and sources below, drawn as the very markers they control so the rows read as a picture of what is currently on. They are the same parameters as the *On* button in a marker's own panel and as alt-click on the plate.
 
 ### Marker panels
 
@@ -390,36 +218,17 @@ Clicking a marker opens its panel over the plate.
 
 ![A pickup panel](doc/img/pickup-panel.png)
 
-A **pickup** panel has X, Y, Level, Pan, On, and a meter of what that point is
-hearing: mono, with its Level applied and its Pan not, so it answers how much
-this pickup is picking up rather than where that lands in the image. Only the
-pickup whose panel is open is metered, so the reading costs one multiply-add
-per mode while a panel is up and nothing at all otherwise.
+A **pickup** panel has X, Y, Level, Pan, On, and a meter of what that point is hearing: mono, with its Level applied and its Pan not, so it answers how much this pickup is picking up rather than where that lands in the image. Only the pickup whose panel is open is metered.
 
 ![A source panel](doc/img/source-panel.png)
 
-A **source** panel is a five-by-three grid, plus a *Note* box and a *MIDI
-learn* button in the footer. Three of its quantities are **mapped**: where it
-strikes, how long the hammer stays in contact, and how hard. Each is a
-*min* / *max* pair plus a *Control* choosing what moves between them. See
-[Source mappings](#source-mappings).
+A **source** panel is a five-by-three grid, plus a *Note* box and a *MIDI learn* button in the footer. Three of its quantities are mapped: where it strikes, how long the hammer stays in contact, and how hard. Each is a *min* / *max* pair plus a *Control* choosing what moves between them. See [Source mappings](#source-mappings).
 
 ### Meters
 
-Every meter in the plugin reads **peak**, held and then falling at 20 dB per
-second, and the hold is computed alongside the audio rather than by the
-editor, so a transient cannot slip between two GUI frames. Peak rather than
-RMS because a struck plate is peaky: its short-term RMS runs 8 to 12 dB under
-its sample peak, so an RMS bar would read +3 while the output was really at
-+13.
-
-The two IO meters read the master pair, post *Out Gain* and post highpass:
-what actually leaves.
+Every meter in the plugin reads **peak**, held and then falling at 20 dB per second. The two IO meters read the master pair, post *Out Gain* and post highpass, which is what actually leaves the plugin.
 
 ## Parameters
-
-Ranges and defaults as shipped. The rightmost column points into
-[doc/technical.pdf](doc/technical.pdf).
 
 ### MODAL DESIGN
 
@@ -430,22 +239,11 @@ Ranges and defaults as shipped. The rightmost column points into
 | **Grid** | 8 - 48 | 16 | mesh density (elements across the plate). Finer is more accurate, not more modes. |
 | **Modes** | 1 - 1024 | 192 | size of the filter bank. Past the computed FEM count (up to 256) the rest is the statistical tail. |
 
-*Grid* and *Modes* are the two halves of the cost. Accuracy comes from *Grid*;
-range and shimmer density come from *Modes*. The bank only processes modes
-below Nyquist, so at a high *Frequency* setting a large bank costs nothing past
-the point where the spectrum runs out.
-
-Because the tail continues at the plate's own spacing, bank size buys **range,
-not density**: added modes go above the ones already there rather than between
-them. What that range is for is the bottom of the *Frequency* range, where the
-plate used to run out of spectrum well below Nyquist.
-
-> Technical paper: *Mesh generation*, *The eigenvalue problem*, *The
-> statistical mode tail*.
+Increasing *Grid* and *Modes* increase computational cost. Accuracy comes from *Grid*. Frequency range and shimmer density come from *Modes*. Only modes below the Nyquist frequency are processed, so at a high *Frequency* setting a large bank costs nothing past the point where the spectrum runs out. Because the added frequencies of the tail continues at the plate's own spacing, bank size determines the frequency range, not the density because added modes go above the ones already there rather than between them. So increasing range helps for small values of the *Frequency* parameter range, where the plate used to run out of spectrum well below the Nyquist frequency.
 
 ### FREQUENCY CONTROL
 
-![The frequncy controls](doc/img/frequency-controls.png)
+![The frequency controls](doc/img/frequency-controls.png)
 
 | Control | Range | Default | What it does |
 | --- | --- | --- | --- |
@@ -455,18 +253,9 @@ plate used to run out of spectrum well below Nyquist.
 | **Freq Chan** | Off, 1 - 16 | Off | the MIDI channel that tunes |
 | **Unmapped note hits** | on / off | on | what a note no source claims does |
 
-*Frequency* reaches down to 1 Hz, where most of the bank falls below the 20 Hz
-audibility floor and is muted outright, leaving a sparse high spectrum. The
-output carries a fixed second-order Butterworth highpass at 20 Hz so that what
-the low settings do not use never reaches a woofer. It is 3 dB down at 20 Hz,
-12 dB/oct below, and has a double zero at DC, so an offset is removed
-absolutely rather than attenuated; above 35 Hz it is within 0.4 dB of flat.
+The *Frequency* parameter starts at 1 Hz. The output carries a fixed second-order Butterworth highpass at 20 Hz so that what the low settings do not use never reaches a woofer. Tuning a plate's base frequency so low is useful when one wants to increase modal density, at the price of a lower upper value of the frequency range.
 
-*Glide* is a time and not a rate, and the travel is logarithmic, so a glide
-takes the same time whatever the interval. It is a time in seconds rather than
-in samples, so it lasts as long at 96 kHz as at 48.
-
-> Technical paper: *Playing the plate: notes, channels and glide*.
+*Glide* is a time in seconds and not a rate, and the travel is logarithmic, so a glide takes the same time whatever the interval.
 
 ### DYNAMICS
 
@@ -482,37 +271,19 @@ in samples, so it lasts as long at 96 kHz as at 48.
 | **Deplete** | 0 - 1 | 0.07 | how much the pumping bands lose in return |
 | **A >** | | closed | opens the CASCADE column |
 
-**Tension** retunes the bank at audio rate: the eigenproblem is solved at
-whatever tension was set when *Compute* ran, and moves around it follow a
-first-order law. Press *Compute* again for exactness at a very different
-tension. Note that it keeps mode 1 pinned at *Frequency* and reshapes the
-ratios only, where *Nonlinear* moves the whole spectrum including the
-fundamental.
+**Tension** retunes the bank at audio rate: the eigenproblem is solved at whatever tension was set when *Compute* ran, and moves around it follow an approximated first-order law, which allows instantaneous recomputation of the frequencies. Press *Compute* again for exactness at a very different tension. Note that it keeps mode 1 pinned at *Frequency* and reshapes the ratios only, where *Nonlinear* moves the whole spectrum including the fundamental.
 
-**Viscous** and **Material** are both the damping ratio of mode 1, and they
-differ in what they do to everything above it: viscous damping decays
-relatively slower for high modes, material damping faster. Material's law is
-steep enough that the shipped 7e-6 is already most of what the top octave will
-take.
+**Viscous** and **Material** are both the damping ratio of mode 1, and they differ in what they do to everything above it: viscous damping decays relatively slower for high modes, material damping faster, allowing a large variety of vibrational timbres.
 
-**Nonlinear** is calibrated in audible glide rather than in plate units, so
-the same setting bends by about the same amount on any shape. The whole
-spectrum rises on a hard hit and relaxes as the plate rings out.
+**Nonlinear** is calibrated in audible glide rather than in plate units, so the same setting bends by about the same amount on any shape. The whole spectrum rises on a hard hit and relaxes as the plate rings out.
 
-**Cascade** at 0 is off in a stronger sense than just silent: the *Overlap*
-bandwidth floor is scaled by the amount too, so at 0 the target modes keep the
-plate's own damping instead of being quietly widened while nothing is being
-pumped.
-
-> Technical paper: *Frequency and damping laws*, *Dynamic tension: the Berger
-> approximation*, *Mode cascade: a multi-band cubic ladder*.
+**Cascade** at 0 is off in a stronger sense than just silent: the *Overlap* bandwidth floor is scaled by the amount too, so at 0 the target modes keep the plate's own damping instead of being quietly widened while nothing is being pumped.
 
 ### CASCADE (the **A >** column)
 
 ![The advanced cascad controls](doc/img/cascad-controls.png)
 
-These voice the ladder rather than sizing it. Useful workflow: set them with
-*Cascade* already up, then bring *Cascade* to where you want it.
+These parameters voiceallows fine tuning of the cascad effect. Recommended cxorkflow is to set them with *Cascade* already up, then bring *Cascade* to a satisfying value.
 
 | Control | Range | Default | What it does |
 | --- | --- | --- | --- |
@@ -528,45 +299,9 @@ plate. Off, the default, injects it at the hit point, through the same mode
 shapes a hammer strike uses. On, it injects through a fixed per-mode
 weighting instead.
 
-On is the more physical of the two. The nonlinear coupling of a real plate is
-an integral over the whole plate and contains no strike position at all; the
-strike matters only because it decides which modes are ringing for the
-coupling to work on. It is also the choice the cascade's *input* side already
-makes, for the same reason: the ladder is driven by the plate's motion rather
-than by what a pickup hears, because the plate does not know where the
-microphone is either. Off applies position a second time, on the way back in.
+On is the more physical of the two choices, but still approximated. The nonlinear coupling of a real plate is an integral over the whole plate and contains no strike position at all. The option is left to the user to let more timbre choices. Both are worth having, which is why this is a switch and not a correction. Off ties the shimmer's character tightly to where you play, which is expressive even though it is not what a plate does. One case is worth knowing about: a strike on a symmetric plate's exact centre is a node of most modes, so few of them ring and the cascade is much weaker.
 
-You do not lose the hit point either way. It still decides which modes ring,
-so it still reaches the ladder. What changes is how much: measured on the
-plate's motion across five strike positions, the shimmer varies by 11 dB with
-the default injection and by 2.9 dB with *Modal inject* on, the remainder
-being the honest part that comes through the modes.
-
-Both are worth having, which is why this is a switch and not a correction.
-Off ties the shimmer's character tightly to where you play, which is
-expressive even though it is not what a plate does. On is steadier and more
-even across the plate. One case is worth knowing about: a strike on a
-symmetric plate's exact centre is a node of most modes, so few of them ring
-and the cascade is much weaker — with *Modal inject* on that is audible, and
-with it off the injection partly hides it.
-
-It ships off, so every existing patch sounds as it did. The two have the same
-injection strength on average, so *Drive*, the gate times and the voiced
-defaults carry across unchanged.
-
-Two things about **Drive**. It is not gradual: at *Cascade* 1 and the shipped
-*Force*, everything from 0.1 to 4 is silent and 4 to 16 covers 76 dB. And
-where that window sits depends on how hard you play, because the tanh knee
-does: 8 matches the voiced sound at *Force* 1, 6 at *Force* 6, 4 at
-*Force* 15.
-
-The band graph is a strict DAG (no band pumps itself, directly or indirectly),
-so the ladder is unconditionally stable with no gain restriction to respect.
-
-Every duration here means the same thing at any sample rate: they are stored
-in seconds and converted when the rate is known.
-
-> Technical paper: *Mode cascade: a multi-band cubic ladder*.
+Two things about **Drive**: It is not gradual: at *Cascade* 1 and *Force* 1 (the default), everything from 0.1 to 4 is silent and 4 to 16 covers 76 dB. And where that window sits depends on how hard you play. So *Drive* may have sometimes to be adjusted by hear.
 
 ### HAMMER CONTROL
 
@@ -576,19 +311,13 @@ in seconds and converted when the rate is known.
 | --- | --- | --- | --- |
 | **Duration** | 0.1 - 50 ms | 3 ms | length of the half-sine shock |
 | **Force** | 0 - 20 | 1 | its amplitude |
+| **Src Dur** | x0.1 - x10 | x1 | scales every source's hammer duration |
+| **Src Force** | x0.1 - x10 | x1 | scales every source's force |
 
-These are the *global* hammer, used by a mouse click on bare plate and by a
-MIDI note no source claims. A source has its own pair, and its own mapping for
-each. Short and hard is a stick; long and soft is a mallet.
+*Duration* and *Force* are for the "mouse" hammer, triggered by a click on
+bare plate and by a MIDI note no source claims (if the corresponding option is on). A source has its own pair, and its own mapping for each. The attack of a soft mallet would correspond to short time and large force, the opposite for a stick.
 
-*Force* goes well past unity because with the nonlinearities engaged the
-absolute level matters (it drives both of them). Nothing downstream is
-unbounded in it: the linear bank is linear in the force, the Berger driver
-saturates well below *Force* 5, and the tanh holds the cascade carriers to
-plus or minus one. What a hard hit buys past that point is the gating and the
-depletion, not more level.
-
-> Technical paper: *Excitation, pickup, gain compensation*.
+*Src Dur* and *Src Force* are trims over all eight sources, multiplying rather than replace each one whatever a source's own min/max mapping. They are what makes a kit of eight playable as one instrument, since hitting the whole set harder or softer is otherwise sixteen knob moves. They do not touch the global hammer above, which is already a single control.
 
 ### IO
 
@@ -599,8 +328,7 @@ depletion, not more level.
 | **In Gain** | 0 - 2 | 0 | how much of the plugin input reaches the sources |
 | **Out Gain** | -36 - +12 dB | 0 dB | master level, before the highpass |
 
-*In Gain* at 0 is the instrument case: nothing goes in and the plate is played
-by strikes alone. Raise it to use ModalDish as an effect.
+*In Gain* at 0 is the instrument case: nothing goes in and the plate is played by strikes alone. Raise it to use ModalDish as an effect.
 
 ### Pickup panel
 
@@ -611,18 +339,9 @@ by strikes alone. Raise it to use ModalDish as an effect.
 | **Pan** | -1 - +1 | pickup 1 centred | equal-power, with the centre at unity |
 | **On** | | pickup 1 only | |
 
-Pan is equal-power with the centre at unity, so a centred pickup at 0 dB is
-exactly what a single mono output would be. The pickups are a linear mix, so
-the audio loop costs the same whether one is on or eight.
+The pickups are a linear mix, so the audio loop costs the same whether one is on or eight. But note that as they sum up, the audio can be significantly louder with 8 pickups than with one.
 
-Positions matter most for the low modes, where a handful of mode shapes give
-each point its own emphasis. High in the spectrum, hundreds of positive terms
-converge to nearly the same value wherever the pickup sits, which is why the
-statistical tail carries its own stereo spread instead (see the technical
-paper).
-
-> Technical paper: *Excitation, pickup, gain compensation*, *Stereo placement
-> of the tail*.
+Positions matter most for the low modes, where a handful of mode shapes give each point its own emphasis. High in the spectrum, hundreds of positive terms converge to nearly the same value wherever the pickup sits, which is why the statistical tail carries its own stereo spread instead.
 
 ### Source panel
 
@@ -652,29 +371,32 @@ The grid, left to right and top to bottom:
 | **Note** | Off, C-1 - G9 | Off | the MIDI note this source answers to |
 | **On** | | source *a* only | |
 
-*Spread* scatters around wherever the mapping placed the hit, not around the
-base point, so a moving strike point and a scattered one compose.
+*Spread* randomize around wherever the mapping placed the hit.
 
-The shipped defaults (*Frc Min* 0, *Frc Max* 1, *Frc Ctl* Vel) are exactly
-"velocity scales force", which is what the hammer did before any of the
+The shipped defaults (*Frc Min* 0, *Frc Max* 1, *Frc Ctl* Vel) are exactly "velocity scales force", which is what the hammer did before any of the
 mapping existed.
 
-Only strikes follow the mappings. The audio input is injected at the *X1*/*Y1*
-point alone, a continuous signal having no velocity to place it by.
+Only strikes follow the mappings. The audio input is injected at the *X1*/*Y1* point alone, a continuous signal having no velocity to place it by.
+
+Also note that a force of 1 don't raise a lot the nonlinearities or might sound too low. Generally, interesting behaviours arise when the force is pushed higher.
 
 ## Playing it
 
 ### With the mouse
 
-Click anywhere on the plate that is not a marker and it is struck there, with
-the global *Duration* and *Force*. That is the fastest way to audition a
-shape, and it is what the design and compute cycle is built around.
+Click anywhere on the plate that is not a marker and it is struck there, with the global *Duration* and *Force*. That is the fastest way to audition a shape, and it is what the design and compute cycle is built around.
 
 ### Source mappings
 
-Each source has three quantities that a control can move: **where** it
-strikes, **how long** the hammer is in contact, and **how hard**. Each is a
-min/max pair and a *Control*.
+Each source has three quantities that a control can move:
+
+- **where** it strikes
+
+- **how long** the hammer is in contact
+
+- **how hard**.
+
+Each is a min/max pair and a *Control*.
 
 The value used for a strike is
 
@@ -682,66 +404,33 @@ The value used for a strike is
 value = min + amount x (max - min)
 ```
 
-where *amount* runs 0 to 1 and comes from the *Control*:
+where *amount* is between 0 and 1 and comes from the *Control*:
 
 - **Off** holds the quantity at its *min*.
-- **Vel** uses the triggering note's velocity, shaped by *Curve*. *Slow*
-  squares it (a hard hit is needed before much happens), *Fast* takes its root
-  (it responds early), *Linear* is the identity.
-- **A CC number** is taken as the player's hardware left it, uncurved, and is
-  read at strike time from the sources' MIDI channel. A controller that has
-  never moved reads zero, holding the min.
+- **Vel** uses the triggering note's velocity, shaped by *Curve* (slow, linear, or fast)
+- **A CC number** is taken as the player's hardware left it, uncurved, and is read at strike time from the sources' MIDI channel. A controller that has never moved reads zero, holding the min.
 
-**Min is not required to be below max.** Putting it above simply inverts the
-mapping, so a source can hit *softer* the harder it is played, or move toward
-the rim as a pedal is released.
+**Min is not required to be below max.** Putting it above simply inverts the mapping, so a source can hit *softer* the harder it is played, or move toward the rim as a pedal is released.
 
-The three controls are independent: position can follow a pedal while force
-follows velocity.
+**Position** is the segment drawn on the plate. The lower-case marker (*a*) is the *min* end and the upper-case one (*A*) the *max*. Played across the range, the plate is struck in different places, nearer the rim or nearer the centre, which is what a real player does and a fixed point cannot imitate.
 
-**Position** is the segment drawn on the plate. The lower-case marker (*a*) is
-the *min* end and the upper-case one (*A*) the *max*. Played across the range,
-the plate is struck in different places, nearer the rim or nearer the centre,
-which is what a real player does and a fixed point cannot imitate.
-
-Both endpoints start on top of each other, so a source is a plain point until
-you pull it apart, and dragging the marker then moves the whole thing. To
-separate them, hover the plate and press the **capital** letter (`A`-`H`) to
-drop the *A* end under the cursor, or use the *X2* / *Y2* boxes. The two are
-then joined by a thin line and drag independently.
+Both endpoints start on top of each other, so a source is a plain point until you pull it apart. To separate them, hover the plate and press the capital letter (`A`-`H`) to drop the *A* end under the cursor, or use the *X2* / *Y2* boxes. The two are then joined by a thin line.
 
 ### From MIDI
 
-A note does two independent things: it **triggers** and it **tunes**. Which of
-them a given note does is decided by the two channel controls, so the same
-keyboard can do both, or two controllers can split the job.
+A note does two independent things: it **triggers** and it **tunes**. This is determined by the below parameters.
 
-**Src Chan** (default *Omni*) is the channel that triggers. A note on it fires
-every enabled source mapped to that note. Note-offs are ignored: a struck
-plate rings out on its own, so the decay is the damping, not the key.
+**Src Chan** (default *Omni*) is the channel that triggers. A note on it fires every enabled source mapped to that note. Note-offs are ignored: a struck plate rings out on its own, so the decay is the damping.
 
 **Unmapped note hits** says what a note on that channel does when no source
 claims it: strike the last touched point with the global *Duration* and
 *Force*, or nothing. On is what makes the plugin playable from a keyboard
-before any source is mapped. Switch it off once every note is mapped, so a
-stray one stays silent rather than hitting wherever the mouse last was.
+before any source is mapped. But the general workflow is to switch it off once every note is mapped, so a stray one stays silent rather than hitting wherever the mouse last was.
 
 **Freq Chan** (default *Off*) is the channel that tunes. A note on it moves
-the plate so **mode 1 lands on the note**, the rest of the spectrum following
-the ratios the geometry and boundary conditions give it. It ships Off, so
-notes only trigger until you assign it. Set both controls to the same channel
-(or leave *Src Chan* on Omni) to play the plate as one instrument, or give
-them different channels to retune it from a second controller without
-striking.
+the plate so mode 1 frequency is determined by the midi note, the rest of the spectrum following the ratios the geometry and boundary conditions give it. It is Off by default, so notes only trigger until you assign it. Set both controls to the same channel (or leave *Src Chan* on Omni) to play the plate as one instrument, or give them different channels to retune it from a second controller without striking.
 
-Two things deliberately never glide: the *Frequency* control, which sets the
-pitch outright, and the first note after loading, which lands in tune instead
-of swooping up from wherever *Frequency* happened to sit.
-
-**MIDI learn.** A source's panel carries a Learn button: arm it and the next
-note received is captured as that source's note, and swallowed, so learning
-never costs you a stray hit. Clicking it again, or closing the panel, gives
-up.
+**MIDI learn.** A source's panel carries a Learn button: arm it and the next note received is captured as that source's note.
 
 Hosts differ on whether an audio effect can receive MIDI at all:
 
@@ -752,9 +441,6 @@ Hosts differ on whether an audio effect can receive MIDI at all:
 | Bitwig / Studio One / Cubase | Route a MIDI track's output to the plugin (note-input assignment). |
 | Logic | Use the AU: it appears under *MIDI-controlled Effects*, not Audio FX. |
 
-If nothing seems to arrive, watch the plate: a note that lands flashes the
-same ring a mouse click does.
-
 ### As an effect
 
 Raise *In Gain* and the plugin input is injected into the plate at each
@@ -762,12 +448,9 @@ enabled source's *X1*/*Y1* point, with that source's *In Vol* and *In Bal*.
 The plate then acts as a resonant body over whatever you send it, and the
 strike controls still work on top, so it can be excited by both at once.
 
-## Loading a geometry from a file
+## Geometry files
 
-*Load* (beside the tool selector, in design mode) reads a plate outline from a
-JSON file. The shape lands **in the canvas** as an ordinary editable one:
-points can be dragged, segments re-cut, conditions cycled, and nothing is
-computed until you press *Compute*.
+*Load* (on the file row of the MODAL DESIGN panel) reads a plate outline from a JSON file. The shape lands **in the canvas** as an ordinary editable one: points can be dragged, segments re-cut, conditions cycled, and nothing is computed until you press *Compute*.
 
 ```json
 {
@@ -784,44 +467,27 @@ computed until you press *Compute*.
 }
 ```
 
-- `points` — (x, y) pairs in [-1, 1] with **y up** (the mathematical
-  convention, not the screen one), joined in order and closed from the last
-  back to the first. Straight edges: the mesher resamples them and keeps any
-  turn sharper than 30 degrees as a corner, so four points really is a valid
-  file. The full [-1, 1] range maps onto the same margin box a drawn shape is
-  fitted into. A shape that uses less of the range stays proportionally
-  smaller rather than being stretched to fill, which also means it gets
-  proportionally fewer elements, since *Grid* sets an absolute element size.
-- `boundary` — optional, maps a **point index** to the condition starting at
-  that point. A point that is not listed inherits the condition of the
-  previous listed one, wrapping around from the end, so the example above is
-  supported from point 2 round to point 1. Names are case-insensitive and
-  accept the obvious variants (`clamp`/`clamped`, `support`/`simplysupported`,
-  `slide`/`sliding`, `free`); a bare 0-3 works too. Omit the key entirely for
-  a simply supported edge all round.
+- `points` — (x, y) pairs in [-1, 1] with **y up** (the mathematical convention, not the screen one), joined in order and closed from the last back to the first. Straight edges: the mesher resamples them and keeps any turn sharper than 30 degrees as a corner, so four points really is a valid file. The full [-1, 1] range maps onto the same margin box a drawn shape is fitted into. A shape that uses less of the range stays proportionally smaller rather than being stretched to fill, which also means it gets proportionally fewer elements, since *Grid* sets an absolute element size.
+
+- `boundary` — optional, maps a **point index** to the condition starting at that point. A point that is not listed inherits the condition of the previous listed one, wrapping around from the end, so the example above is supported from point 2 round to point 1. Names are case-insensitive and accept the obvious variants (`clamp`/`clamped`, `support`/`simplysupported`, `slide`/`sliding`, `free`); a bare 0-3 works too. Omit the key entirely for a simply supported edge all round.
+
 - `meshDensity` — optional, 8 to 48, the same number the *Grid* control sets.
+
 - `name` and `modaldish_shape` are carried but not required.
 
-A malformed file is refused with a message naming what is wrong and where (the
-offending point index, the unknown condition, the out-of-range key) rather
-than loading a half-shape. Examples live in [`Shapes/`](Shapes/).
+A malformed file is refused with a message naming what is wrong and where (the offending point index, the unknown condition, the out-of-range key) rather than loading a half-shape. Examples live in [`Shapes/`](Shapes/).
+
+*Save* writes the shape on screen back out in the same format, so a plate can live outside a preset, be edited by hand, or be shared. One step is lossy and worth knowing about: the file keys conditions by **point index**, while the editor carries them as positions along the edge that a dragged divider can put anywhere, so each divider is written at the vertex nearest to it. A file that was loaded and saved again is unchanged, its dividers being on vertices already. One whose dividers you dragged moves them to the nearest vertex, which is a fraction of a percent of the perimeter on a drawn outline and can be a whole corner on a four-point rectangle.
 
 ## Presets
 
 ![The preset browser](doc/img/presets.png)
 
-The top bar carries the standard FX-Mechanics preset strip (previous / next /
-name / save) and a triangle button opening the browser over the working area.
-User presets live in the per-product folder (`~/.config/ModalDish/Presets` on
-Linux, `~/Library/Application Support/ModalDish/Presets` on macOS,
-`%APPDATA%\ModalDish\Presets` on Windows), and any `.xml` dropped into
-[`Source/Presets/`](Source/Presets/) is embedded as a factory preset.
+The top bar carries the standard FX-Mechanics preset strip (previous / next / name / save) and a triangle button opening the browser over the working area. User presets live in the per-product folder (`~/.config/ModalDish/Presets` on Linux, `~/Library/Application Support/ModalDish/Presets` on macOS, `%APPDATA%\ModalDish\Presets` on Windows), and any `.xml` dropped into [`Source/Presets/`](Source/Presets/) is embedded as a factory preset.
 
 ### What a preset, and a session, actually contain
 
-Three things, and they are the same three whether the state is being written
-into a preset file or into a DAW session. Both travel by the same route, so
-neither can carry something the other does not.
+Three things, and they are the same three whether the state is being written into a preset file or into a DAW session. Both travel by the same route, so neither can carry something the other does not.
 
 | | Stored | Restored |
 | --- | --- | --- |
@@ -829,31 +495,13 @@ neither can carry something the other does not.
 | **Geometry** | the outline, the segment positions and their boundary conditions | the mesh is rebuilt from it (fast, milliseconds) |
 | **Modal data** | the eigenvalues, the tension sensitivities, the mode shapes and the statistical tail | published straight to the audio thread, with no eigensolve |
 
-The **mesh is not stored**, because it does not need to be: it is a
-deterministic function of the outline and *Grid*, both of which are, so
-rebuilding it costs less than reading it would. Only its vertex count travels,
-as a check that the stored mode shapes are indexed against the mesh that comes
-back.
+The **mesh is not stored**, because it can be rebuilt with the geometry data.
 
-The **modal data is stored**, which is the part worth knowing about, because
-it is what a plate costs to compute. It is one float per mesh vertex per mode:
-about 0.1 MB for the shipped plate at *Grid* 16, 1.4 MB for it at *Grid* 48,
-and 2.2 MB for the largest plate the canvas holds at *Grid* 48. The state is
-gzipped on the way out, which almost exactly cancels the base64 the blocks are
-written as, so those are also the figures that reach the disk.
+The **modal data is stored** to save computation time on reload. It is one float per mesh vertex per mode (about 0.1 MB for the shipped plate at *Grid* 16, 1.4 MB for it at *Grid* 48, and 2.2 MB for the largest plate the canvas holds at *Grid* 48). The state is gzipped on the way out.
 
-That is a large preset by the standards of a plugin whose parameters would fit
-in a few kilobytes, and it is worth it: without the cache, loading a preset
-means waiting out an eigensolve, which is seconds at a modest *Grid* and tens
-of seconds at the top of the range. There is no previous model to go on
-sounding on a fresh load, so that wait is silence. With the cache the plate
-sounds as soon as the preset lands.
+That is a large preset by the standards of a plugin whose parameters would fit in a few kilobytes.
 
-The eigensolve is still there as the fallback, and runs in the background the
-way the *Compute* button does, when the cache is missing (a preset saved
-before its plate was ever computed) or does not match the mesh the geometry
-rebuilds to. That is the one case where a loaded plate is briefly silent, and
-the progress bar says so.
+The eigensolver computation is still there as the fallback, and runs in the background the way the *Compute* button does, when the cache is missing (a preset saved before its plate was ever computed) or does not match the mesh the geometry rebuilds to. That is the one case where a loaded plate is briefly silent, and the progress bar says so.
 
 ## Building
 
@@ -907,9 +555,7 @@ licence - see [LICENSE.md](LICENSE.md) for the details and the four
 framework-free files that stay LGPL-3.0-or-later.
 
 The finite-element mesher and the Morley plate eigensolver are not in this
-repository: they live in the framework-free half of
-[FxmeTools](https://github.com/odoare/FxmeTools) under LGPL-3.0-or-later, and
-can be used without JUCE.
+repository: they live in the framework-free half of [FxmeTools](https://github.com/odoare/FxmeTools) under LGPL-3.0-or-later, and can be used without JUCE.
 
 ---
 Author: Olivier Doaré · FX-Mechanics · AGPL-3.0-or-later OR LicenseRef-FXME-Commercial
