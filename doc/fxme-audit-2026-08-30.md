@@ -2,6 +2,8 @@
 
 Revisions:
 
+- 2026-09-03, sixth pass: R1 applied, and the finding grew while being fixed
+  (see below). This closes the last open item in the report.
 - 2026-08-30, fifth pass: H3 and H5 applied (both in the submodule). H4
   declined, with a note on when it would become worth doing.
 - 2026-08-30, fourth pass: H1 and H2 applied, both verified bit-identical.
@@ -83,17 +85,41 @@ DAW skips it silently. The per-host MIDI routing section is already present
 
 ## Retrofit
 
-### R1 — `setTooltip` is called but no `TooltipWindow` exists — **declined for now**
+### R1 — `setTooltip` is called but no `TooltipWindow` exists — **applied**
 
-- [ ] [../Source/PluginEditor.cpp](../Source/PluginEditor.cpp) sets a tooltip on
-      the presets button; nothing in the project owns a `juce::TooltipWindow`,
-      so that tooltip never appears.
+- [x] [../Source/PluginEditor.cpp](../Source/PluginEditor.cpp) sets a tooltip on
+      the presets button; nothing in the project owned a `juce::TooltipWindow`,
+      so that tooltip never appeared. It does now, and so does the one
+      `fxme::InfoButton` sets on itself.
 
-Declined on 2026-08-30. Worth re-reading before release, because R3 added a
-second invisible tooltip: `fxme::InfoButton` sets one on itself in its
-constructor ("Help & shortcuts for this page"). Neither is load-bearing (both
-controls are legible without them), so nothing is broken, but the count of
-tooltips that exist and cannot be seen is now two rather than one.
+Declined on 2026-08-30, applied on 2026-09-03, and the shape of it changed on
+the way. The finding as written was two invisible strings on two buttons that
+are legible without them, which is why it was worth declining: making them
+appear fixed nothing anybody could feel.
+
+What made it worth doing was turning it round. The plugin has around forty
+number boxes whose labels are six or seven characters (`Ham Max`, `Frc Ctl`,
+`Src Dur`, `Deplete`), because that is what fits in a box that size. The
+README explains every one of them, but the README is not in front of the
+player. So the window was added *and* every number box was given a sentence,
+which is the thing the window was missing rather than the reverse.
+
+- [x] Editor owns a `juce::TooltipWindow`, parented to itself rather than left
+      to make a desktop window (a plugin's tip belongs inside the plugin).
+- [x] Every `fxme::FxmeNumberBox` in the editor and in both marker panels
+      carries an explanation, held in [../Source/Tooltips.h](../Source/Tooltips.h)
+      so they read as a set and stay diffable against the README's parameter
+      tables.
+- [x] `fem::theme::styleBox` takes the tooltip as a **required** argument, so
+      a control added later cannot be styled and left silently unexplained.
+- [x] A `?` toggle in the top bar beside the info button turns them off. It
+      destroys the `TooltipWindow` rather than dimming it, so off means no
+      mechanism running at all, and the state joins the rest of `EditorState`
+      (remembered while the host lives, not written to preset or session).
+
+Still without tooltips, deliberately: the combo boxes, the file and mode
+buttons, and the plate markers. Their names are full words or their meaning is
+the picture they sit on. Worth revisiting only if a player asks.
 
 ### R2 — no control enablement for superseded parameters — **safe to apply**
 
@@ -383,6 +409,8 @@ pointer has to move after its own commit.
 - [ ] Add `Source/Assets/splash.png`, `Source/Assets/icon.png`,
       `Source/Presets/`, `Source/ShapeFile.{h,cpp}`, `Tests/ShapeFileTests.cpp`
       and `Shapes/`; `Source/Assets/splash.jpg` is deleted.
+- [ ] Add `Source/Tooltips.h` (R1, sixth pass). The CMake source list is a
+      glob, so it needs no build change, only tracking.
 - [ ] This report is deliberately left unstaged.
 
 Build commands, yours to run:

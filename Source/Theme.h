@@ -158,10 +158,17 @@ namespace fem::theme
     // style is deliberately left alone: the box sets RotaryVerticalDrag in
     // its constructor, and a box this small is unusable with the horizontal
     // mapping a knob wants.
-    inline void styleBox (fxme::FxmeNumberBox& s, const juce::String& name, juce::Colour a)
+    /** `tip` is the sentence the control shows on hover; they all live in
+        Tooltips.h. Required rather than defaulted, so that adding a control
+        is also the moment of writing its explanation: a knob whose name is
+        six characters long and whose tooltip was never written is exactly the
+        one a player cannot work out. */
+    inline void styleBox (fxme::FxmeNumberBox& s, const juce::String& name, juce::Colour a,
+                          const char* tip)
     {
         accentControl (s, name, a);
         s.setColour (juce::Slider::textBoxTextColourId, text);
+        s.setTooltip (tip);
     }
 
     inline void styleCombo (juce::ComboBox& c, juce::Colour a)

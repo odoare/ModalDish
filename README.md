@@ -108,7 +108,9 @@ The plugin has two modes, and the panels on screen are the ones belonging to the
 
 The split is not cosmetic. *Modes* reallocates and retunes the entire filter bank, and raising it while the plate is ringing can produce a very loud transient, so it lives on the design side where you are not playing.
 
-Closing the plugin window and reopening it is a no-op: the mode you were in, the view you had selected, the tool, the Cascade column and the angle you had turned the 3D plate to all come back as you left them. None of that is in the preset or in the session, on purpose. It describes a window rather than a sound, so recalling a preset never moves the interface about, and a reloaded session opens on the defaults.
+Every control explains itself on hover, in a sentence or two. The panels are dense and the names on the boxes are necessarily short, so the tooltip is where a control says what it is for; the tables further down say the same things at more length. The **?** button in the top bar turns them off once you no longer need them, and the **i** beside it opens the list of keyboard and mouse shortcuts.
+
+Closing the plugin window and reopening it is a no-op: the mode you were in, the view you had selected, the tool, whether tooltips are on, the Cascade column and the angle you had turned the 3D plate to all come back as you left them. None of that is in the preset or in the session, on purpose. It describes a window rather than a sound, so recalling a preset never moves the interface about, and a reloaded session opens on the defaults.
 
 ### Modal design
 

@@ -88,8 +88,20 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
         "greys out when its control is Off.");
     addAndMakeVisible (infoButton);
 
+    // Tooltips. Every number box carries one (Tooltips.h); this decides
+    // whether any of them can be seen. On by default, because the plugin has
+    // a lot of controls whose names are necessarily short, and off is one
+    // click away once they are learned.
+    fem::theme::styleButton (tipsButton, fem::theme::accent);
+    tipsButton.setClickingTogglesState (true);
+    tipsButton.setMouseClickGrabsKeyboardFocus (false);
+    tipsButton.setTooltip ("Control tooltips on or off");
+    tipsButton.onClick = [this] { setTooltipsEnabled (tipsButton.getToggleState()); };
+    setTooltipsEnabled (processor.editorState.tooltips);
+
     topBar.setRightControls ({ { &presetBar, 260 },
                                { &presetsButton, 22 },
+                               { &tipsButton, 24 },
                                { &infoButton, 26 } });
 
     addChildComponent (presetOverlay);
@@ -228,7 +240,7 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
     };
     addAndMakeVisible (viewBox);
 
-    fem::theme::styleBox (modeViewKnob, "Mode", fem::theme::accent);
+    fem::theme::styleBox (modeViewKnob, "Mode", fem::theme::accent, fem::tip::modeView);
     modeViewKnob.setRange (0, fem::maxModes, 1);
     modeViewKnob.setValue (processor.editorState.displayMode, juce::dontSendNotification);
     // Normally set by viewBox.onChange, which a restored selection does not
@@ -279,7 +291,7 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
     ellipseButton.onClick   = [this] { canvas.generateStandardShape (false); };
     rectangleButton.onClick = [this] { canvas.generateStandardShape (true); };
 
-    fem::theme::styleBox (aspectKnob, "Aspect", fem::theme::geomAccent);
+    fem::theme::styleBox (aspectKnob, "Aspect", fem::theme::geomAccent, fem::tip::aspect);
     aspectKnob.setRange (0.25, 4.0, 0.01);
     aspectKnob.setSkewFactorFromMidPoint (1.0);
     aspectKnob.setValue (processor.editorState.aspect, juce::dontSendNotification);
@@ -292,7 +304,7 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
         (fem::ShapeCanvas::Tool) (toolBox.getSelectedId() - 1),
         processor.editorState.aspect);
 
-    fem::theme::styleBox (pointsKnob, "Points", fem::theme::geomAccent);
+    fem::theme::styleBox (pointsKnob, "Points", fem::theme::geomAccent, fem::tip::points);
     pointsKnob.setRange (1, 12, 1);
     pointsKnob.setValue (canvas.numBorderPoints(), juce::dontSendNotification);
     pointsKnob.onValueChange = [this]
@@ -301,7 +313,7 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
     };
     addAndMakeVisible (pointsKnob);
 
-    fem::theme::styleBox (densityKnob, "Grid", fem::theme::geomAccent);
+    fem::theme::styleBox (densityKnob, "Grid", fem::theme::geomAccent, fem::tip::grid);
     densityKnob.setRange (8, 48, 1);
     densityKnob.setValue (processor.shape().meshDensity, juce::dontSendNotification);
     densityKnob.onValueChange = [this]
@@ -320,29 +332,30 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
     // belongs to is readable without reading its label.
     auto& apvts = processor.apvts;
     auto addBox = [&] (fxme::FxmeNumberBox& s, const char* text, const char* id,
-                       std::unique_ptr<SliderAttachment>& att, juce::Colour accent)
+                       std::unique_ptr<SliderAttachment>& att, juce::Colour accent,
+                       const char* tip)
     {
-        fem::theme::styleBox (s, text, accent);
+        fem::theme::styleBox (s, text, accent, tip);
         addAndMakeVisible (s);
         att = std::make_unique<SliderAttachment> (apvts, id, s);
     };
 
     // Group 1, Dynamics.
-    addBox (tensionKnob, "Tension", fem::id::tension, tensionAtt, fem::theme::dynGroup);
-    addBox (nonlinKnob, "Nonlinear", fem::id::nonlin, nonlinAtt, fem::theme::dynGroup);
-    addBox (viscKnob, "Viscous", fem::id::viscDamp, viscAtt, fem::theme::dynGroup);
-    addBox (matKnob, "Material", fem::id::matDamp, matAtt, fem::theme::dynGroup);
-    addBox (cascadeKnob, "Cascade", fem::id::cascade, cascadeAtt, fem::theme::dynGroup);
-    addBox (deplKnob, "Deplete", fem::id::cascDeplete, deplAtt, fem::theme::dynGroup);
+    addBox (tensionKnob, "Tension", fem::id::tension, tensionAtt, fem::theme::dynGroup, fem::tip::tension);
+    addBox (nonlinKnob, "Nonlinear", fem::id::nonlin, nonlinAtt, fem::theme::dynGroup, fem::tip::nonlinear);
+    addBox (viscKnob, "Viscous", fem::id::viscDamp, viscAtt, fem::theme::dynGroup, fem::tip::viscous);
+    addBox (matKnob, "Material", fem::id::matDamp, matAtt, fem::theme::dynGroup, fem::tip::material);
+    addBox (cascadeKnob, "Cascade", fem::id::cascade, cascadeAtt, fem::theme::dynGroup, fem::tip::cascade);
+    addBox (deplKnob, "Deplete", fem::id::cascDeplete, deplAtt, fem::theme::dynGroup, fem::tip::deplete);
 
     // Group 2, Frequency control. Integer boxes rather than combos for the
     // channels so the row matches the rest of the panel; the zero of each
     // reads as a word, because "0" means two different things here and
     // neither of them is a channel number.
-    addBox (f1Knob, "Frequency", fem::id::f1, f1Att, fem::theme::freqGroup);
-    addBox (glideKnob, "Glide", fem::id::glide, glideAtt, fem::theme::freqGroup);
-    addBox (srcChanKnob, "Src Chan", fem::id::srcChannel, srcChanAtt, fem::theme::freqGroup);
-    addBox (freqChanKnob, "Freq Chan", fem::id::freqChannel, freqChanAtt, fem::theme::freqGroup);
+    addBox (f1Knob, "Frequency", fem::id::f1, f1Att, fem::theme::freqGroup, fem::tip::frequency);
+    addBox (glideKnob, "Glide", fem::id::glide, glideAtt, fem::theme::freqGroup, fem::tip::glide);
+    addBox (srcChanKnob, "Src Chan", fem::id::srcChannel, srcChanAtt, fem::theme::freqGroup, fem::tip::srcChan);
+    addBox (freqChanKnob, "Freq Chan", fem::id::freqChannel, freqChanAtt, fem::theme::freqGroup, fem::tip::freqChan);
     srcChanKnob.textFromValueFunction = [] (double v)
         { return v < 0.5 ? juce::String ("Omni") : juce::String ((int) v); };
     freqChanKnob.textFromValueFunction = [] (double v)
@@ -355,16 +368,16 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
     addAndMakeVisible (*unmappedHitButton);
 
     // Group 3, Hammer control.
-    addBox (hammerKnob, "Duration", fem::id::hammerMs, hammerAtt, fem::theme::hammerGroup);
-    addBox (forceKnob, "Force", fem::id::force, forceAtt, fem::theme::hammerGroup);
+    addBox (hammerKnob, "Duration", fem::id::hammerMs, hammerAtt, fem::theme::hammerGroup, fem::tip::duration);
+    addBox (forceKnob, "Force", fem::id::force, forceAtt, fem::theme::hammerGroup, fem::tip::force);
 
     // Trims over the eight sources, under the global hammer they sit beside.
     // Shown as a multiplier rather than a bare number: "Src Dur 2.5" could be
     // milliseconds, and "x2.50" cannot.
     addBox (srcDurScaleKnob, "Src Dur", fem::id::srcHammerScale,
-            srcDurScaleAtt, fem::theme::hammerGroup);
+            srcDurScaleAtt, fem::theme::hammerGroup, fem::tip::srcDur);
     addBox (srcForceScaleKnob, "Src Force", fem::id::srcForceScale,
-            srcForceScaleAtt, fem::theme::hammerGroup);
+            srcForceScaleAtt, fem::theme::hammerGroup, fem::tip::srcForce);
     for (auto* k : { &srcDurScaleKnob, &srcForceScaleKnob })
     {
         k->textFromValueFunction = [] (double v)
@@ -375,23 +388,23 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
     // Modes belongs with the design, not the performance: it reallocates and
     // retunes the whole bank, and raising it while the plate is ringing can
     // produce a very loud transient. It is only reachable in design mode.
-    fem::theme::styleBox (modesKnob, "Modes", fem::theme::geomAccent);
+    fem::theme::styleBox (modesKnob, "Modes", fem::theme::geomAccent, fem::tip::modes);
     addAndMakeVisible (modesKnob);
     modesAtt = std::make_unique<SliderAttachment> (apvts, fem::id::numModes, modesKnob);
 
     // --- right: cascade tuning ---------------------------------------------------
     auto addCasc = [&] (fxme::FxmeNumberBox& s, const char* text, const char* id,
-                        std::unique_ptr<SliderAttachment>& att)
+                        std::unique_ptr<SliderAttachment>& att, const char* tip)
     {
-        fem::theme::styleBox (s, text, fem::theme::dynGroup);
+        fem::theme::styleBox (s, text, fem::theme::dynGroup, tip);
         addAndMakeVisible (s);
         att = std::make_unique<SliderAttachment> (apvts, id, s);
     };
-    addCasc (cascDriveKnob, "Drive", fem::id::cascDrive, cascDriveAtt);
-    addCasc (cascWinKnob, "Window", fem::id::cascWindow, cascWinAtt);
-    addCasc (cascAttKnob, "Attack", fem::id::cascAttack, cascAttAtt);
-    addCasc (cascRelKnob, "Release", fem::id::cascRelease, cascRelAtt);
-    addCasc (cascOverKnob, "Overlap", fem::id::cascOverlap, cascOverAtt);
+    addCasc (cascDriveKnob, "Drive", fem::id::cascDrive, cascDriveAtt, fem::tip::cascDrive);
+    addCasc (cascWinKnob, "Window", fem::id::cascWindow, cascWinAtt, fem::tip::cascWindow);
+    addCasc (cascAttKnob, "Attack", fem::id::cascAttack, cascAttAtt, fem::tip::cascAttack);
+    addCasc (cascRelKnob, "Release", fem::id::cascRelease, cascRelAtt, fem::tip::cascRelease);
+    addCasc (cascOverKnob, "Overlap", fem::id::cascOverlap, cascOverAtt, fem::tip::cascOverlap);
 
     cascModalInjButton = std::make_unique<fxme::FxmeButton> (
         apvts, fem::id::cascModalInject, "Modal inject", fem::theme::dynGroup);
@@ -399,14 +412,14 @@ ModalDishAudioProcessorEditor::ModalDishAudioProcessorEditor (ModalDishAudioProc
 
     // --- right: I/O --------------------------------------------------------------
     auto addIo = [&] (fxme::FxmeNumberBox& s, const char* text, const char* id,
-                      std::unique_ptr<SliderAttachment>& att)
+                      std::unique_ptr<SliderAttachment>& att, const char* tip)
     {
-        fem::theme::styleBox (s, text, fem::theme::ioGroup);
+        fem::theme::styleBox (s, text, fem::theme::ioGroup, tip);
         addAndMakeVisible (s);
         att = std::make_unique<SliderAttachment> (apvts, id, s);
     };
-    addIo (inGainKnob, "In", fem::id::inGain, inGainAtt);
-    addIo (outGainKnob, "Out", fem::id::outGain, outGainAtt);
+    addIo (inGainKnob, "In", fem::id::inGain, inGainAtt, fem::tip::inGain);
+    addIo (outGainKnob, "Out", fem::id::outGain, outGainAtt, fem::tip::outGain);
 
     // Output metering, post Out Gain. The pickup positions used to occupy
     // this room; they live on the plate now, where a position belongs.
@@ -469,6 +482,10 @@ ModalDishAudioProcessorEditor::~ModalDishAudioProcessorEditor()
 {
     saveEditorState();
     processor.removeChangeListener (this);
+
+    // Before the look-and-feel is detached and while this is still a valid
+    // parent: the tooltip window is a child that draws through both.
+    tooltipWindow = nullptr;
     setLookAndFeel (nullptr);
 }
 
@@ -487,6 +504,7 @@ void ModalDishAudioProcessorEditor::saveEditorState()
     st.azimuth     = plateView3D.projection().getAzimuth();
     st.elevation   = plateView3D.projection().getElevation();
     st.zoom        = plateView3D.getZoom();
+    st.tooltips    = tipsButton.getToggleState();
     st.everOpened  = true;
 
     // The two overlays are not restored. A preset browser or a marker panel
@@ -656,6 +674,24 @@ void ModalDishAudioProcessorEditor::loadShapeFile()
         canvas.setTool (fem::ShapeCanvas::Tool::Boundary);
         syncShapeToProcessor (true);
     });
+}
+
+void ModalDishAudioProcessorEditor::setTooltipsEnabled (bool shouldBeEnabled)
+{
+    tipsButton.setToggleState (shouldBeEnabled, juce::dontSendNotification);
+
+    // Creating and destroying the window, rather than leaving it in place with
+    // a long delay: a TooltipWindow is what drives the whole mechanism, so
+    // without one the controls keep their sentences and nothing displays them.
+    if (shouldBeEnabled)
+    {
+        if (tooltipWindow == nullptr)
+            tooltipWindow = std::make_unique<juce::TooltipWindow> (this);
+    }
+    else
+    {
+        tooltipWindow = nullptr;
+    }
 }
 
 void ModalDishAudioProcessorEditor::syncShapeToProcessor (bool geometryChanged)

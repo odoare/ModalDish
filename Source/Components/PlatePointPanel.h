@@ -29,6 +29,7 @@
 
 #include "PluginProcessor.h"
 #include "Theme.h"
+#include "Tooltips.h"
 
 #include <memory>
 #include <optional>
@@ -50,16 +51,18 @@ public:
                                (juce::juce_wchar) fem::sourceLabel (index));
 
         addKnob (isPickup ? "X" : "X1",
-                 isPickup ? fem::id::pickupX[index] : fem::id::sourceX[index]);
+                 isPickup ? fem::id::pickupX[index] : fem::id::sourceX[index],
+                 isPickup ? fem::tip::pickupX : fem::tip::sourceX);
         addKnob (isPickup ? "Y" : "Y1",
-                 isPickup ? fem::id::pickupY[index] : fem::id::sourceY[index]);
+                 isPickup ? fem::id::pickupY[index] : fem::id::sourceY[index],
+                 isPickup ? fem::tip::pickupY : fem::tip::sourceY);
         if (! isPickup)
-            addKnob ("Spread", fem::id::sourceSpread[index]);
+            addKnob ("Spread", fem::id::sourceSpread[index], fem::tip::spread);
 
         if (isPickup)
         {
-            addKnob ("Level", fem::id::pickupLevel[index]);
-            addKnob ("Pan", fem::id::pickupPan[index], 0.0);
+            addKnob ("Level", fem::id::pickupLevel[index], fem::tip::pickupLevel);
+            addKnob ("Pan", fem::id::pickupPan[index], fem::tip::pickupPan, 0.0);
 
             // Mono, and pre-pan on purpose: the question this answers is how
             // much this point is picking up, which Level scales and Pan does
@@ -97,27 +100,27 @@ public:
                 return juce::String (n[juce::jlimit (0, 2, (int) std::lround (v))]);
             };
 
-            x2Box = addKnob ("X2", fem::id::sourceX2[index]);
-            y2Box = addKnob ("Y2", fem::id::sourceY2[index]);
-            addKnob ("Pos Ctl", fem::id::sourcePosCtl[index], {}, ctlText);
+            x2Box = addKnob ("X2", fem::id::sourceX2[index], fem::tip::sourceX2);
+            y2Box = addKnob ("Y2", fem::id::sourceY2[index], fem::tip::sourceY2);
+            addKnob ("Pos Ctl", fem::id::sourcePosCtl[index], fem::tip::posCtl, {}, ctlText);
 
-            addKnob ("Ham Min", fem::id::sourceHammer[index]);
-            hamMaxBox = addKnob ("Ham Max", fem::id::sourceHammerMax[index]);
-            addKnob ("Ham Ctl", fem::id::sourceHammerCtl[index], {}, ctlText);
+            addKnob ("Ham Min", fem::id::sourceHammer[index], fem::tip::hamMin);
+            hamMaxBox = addKnob ("Ham Max", fem::id::sourceHammerMax[index], fem::tip::hamMax);
+            addKnob ("Ham Ctl", fem::id::sourceHammerCtl[index], fem::tip::hamCtl, {}, ctlText);
 
-            addKnob ("Frc Min", fem::id::sourceForce[index]);
-            frcMaxBox = addKnob ("Frc Max", fem::id::sourceForceMax[index]);
-            addKnob ("Frc Ctl", fem::id::sourceForceCtl[index], {}, ctlText);
+            addKnob ("Frc Min", fem::id::sourceForce[index], fem::tip::frcMin);
+            frcMaxBox = addKnob ("Frc Max", fem::id::sourceForceMax[index], fem::tip::frcMax);
+            addKnob ("Frc Ctl", fem::id::sourceForceCtl[index], fem::tip::frcCtl, {}, ctlText);
 
-            curveBox = addKnob ("Curve", fem::id::sourceVelCurve[index], {}, curveText);
-            addKnob ("In Vol", fem::id::sourceSend[index]);
-            addKnob ("In Bal", fem::id::sourcePan[index], 0.0);
+            curveBox = addKnob ("Curve", fem::id::sourceVelCurve[index], fem::tip::curve, {}, curveText);
+            addKnob ("In Vol", fem::id::sourceSend[index], fem::tip::inVol);
+            addKnob ("In Bal", fem::id::sourcePan[index], fem::tip::inBal, 0.0);
 
             // Note lives in the footer beside the Learn button that sets it,
             // rather than in the grid: the grid is the sound, this pair is
             // the wiring.
             noteBox = std::make_unique<fxme::FxmeNumberBox>();
-            fem::theme::styleBox (*noteBox, "Note", accent);
+            fem::theme::styleBox (*noteBox, "Note", accent, fem::tip::note);
             addAndMakeVisible (*noteBox);
             attachments.push_back (std::make_unique<
                 juce::AudioProcessorValueTreeState::SliderAttachment> (
@@ -274,11 +277,12 @@ private:
     /** Returns the box, so a caller that needs to grey it out later can keep a
         handle rather than indexing into `knobs` by position. */
     fxme::FxmeNumberBox* addKnob (const juce::String& label, const char* paramId,
+                                  const char* tip,
                                   std::optional<double> centre = {},
                                   std::function<juce::String (double)> textFn = {})
     {
         auto s = std::make_unique<fxme::FxmeNumberBox>();
-        fem::theme::styleBox (*s, label, accent);
+        fem::theme::styleBox (*s, label, accent, tip);
         if (centre.has_value())
             s->setCentralValue (*centre);          // bipolar: arc grows from centre
         if (textFn != nullptr)

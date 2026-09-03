@@ -24,6 +24,7 @@
 
 #include "PluginProcessor.h"
 #include "Theme.h"
+#include "Tooltips.h"
 #include "Components/ShapeCanvas.h"
 #include "Components/PlatePointPanel.h"
 #include "Components/PointToggle.h"
@@ -203,8 +204,22 @@ private:
 
     void setPresetPanelVisible (bool shouldBeVisible);
 
+    /** Hover explanations on or off, and remembered for the session.
+
+        Owning the window rather than dimming it is what makes off mean off:
+        with no TooltipWindow in the hierarchy nothing polls for a tip and
+        none can appear, whatever the controls still carry. Parented to the
+        editor rather than left to make a desktop window of its own, which is
+        what a plugin wants: the tip is clipped to the plugin's own bounds
+        instead of floating over the host. */
+    void setTooltipsEnabled (bool shouldBeEnabled);
+    std::unique_ptr<juce::TooltipWindow> tooltipWindow;
+
     GlowLine glowLine;
     fxme::InfoButton infoButton;
+    /** Beside the info button, being the same kind of thing: one opens the
+        page of help, the other says whether the controls explain themselves. */
+    juce::TextButton tipsButton { "?" };
     fxme::SplashOverlay splash;
     fxme::PresetBarComponent presetBar { processor.getPresetManager() };
     TriangleButton presetsButton;
