@@ -68,25 +68,19 @@ The full derivation (the Kirchhoff plate with tension, the Morley element, the s
 
 ## Signal path
 
-The detailed path, from a note or a sample arriving to a sample leaving. The
-grey block runs once per plate, off the audio thread; everything else runs
-per sample.
+The detailed path, from a note or a sample arriving to a sample leaving.
 
 ![ModalDish in Perform mode](doc/img/signalpath.svg)
 
 
 ## Installing
 
-Builds are published on the releases page: a zip per platform, plus a `.pkg`
-installer for macOS. VST3 and AU on macOS, VST3 on Windows and Linux, with a
-standalone application everywhere.
+Builds are published on the releases page: a zip per platform, plus a `.pkg` installer for macOS. VST3 and AU on macOS, VST3 on Windows and Linux, with a standalone application everywhere.
 
 ### macOS
 
 ModalDish is free software and is **not signed with an Apple Developer ID**
-(that is a paid Apple subscription). macOS therefore marks anything downloaded
-through a browser as untrusted, and the DAW skips it during its scan, usually
-with no error at all: the plugin simply never appears.
+(that is a paid Apple subscription). macOS therefore marks anything downloaded through a browser as untrusted, and the DAW skips it during its scan, usually with no error at all: the plugin simply never appears.
 
 After copying the bundles into place, run the lines matching what you
 installed:
@@ -96,11 +90,9 @@ xattr -dr com.apple.quarantine /Library/Audio/Plug-Ins/VST3/ModalDish.vst3
 xattr -dr com.apple.quarantine /Library/Audio/Plug-Ins/Components/ModalDish.component
 ```
 
-Then rescan. If you used the `.pkg` and macOS refused to open it, right-click
-it and choose Open rather than double-clicking.
+Then rescan. If you used the `.pkg` and macOS refused to open it, right-click it and choose Open rather than double-clicking.
 
-The builds are universal (Apple Silicon and Intel) and target macOS 10.13 and
-later.
+The builds are universal (Apple Silicon and Intel) and target macOS 10.13 and later.
 
 ### Windows and Linux
 
