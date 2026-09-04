@@ -12,7 +12,7 @@ The principle is to draw a shape, cut its border into segments and give each one
 
 This is a physically modelled structure. Nothing is sampled and nothing is convolved. The plate exists as a set of modes that the geometry actually produced, so moving the strike point, the pickup, the tension or the damping changes the sound the way it would change a real plate.
 
-ModalDish adds two geometric nonlinearities to the modal bank: a dynamic tension that bends the pitch up on a hard hit, and an eight-band cubic cascade that carries energy up the spectrum into shimmer. A full physical model of the nonlinearities would consume too much CPU to be reasonably implemented in an audio plugin. Both run as cheap real-time surrogates for nonlinear-plate effects that are normally computed offline, and the cascade runs on whatever shape you drew rather than a fixed geometry. The result is a plugin that consumes at most a few percent of CPU on current computers with all parameters at max quality.
+ModalDish adds two geometric nonlinearities to the modal bank: a dynamic tension that bends the pitch up on a hard hit, and an eight-band cubic cascade that carries energy up the spectrum into shimmer. Solving the von Kármán equations directly is the more faithful route, and Bilbao, Webb, Wang and Ducceschi have run it in real time [[1]](#references), though on a fixed rectangle and at roughly an order of magnitude more CPU than the whole of ModalDish. Both nonlinearities here are cheap surrogates instead, and the cascade runs on whatever shape you drew rather than a fixed geometry. The result is a plugin that consumes at most a few percent of CPU on current computers with all parameters at max quality.
 
 ---
 
@@ -28,6 +28,7 @@ ModalDish adds two geometric nonlinearities to the modal bank: a dynamic tension
 - [Presets](#presets)
 - [Building](#building)
 - [Repo layout](#repo-layout)
+- [References](#references)
 - [License](#license)
 
 ---
@@ -475,6 +476,24 @@ A malformed file is refused with a message naming what is wrong and where (the o
 
 The top bar carries the standard FX-Mechanics preset strip (previous / next / name / save) and a triangle button opening the browser over the working area. User presets live in the per-product folder (`~/.config/ModalDish/Presets` on Linux, `~/Library/Application Support/ModalDish/Presets` on macOS, `%APPDATA%\ModalDish\Presets` on Windows), and any `.xml` dropped into [`Source/Presets/`](Source/Presets/) is embedded as a factory preset.
 
+### The factory set
+
+Sixteen presets ship with the plugin, and the prefix in the name says what kind of patch it is.
+
+| Prefix | | What it is |
+| --- | --- | --- |
+| **GONG** | 3 | Large struck plates with *Cascade* up, so hard hits brighten into shimmer. |
+| **PERC** | 6 | Shorter struck sounds: boxes, two leather patches, a xylophone and two bongos. The bongos run with the cascade off. |
+| **MIDI** | 2 | Made to be played from a keyboard. *Freq Chan* is on, so notes retune the whole plate. |
+| **MIDI+PERC** | 1 | Sources mapped to notes for striking, with a tuning channel as well. |
+| **REV** | 4 | Effect presets. *In Gain* is raised, so audio sent to the plugin passes through the plate and comes back coloured by it. |
+
+The REV presets are not attempts at a plate reverberator. An EMT 140 carries something like 1.3 modes per hertz [[2]](#references), which is why a real plate sounds diffuse instead of pitched. ModalDish spaces its modes at roughly 0.64 times the *Frequency* setting, so matching that density means running *Frequency* down around 1 Hz, and 1024 modes at that spacing reach only about 800 Hz. Filling the audible band as densely would take some 26,000 of them. Bank size buys frequency range and not density, because the tail continues at the plate's own spacing instead of filling in between, so the two demands pull against each other. These presets colour what you send them rather than diffuse it.
+
+Bank sizes run from 474 to 1024 modes. Each preset carries its own geometry and modal data, so loading one puts its plate on screen and in the audio path with no solve.
+
+They are starting points. Opening a preset's shape in *Modal design* and pulling it about costs one *Compute*, and the same settings on a different outline give a different instrument.
+
 ### What a preset, and a session, actually contain
 
 Three things, and they are the same three whether the state is being written into a preset file or into a DAW session. Both travel by the same route, so neither can carry something the other does not.
@@ -537,6 +556,14 @@ and make it rescan.
 | `Tests/CascadeMeasure.cpp` | cascade level and sample-rate independence |
 | `doc/technical.tex` | the method, in full |
 | `doc/starting_spec.md` | the original design brief |
+
+## References
+
+1. S. Bilbao, C. Webb, Z. Wang, M. Ducceschi, "Real-time gong synthesis", *Proceedings of the 26th International Conference on Digital Audio Effects (DAFx23)*, Copenhagen, 2023. A direct time-domain solution of the von Kármán plate, fast enough to run live on a rectangular domain. This is the approach the two nonlinearities here approximate.
+
+2. K. Arcas, A. Chaigne, "On the quality of plate reverberation", *Applied Acoustics*, 2010. Modal density, damping and diffusion measured on a real plate reverberator.
+
+The derivation behind ModalDish, with its own bibliography, is in the [technical doc repo](https://github.com/odoare/ModalDishPaper).
 
 ## License
 

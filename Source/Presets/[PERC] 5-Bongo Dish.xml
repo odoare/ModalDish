@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<Parameters presetName="[PERC4] Bongo Dish" presetIsFactory="0">
+<Parameters presetName="[PERC] 5-Bongo Dish" presetIsFactory="0">
   <PARAM id="cascade" value="0.0"/>
   <PARAM id="cascatt" value="5.105046272277832"/>
   <PARAM id="cascdepl" value="0.004999999888241291"/>
@@ -15,7 +15,7 @@
   <PARAM id="hammer" value="8.736623764038086"/>
   <PARAM id="ingain" value="0.0"/>
   <PARAM id="matdamp" value="0.001202264451421797"/>
-  <PARAM id="nmodes" value="1024.0"/>
+  <PARAM id="nmodes" value="474.0"/>
   <PARAM id="nonlin" value="0.0000999999901978299"/>
   <PARAM id="outgain" value="-18.0"/>
   <PARAM id="pickup1level" value="0.0"/>
@@ -60,7 +60,7 @@
   <PARAM id="pickup8y" value="0.5440000295639038"/>
   <PARAM id="sourceaforce" value="0.0"/>
   <PARAM id="sourceahammer" value="1.0"/>
-  <PARAM id="sourceanote" value="24.0"/>
+  <PARAM id="sourceanote" value="36.0"/>
   <PARAM id="sourceaon" value="1.0"/>
   <PARAM id="sourceapan" value="0.0"/>
   <PARAM id="sourceasend" value="0.9999999403953552"/>
@@ -69,7 +69,7 @@
   <PARAM id="sourceay" value="0.7880000472068787"/>
   <PARAM id="sourcebforce" value="1.000000238418579"/>
   <PARAM id="sourcebhammer" value="1.0"/>
-  <PARAM id="sourcebnote" value="25.0"/>
+  <PARAM id="sourcebnote" value="37.0"/>
   <PARAM id="sourcebon" value="1.0"/>
   <PARAM id="sourcebpan" value="0.0"/>
   <PARAM id="sourcebsend" value="0.0"/>
@@ -78,7 +78,7 @@
   <PARAM id="sourceby" value="0.7360000610351562"/>
   <PARAM id="sourcecforce" value="0.0"/>
   <PARAM id="sourcechammer" value="1.0"/>
-  <PARAM id="sourcecnote" value="26.0"/>
+  <PARAM id="sourcecnote" value="38.0"/>
   <PARAM id="sourcecon" value="1.0"/>
   <PARAM id="sourcecpan" value="0.0"/>
   <PARAM id="sourcecsend" value="0.0"/>
@@ -87,7 +87,7 @@
   <PARAM id="sourcecy" value="0.6500000357627869"/>
   <PARAM id="sourcedforce" value="0.0"/>
   <PARAM id="sourcedhammer" value="1.0"/>
-  <PARAM id="sourcednote" value="27.0"/>
+  <PARAM id="sourcednote" value="39.0"/>
   <PARAM id="sourcedon" value="1.0"/>
   <PARAM id="sourcedpan" value="0.0"/>
   <PARAM id="sourcedsend" value="0.0"/>
@@ -96,7 +96,7 @@
   <PARAM id="sourcedy" value="0.1940000057220459"/>
   <PARAM id="sourceeforce" value="0.0"/>
   <PARAM id="sourceehammer" value="1.0"/>
-  <PARAM id="sourceenote" value="28.0"/>
+  <PARAM id="sourceenote" value="40.0"/>
   <PARAM id="sourceeon" value="1.0"/>
   <PARAM id="sourceepan" value="0.0"/>
   <PARAM id="sourceesend" value="0.0"/>
@@ -105,7 +105,7 @@
   <PARAM id="sourceey" value="0.2680000066757202"/>
   <PARAM id="sourcefforce" value="0.0"/>
   <PARAM id="sourcefhammer" value="1.0"/>
-  <PARAM id="sourcefnote" value="30.0"/>
+  <PARAM id="sourcefnote" value="41.0"/>
   <PARAM id="sourcefon" value="1.0"/>
   <PARAM id="sourcefpan" value="0.0"/>
   <PARAM id="sourcefsend" value="0.0"/>
@@ -114,7 +114,7 @@
   <PARAM id="sourcefy" value="0.5740000009536743"/>
   <PARAM id="sourcegforce" value="0.0"/>
   <PARAM id="sourceghammer" value="1.0"/>
-  <PARAM id="sourcegnote" value="29.0"/>
+  <PARAM id="sourcegnote" value="42.0"/>
   <PARAM id="sourcegon" value="1.0"/>
   <PARAM id="sourcegpan" value="0.0"/>
   <PARAM id="sourcegsend" value="0.0"/>
@@ -123,7 +123,7 @@
   <PARAM id="sourcegy" value="0.5940000414848328"/>
   <PARAM id="sourcehforce" value="0.0"/>
   <PARAM id="sourcehhammer" value="3.000000476837158"/>
-  <PARAM id="sourcehnote" value="31.0"/>
+  <PARAM id="sourcehnote" value="43.0"/>
   <PARAM id="sourcehon" value="1.0"/>
   <PARAM id="sourcehpan" value="0.0"/>
   <PARAM id="sourcehsend" value="0.0"/>
