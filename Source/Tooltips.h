@@ -72,11 +72,10 @@ namespace fem::tip
 
     // --- Frequency control ----------------------------------------------------
     inline constexpr const char* frequency =
-        "Where mode 1 lands. Every other mode follows the ratios the "
-        "geometry gives it.";
+        "Value of first eigenfrequency. Every other mode follows the"
+        "ratios the calculated geometry gives it.";
     inline constexpr const char* glide =
-        "Portamento between MIDI-tuned notes. A time rather than a "
-        "rate, so a glide takes the same time whatever the interval.";
+        "Portamento time between MIDI-tuned notes."
     inline constexpr const char* srcChan =
         "The MIDI channel that triggers sources. Omni accepts any of "
         "them.";
@@ -90,7 +89,7 @@ namespace fem::tip
         "reads as a stick, long and soft as a mallet.";
     inline constexpr const char* force =
         "How hard the mouse hammer strikes. High values are where the "
-        "nonlinear behaviour lives.";
+        "nonlinear behaviour is triggered.";
     inline constexpr const char* srcDur =
         "Trim over all eight sources' hammer durations. Multiplies "
         "whatever each source's own mapping resolved to rather than "
