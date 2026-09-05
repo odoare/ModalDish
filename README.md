@@ -1,5 +1,7 @@
 # ModalDish
 
+[Demo video](https://youtu.be/EDX9046LzlA) · [Download the latest release](https://github.com/odoare/ModalDish/releases) · [FX-Mechanics](https://fx-mechanics.com)
+
 ModalDish is an audio plugin based on a physical model of a plate of arbitrary shape, solved by finite elements. It can be played as an instrument (strike it) or used as an effect (feed it audio).
 
 <div align="center">
@@ -76,7 +78,7 @@ The detailed path, from a note or a sample arriving to a sample leaving.
 
 ## Installing
 
-Builds are published on the releases page: a zip per platform, plus a `.pkg` installer for macOS. VST3 and AU on macOS, VST3 on Windows and Linux, with a standalone application everywhere.
+Builds are published on the [releases page](https://github.com/odoare/ModalDish/releases): a zip per platform, plus a `.pkg` installer for macOS. VST3 and AU on macOS, VST3 on Windows and Linux, with a standalone application everywhere.
 
 ### macOS
 
