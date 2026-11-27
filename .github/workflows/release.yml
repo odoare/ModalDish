@@ -154,9 +154,10 @@ jobs:
   # ---------------------------------------------------------------- macOS ---
   build-macos:
     needs: changelog
-    # macos-14 is Apple Silicon. A build that loses the architecture list here
-    # produces an arm64-only bundle that looks perfectly fine on the runner.
-    runs-on: macos-14
+    # macos-15 is Apple Silicon (macos-14 is no longer offered). A build that
+    # loses the architecture list here produces an arm64-only bundle that
+    # looks perfectly fine on the runner.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
         with:
