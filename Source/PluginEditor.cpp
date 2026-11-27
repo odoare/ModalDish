@@ -1267,16 +1267,8 @@ void ModalDishAudioProcessorEditor::timerCallback()
         outMeter[ch].setValue (processor.getOutputPeakDb (ch));
 
     // A MIDI learn capture is applied here rather than on the audio thread,
-    // which must not touch a parameter. Consumed with exchange so a note is
-    // applied once even if the timer and the audio thread race.
-    const int learned = processor.midiLearnNote.exchange (-1, std::memory_order_acq_rel);
-    if (learned >= 0)
-    {
-        const int src = processor.midiLearnSource.load (std::memory_order_relaxed);
-        if (juce::isPositiveAndBelow (src, fem::maxSources))
-            if (auto* param = processor.apvts.getParameter (fem::id::sourceNote[src]))
-                param->setValueNotifyingHost (param->convertTo0to1 ((float) learned));
-    }
+    // which must not touch a parameter.
+    processor.applyMidiLearn();
 
     // Drain the synth's hit ring into flashes. Every hit comes through here,
     // whether it started as a click, a MIDI note or several sources firing on

@@ -78,7 +78,7 @@ public:
             // only ever meters the pickup whose panel is open. Claiming it on
             // construction and releasing it below keeps that in step with the
             // window, whatever dismisses it.
-            processor.meteredPickup.store (index, std::memory_order_release);
+            processor.setMeteredPickup (index);
             startTimerHz (24);
         }
         else
@@ -133,8 +133,7 @@ public:
             {
                 // Arming is a toggle: clicking again gives up rather than
                 // leaving the plugin quietly waiting for a note forever.
-                processor.midiLearnArmed.store (learnButton.getToggleState() ? pointIndex : -1,
-                                                std::memory_order_release);
+                processor.armMidiLearn (learnButton.getToggleState() ? pointIndex : -1);
             };
             addAndMakeVisible (learnButton);
             updateEnablement();      // open in the right state, not a tick later
@@ -161,14 +160,14 @@ public:
     {
         // Closing the panel disarms: an armed Learn that outlived its window
         // would capture the next note played for no visible reason.
-        if (! isPickup && processor.midiLearnArmed.load (std::memory_order_acquire) == pointIndex)
-            processor.midiLearnArmed.store (-1, std::memory_order_release);
+        if (! isPickup)
+            processor.disarmMidiLearn (pointIndex);
 
         // Likewise the meter: stop paying for it once nobody is looking. The
         // test matters because opening a second panel claims the slot before
         // this one is destroyed.
-        if (isPickup && processor.meteredPickup.load (std::memory_order_acquire) == pointIndex)
-            processor.meteredPickup.store (-1, std::memory_order_release);
+        if (isPickup)
+            processor.releaseMeteredPickup (pointIndex);
     }
 
     void paint (juce::Graphics& g) override
@@ -241,7 +240,7 @@ private:
         // Polled rather than driven from onClick, so that the button also
         // clears when the audio thread captures a note, and when something
         // else disarms it.
-        const bool armed = processor.midiLearnArmed.load (std::memory_order_acquire) == pointIndex;
+        const bool armed = processor.getMidiLearnArmed() == pointIndex;
         if (armed != learnButton.getToggleState())
             learnButton.setToggleState (armed, juce::dontSendNotification);
         learnButton.setButtonText (armed ? "listening..." : "MIDI learn");

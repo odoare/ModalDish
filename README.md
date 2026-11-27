@@ -562,9 +562,11 @@ On the server, a state arriving without modes (an edit made before *Compute*) do
 
 Clicks on the plate in the mirror's editor are sent to the server as FxmeNet events (ABI 2, `NetBridge::postEvent`), where they strike the plate as they would locally, about 20 ms later (the client reads events at 50 Hz).
 
-Telemetry sent back to the mirror: the output peak meters (`outL`, `outR`) and the hit ring the markers are drawn from (`hits`, `hitX0`… `hitA15`), so clicks, MIDI notes and sources all flash on the mirror's plate.
+MIDI learn works too: arming and disarming are sent to the server as events, the server's instance captures the note and sets the source's Note parameter itself, and the new value comes back to the editor like any parameter change. Opening a pickup's panel tells the server which pickup to meter.
 
-Not working yet under FxmeNet: MIDI learn, the pickup panel's meter and the animated displacement/velocity view. The first two can use the same event channel; the third needs the modal field as telemetry.
+Telemetry sent back to the mirror: the output peak meters (`outL`, `outR`), the open pickup's meter (`pickup`), the count of MIDI learn captures (`learns`, so the button stops listening) and the hit ring the markers are drawn from (`hits`, `hitX0`… `hitA15`), so clicks, MIDI notes and sources all flash on the mirror's plate.
+
+Not shown under FxmeNet: the animated displacement/velocity view, which would need the modal field as telemetry (the static mode shapes are drawn as usual).
 
 ## Repo layout
 

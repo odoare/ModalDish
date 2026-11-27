@@ -235,11 +235,18 @@ modes. The server falls back to `computeModes()` only when nothing sounds yet
 first byte `strikeEvent`, then x, y, velocity as f32) instead of writing the
 mailbox, which the mirror's audio thread never reads; the server's instance
 gets it in `net.onEvent` (a host thread, not the audio thread) and writes
-its own mailbox through `postStrike()`. Telemetry is the output peak meters
-(`outL`, `outR`) and the hit ring (`hits` and `hitX/Y/A0..15`, one scalar
-per ring slot): on a mirror `getHitCount()` and `getHit()` read them, so
-the editor drains the server's hits unchanged. MIDI learn, the pickup meter
-and the animated field do not work yet.
+its own mailbox through `postStrike()`. The pickup panel's meter and the
+MIDI learn button go the same way (`setMeteredPickup()`, `armMidiLearn()`:
+the local atomic, plus an event in a mirror). On the server no editor
+applies a learn capture, so the instance's own timer (started in
+`prepareToPlay` when it is a source) calls `applyMidiLearn()`; the
+parameter reaches the mirror as a parameter change, over TCP, so no
+capture is lost. Telemetry is the output peak meters (`outL`, `outR`), the
+pickup meter (`pickup`), the count of applied captures (`learns`: when it
+moves, a mirror's `getMidiLearnArmed()` disarms) and the hit ring (`hits`
+and `hitX/Y/A0..15`, one scalar per ring slot): on a mirror `getHitCount()`
+and `getHit()` read them, so the editor drains the server's hits
+unchanged. The animated field is not sent.
 
 ---
 

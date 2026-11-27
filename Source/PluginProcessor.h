@@ -50,7 +50,8 @@
 //==============================================================================
 class ModalDishAudioProcessor : public juce::AudioProcessor,
                                public juce::ChangeBroadcaster,
-                               private juce::AsyncUpdater
+                               private juce::AsyncUpdater,
+                               private juce::Timer
 {
 public:
     ModalDishAudioProcessor();
@@ -142,12 +143,25 @@ public:
 
     /** MIDI learn, editor <-> audio thread.
 
-        `midiLearnArmed` is the source index the editor is waiting to map, or
-        -1. The audio thread captures the next note-on into `midiLearnNote` /
-        `midiLearnSource`, disarms, and swallows that note rather than firing
-        anything with it. The editor's timer applies the capture to the
-        parameter, so nothing writes a parameter from the audio thread. */
-    std::atomic<int> midiLearnArmed { -1 };
+        The armed source is the source index the editor is waiting to map,
+        or -1. The audio thread captures the next note-on into
+        `midiLearnNote` / `midiLearnSource`, disarms, and swallows that note
+        rather than firing anything with it. applyMidiLearn(), from the
+        editor's timer, writes the capture into the parameter, so nothing
+        writes a parameter from the audio thread.
+
+        Under FxmeNet the note arrives on the server: arming and disarming
+        are sent there as events, and the server's instance applies the
+        capture itself (its own timer); the parameter comes back to the
+        mirror as any parameter change. The learn counter, as telemetry,
+        tells the mirror a capture happened, so its button stops listening.
+
+        Message thread, all four. */
+    void armMidiLearn (int sourceIndex);              // -1 disarms
+    void disarmMidiLearn (int sourceIndex);           // only if that one is armed
+    int  getMidiLearnArmed() noexcept;
+    void applyMidiLearn();
+
     std::atomic<int> midiLearnSource { -1 };
     std::atomic<int> midiLearnNote { -1 };
 
@@ -216,9 +230,11 @@ public:
     }
 
     /** Message thread: which pickup the point panel's meter follows, or -1.
-        A panel sets it when it opens and clears it when it closes, so at
-        most one pickup is ever metered. */
-    std::atomic<int> meteredPickup { -1 };
+        A panel sets it when it opens and releases it when it closes, so at
+        most one pickup is ever metered. Under FxmeNet it is sent to the
+        server, which meters, and the level comes back as telemetry. */
+    void setMeteredPickup (int pickupIndex);
+    void releaseMeteredPickup (int pickupIndex);      // only if that one is metered
 
     /** Level in dBFS of the pickup named by `meteredPickup`: mono, its own
         Level applied and its Pan not, and pre Out Gain. Peak, held and
@@ -387,13 +403,23 @@ private:
         send the server back the state the server just gave it. */
     bool restoringState = false;
 
+    void timerCallback() override;   // the server's instance: applyMidiLearn
+
+    /** In a mirror, sends `value` for `kind` to the server's instance. */
+    void postIndexEvent (std::uint8_t kind, int value);
+
+    std::atomic<int> midiLearnArmed { -1 };
+    std::atomic<int> meteredPickup { -1 };
+    std::atomic<float> midiLearnCount { 0.0f };   // captures applied; telemetry
+    int seenLearnCount = -1;                      // mirror: the count last acted on
+
     /** Into the strike mailbox the audio thread reads; what requestStrike
         does without FxmeNet, and what the server's instance does with the
         mirror's strike events. */
     void postStrike (float x, float y, float velocity);
 
     /** FxmeNet events (NetBridge::postEvent), first byte. */
-    enum EventKind : std::uint8_t { strikeEvent = 1 };
+    enum EventKind : std::uint8_t { strikeEvent = 1, meterPickupEvent = 2, learnArmEvent = 3 };
 
     /** Telemetry channel names of the hit ring, one per ring slot. */
     struct HitNames { std::string x, y, amplitude; };

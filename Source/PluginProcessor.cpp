@@ -218,20 +218,35 @@ ModalDishAudioProcessor::ModalDishAudioProcessor()
         net.telemetry().addScalar (n.amplitude, [this, i] { return synth.getHit (i).amplitude; });
     }
 
-    // FxmeNet: on the server, the strikes clicked in the mirror's editor.
+    // The pickup panel's meter, and the MIDI learn button: the server's
+    // count of applied captures, so a mirror's button stops listening.
+    net.telemetry().addValue ("pickup", peakHoldPickup);
+    net.telemetry().addValue ("learns", midiLearnCount);
+
+    // FxmeNet: on the server, what the mirror's editor triggered.
     net.onEvent = [this] (const std::uint8_t* data, std::size_t size)
     {
         fxme::net::ByteReader r (data, size);
-        if (r.u8() != strikeEvent)
-            return;
-        const float x = r.f32(), y = r.f32(), velocity = r.f32();
-        if (r.ok())
-            postStrike (x, y, velocity);
+        const auto kind = r.u8();
+        if (kind == strikeEvent)
+        {
+            const float x = r.f32(), y = r.f32(), velocity = r.f32();
+            if (r.ok())
+                postStrike (x, y, velocity);
+        }
+        else if (kind == meterPickupEvent || kind == learnArmEvent)
+        {
+            const auto value = (int) (std::int32_t) r.u32();
+            if (r.ok())
+                (kind == meterPickupEvent ? meteredPickup : midiLearnArmed)
+                    .store (value, std::memory_order_release);
+        }
     };
 }
 
 ModalDishAudioProcessor::~ModalDishAudioProcessor()
 {
+    stopTimer();
     runner.cancelAndWait();
 }
 
@@ -557,6 +572,13 @@ void ModalDishAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBl
     // output meters it needs somewhere to put a block before measuring it.
     pickupMeter.prepare (sampleRate);
     pickupMeterScratch.assign ((size_t) juce::jmax (0, samplesPerBlock), 0.0f);
+
+    // FxmeNet: on the server no editor applies a MIDI learn capture, so
+    // this instance does (the role is set before prepareToPlay).
+    if (net.isSource())
+        startTimerHz (20);
+    else
+        stopTimer();
 
     const auto hp = fxme::BiquadCoeffs::highpass (sampleRate, outHighpassHz, outHighpassQ);
     outHpL.c = hp;
@@ -945,6 +967,75 @@ void ModalDishAudioProcessor::requestStrike (float x, float y, float velocity)
         return;
 
     postStrike (x, y, velocity);
+}
+
+void ModalDishAudioProcessor::postIndexEvent (std::uint8_t kind, int value)
+{
+    std::vector<std::uint8_t> event;
+    fxme::net::ByteWriter w (event);
+    w.u8 (kind);
+    w.u32 ((std::uint32_t) (std::int32_t) value);
+    net.postEvent (event.data(), event.size());   // false, nothing to do, when not a mirror
+}
+
+void ModalDishAudioProcessor::setMeteredPickup (int pickupIndex)
+{
+    meteredPickup.store (pickupIndex, std::memory_order_release);
+    postIndexEvent (meterPickupEvent, pickupIndex);
+}
+
+void ModalDishAudioProcessor::releaseMeteredPickup (int pickupIndex)
+{
+    // The test matters because opening a second panel claims the slot
+    // before the first one is destroyed.
+    if (meteredPickup.load (std::memory_order_acquire) == pickupIndex)
+        setMeteredPickup (-1);
+}
+
+void ModalDishAudioProcessor::armMidiLearn (int sourceIndex)
+{
+    midiLearnArmed.store (sourceIndex, std::memory_order_release);
+    postIndexEvent (learnArmEvent, sourceIndex);
+}
+
+void ModalDishAudioProcessor::disarmMidiLearn (int sourceIndex)
+{
+    if (midiLearnArmed.load (std::memory_order_acquire) == sourceIndex)
+        armMidiLearn (-1);
+}
+
+int ModalDishAudioProcessor::getMidiLearnArmed() noexcept
+{
+    // A mirror's audio thread never runs, so nothing disarms it there: the
+    // server's capture count moving does. The first count read only syncs.
+    if (net.isMirror())
+    {
+        const int count = (int) midiLearnCount.load (std::memory_order_relaxed);
+        if (seenLearnCount >= 0 && count != seenLearnCount)
+            midiLearnArmed.store (-1, std::memory_order_release);
+        seenLearnCount = count;
+    }
+    return midiLearnArmed.load (std::memory_order_acquire);
+}
+
+void ModalDishAudioProcessor::applyMidiLearn()
+{
+    // Consumed with exchange so a note is applied once even if the timer and
+    // the audio thread race.
+    const int learned = midiLearnNote.exchange (-1, std::memory_order_acq_rel);
+    if (learned < 0)
+        return;
+    const int src = midiLearnSource.load (std::memory_order_relaxed);
+    if (juce::isPositiveAndBelow (src, fem::maxSources))
+        if (auto* param = apvts.getParameter (fem::id::sourceNote[src]))
+            param->setValueNotifyingHost (param->convertTo0to1 ((float) learned));
+    midiLearnCount.store (midiLearnCount.load (std::memory_order_relaxed) + 1.0f,
+                          std::memory_order_relaxed);
+}
+
+void ModalDishAudioProcessor::timerCallback()
+{
+    applyMidiLearn();
 }
 
 void ModalDishAudioProcessor::postStrike (float x, float y, float velocity)
