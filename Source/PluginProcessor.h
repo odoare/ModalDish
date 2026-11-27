@@ -40,6 +40,7 @@
 #include <FxmeTools/dsp/Biquad.h>
 #include <FxmeTools/presets/PresetManager.h>
 #include <FxmeTools/dsp/VuMeter.h>
+#include <FxmeTools/net/NetBridge.h>   // FxmeNet
 
 #include <atomic>
 #include <vector>
@@ -76,6 +77,9 @@ public:
 
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
+
+    // FxmeNet: the server and the client find the bridge through the VST3 component.
+    juce::VST3ClientExtensions* getVST3ClientExtensions() override { return &net; }
 
     //==========================================================================
     juce::AudioProcessorValueTreeState apvts;
@@ -356,6 +360,23 @@ private:
     std::atomic<float>* pSourceOn[fem::maxSources] {};
     std::atomic<float>* pInGain = nullptr;
     std::atomic<float>* pOutGain = nullptr;
+
+    /** True while a state handed over by the host is being rebuilt
+        (handleAsyncUpdate). The shape it invalidates is the host's, not an
+        edit, so it is not reported to FxmeNet as a change: the mirror would
+        send the server back the state the server just gave it. */
+    bool restoringState = false;
+
+    /** FxmeNet (FxmeTools doc/fxmenet-howto.md). Declared last: it holds
+        references to the peak-hold atomics above.
+
+        In a mirror (the DAW side, never processed) the editor works as
+        usual, and Compute runs here: the editor needs the modes to draw
+        them. Each change of the geometry, and each completed computation,
+        is reported with notifyStateChanged(), so FxmeNet sends the server
+        the whole state, modal cache included, and the server restores the
+        modes from it without solving again. */
+    fxme::net::NetBridge net;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ModalDishAudioProcessor)
 };

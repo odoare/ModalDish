@@ -72,10 +72,10 @@ namespace fem::tip
 
     // --- Frequency control ----------------------------------------------------
     inline constexpr const char* frequency =
-        "Value of first eigenfrequency. Every other mode follows the"
+        "Value of first eigenfrequency. Every other mode follows the "
         "ratios the calculated geometry gives it.";
     inline constexpr const char* glide =
-        "Portamento time between MIDI-tuned notes."
+        "Portamento time between MIDI-tuned notes.";
     inline constexpr const char* srcChan =
         "The MIDI channel that triggers sources. Omni accepts any of "
         "them.";

@@ -7,8 +7,9 @@ on:
     tags: ['v[0-9]+.[0-9]+.[0-9]+']
   workflow_dispatch:
 
+# JUCE, FxmeTools and clap-juce-extensions are fetched by CMake at the commits
+# pinned in cmake/Dependencies.cmake; -DFXME_USE_SIBLINGS=OFF makes sure of it.
 env:
-  JUCE_VERSION: 8.0.12
   # Fallback for manual runs, which have no tag to take a version from. Keep
   # in step with project(ModalDish VERSION ...) in CMakeLists.txt; this is the
   # one place the number is duplicated.
@@ -22,14 +23,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: ModalDish
-          submodules: recursive        # FxmeTools, and anything nested in it
-
-      # CMakeLists expects JUCE as a sibling of the project directory.
-      - uses: actions/checkout@v4
-        with:
-          repository: juce-framework/JUCE
-          ref: ${{ env.JUCE_VERSION }}
-          path: JUCE
 
       - name: Install JUCE build dependencies
         run: |
@@ -38,12 +31,14 @@ jobs:
             libasound2-dev libfreetype-dev libx11-dev libxcomposite-dev \
             libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev \
             libxrender-dev libwebkit2gtk-4.1-dev libglu1-mesa-dev \
-            libcurl4-openssl-dev
+            libcurl4-openssl-dev \
+            libxi-dev libegl-dev    # JUCE 9: XInput2 (multi-touch), EGL (OpenGL)
 
       - name: Configure
         run: |
           cmake -B ModalDish/build -S ModalDish \
             -DCMAKE_BUILD_TYPE=Release \
+            -DFXME_USE_SIBLINGS=OFF \
             -DMODALDISH_BUILD_TESTS=ON
 
       # BinaryData on its own first: juceaide turning ~1.2 MB of artwork into
@@ -71,6 +66,7 @@ jobs:
           ART=ModalDish/build/ModalDish_artefacts/Release
           mkdir -p stage
           cp -r "$ART/VST3/ModalDish.vst3" stage/
+          cp -r "$ART/CLAP/ModalDish.clap" stage/
           cp -r "$ART/Standalone/ModalDish" stage/ModalDish-standalone
           cp ModalDish/README.md stage/
           cd stage && zip -r "../ModalDish-${VERSION}-linux-x86_64.zip" .
@@ -87,18 +83,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: ModalDish
-          submodules: recursive
-
-      - uses: actions/checkout@v4
-        with:
-          repository: juce-framework/JUCE
-          ref: ${{ env.JUCE_VERSION }}
-          path: JUCE
 
       - uses: ilammy/msvc-dev-cmd@v1
 
       - name: Configure
-        run: cmake -B ModalDish/build -S ModalDish -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B ModalDish/build -S ModalDish -DCMAKE_BUILD_TYPE=Release -DFXME_USE_SIBLINGS=OFF
 
       - name: Build binary data
         run: cmake --build ModalDish/build --config Release --target ModalDishBinaryData --parallel 1
@@ -115,6 +104,7 @@ jobs:
           ART=ModalDish/build/ModalDish_artefacts/Release
           mkdir -p stage
           cp -r "$ART/VST3/ModalDish.vst3" stage/
+          cp -r "$ART/CLAP/ModalDish.clap" stage/
           cp -r "$ART/Standalone/ModalDish.exe" stage/
           cp ModalDish/README.md stage/
           cd stage && 7z a "../ModalDish-${VERSION}-windows-x86_64.zip" .
@@ -133,13 +123,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: ModalDish
-          submodules: recursive
-
-      - uses: actions/checkout@v4
-        with:
-          repository: juce-framework/JUCE
-          ref: ${{ env.JUCE_VERSION }}
-          path: JUCE
 
       # Passed as -D as well as being set in CMakeLists: a -D is in the cache
       # before any line of CMakeLists runs, so it cannot be lost to file
@@ -149,6 +132,7 @@ jobs:
         run: |
           cmake -B ModalDish/build -S ModalDish \
             -DCMAKE_BUILD_TYPE=Release \
+            -DFXME_USE_SIBLINGS=OFF \
             -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13
 
@@ -162,7 +146,7 @@ jobs:
 
       # A verification step that cannot fail is not one. lipo printing "arm64"
       # while the job goes green is exactly how an arm64-only "universal"
-      # release ships. All three bundles, because they are three separate link
+      # release ships. Every bundle, because they are separate link
       # steps and a user reporting "the standalone won't open either" is
       # reporting this same bug.
       - name: Verify universal binaries
@@ -173,6 +157,7 @@ jobs:
           for bundle in \
             "$ART/VST3/ModalDish.vst3/Contents/MacOS/ModalDish" \
             "$ART/AU/ModalDish.component/Contents/MacOS/ModalDish" \
+            "$ART/CLAP/ModalDish.clap/Contents/MacOS/ModalDish" \
             "$ART/Standalone/ModalDish.app/Contents/MacOS/ModalDish"
           do
             if [[ ! -f "$bundle" ]]; then
@@ -198,6 +183,7 @@ jobs:
           ART=ModalDish/build/ModalDish_artefacts/Release
           for b in "$ART/VST3/ModalDish.vst3" \
                    "$ART/AU/ModalDish.component" \
+                   "$ART/CLAP/ModalDish.clap" \
                    "$ART/Standalone/ModalDish.app"; do
             codesign --force --deep --sign - --timestamp=none "$b"
             codesign --verify --verbose "$b"
@@ -211,8 +197,10 @@ jobs:
           ART=ModalDish/build/ModalDish_artefacts/Release
           mkdir -p pkg_root/Library/Audio/Plug-Ins/VST3
           mkdir -p pkg_root/Library/Audio/Plug-Ins/Components
+          mkdir -p pkg_root/Library/Audio/Plug-Ins/CLAP
           cp -r "$ART/VST3/ModalDish.vst3"    pkg_root/Library/Audio/Plug-Ins/VST3/
           cp -r "$ART/AU/ModalDish.component" pkg_root/Library/Audio/Plug-Ins/Components/
+          cp -r "$ART/CLAP/ModalDish.clap"   pkg_root/Library/Audio/Plug-Ins/CLAP/
           pkgbuild --root pkg_root --identifier com.fx-mechanics.ModalDish \
                    --version "$VERSION" --install-location / \
                    "ModalDish-${VERSION}-macOS.pkg"
@@ -226,6 +214,7 @@ jobs:
           mkdir -p stage
           cp -r "$ART/VST3/ModalDish.vst3"       stage/
           cp -r "$ART/AU/ModalDish.component"    stage/
+          cp -r "$ART/CLAP/ModalDish.clap"       stage/
           cp -r "$ART/Standalone/ModalDish.app"  stage/
           cp ModalDish/README.md stage/
           cd stage && zip -ry "../ModalDish-${VERSION}-macOS.zip" .

@@ -219,6 +219,21 @@ mode shapes are indexed against.
 `editorState` is deliberately **not** serialised: it describes a window, not
 a sound.
 
+**Under FxmeNet**, the geometry and the modes are state, not parameters, so
+they reach the server only through the state channel. The mirror (the DAW-side
+copy that shows the editor and never processes) runs *Compute* locally, since
+the editor needs the modes to draw them, and calls
+`NetBridge::notifyStateChanged()` on each geometry edit and each completed
+computation. FxmeNet then sends the whole state, `MODES` cache included, and
+the server restores the modes from the cache without solving. A state that
+arrives without modes (an edit before *Compute*) starts no solve on the
+server: the previous plate keeps sounding until the mirror sends the new
+modes. The server falls back to `computeModes()` only when nothing sounds yet
+(a session reloaded from a state saved without its cache). Telemetry is the
+output peak meters (`outL`, `outR`). Strikes, MIDI learn, the pickup meter,
+hit markers and the animated field need a client-to-server event channel and
+do not work yet.
+
 ---
 
 ## 7. Audio-thread rules
@@ -272,7 +287,7 @@ on the processor (`editorState`, `splashClaimed`).
 | `Source/PluginEditor.{h,cpp}` | editor, timer, cross-thread reads |
 | `Source/Components/ShapeCanvas.*` | shape editing; owns no processor state |
 | `Source/ShapeFile.*` | JSON geometry reader |
-| `lib/FxmeTools/core/…/acoustics` | mesher and eigensolver, JUCE-free |
+| FxmeTools `core/FxmeTools/acoustics` (separate repo) | mesher and eigensolver, JUCE-free |
 | `Tests/CascadeMeasure.cpp` | offline render; the sample-rate and cascade guards |
 
 `Source/ParamIDs.h`, `Source/Dsp/ModalModel.h`, `Tests/FemTests.cpp` and

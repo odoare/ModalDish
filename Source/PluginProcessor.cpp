@@ -141,6 +141,7 @@ ModalDishAudioProcessor::ModalDishAudioProcessor()
         invalidateShape();
         if (buildMesh() && ! modesFromTree (apvts.state.getChildWithName ("MODES")))
             computeModes();
+        net.notifyStateChanged();   // FxmeNet: a preset loaded in the mirror
         sendChangeMessage();
     };
 
@@ -199,6 +200,11 @@ ModalDishAudioProcessor::ModalDishAudioProcessor()
 
     shapeData = makeDefaultShape();
     buildMesh();
+
+    // FxmeNet: everything the editor reads that is not a parameter and that
+    // the mirror can be given. Names are stable: the mirror skips unknown ones.
+    net.telemetry().addValue ("outL", peakHoldL);   // the output meters
+    net.telemetry().addValue ("outR", peakHoldR);
 }
 
 ModalDishAudioProcessor::~ModalDishAudioProcessor()
@@ -792,6 +798,8 @@ void ModalDishAudioProcessor::invalidateBoundary()
     // Mark the modes stale for the UI, but keep the published model sounding
     // until a new computation replaces it: edits shouldn't cut the audio.
     currentModel = nullptr;
+    if (! restoringState)
+        net.notifyStateChanged();   // FxmeNet: the geometry was edited
     sendChangeMessage();
 }
 
@@ -862,6 +870,9 @@ void ModalDishAudioProcessor::computeModes()
                         {
                             appendStatisticalTail (*pendingModel, fem::maxModes);
                             publishModel (std::move (pendingModel));
+                            // FxmeNet: the mirror's modes go to the server
+                            // inside the state, so it need not solve again.
+                            net.notifyStateChanged();
                         }
                         else
                             pendingModel = nullptr;
@@ -1130,12 +1141,23 @@ void ModalDishAudioProcessor::setStateInformation (const void* data, int sizeInB
 
 void ModalDishAudioProcessor::handleAsyncUpdate()
 {
+    const juce::ScopedValueSetter<bool> restoring (restoringState, true);
+
     invalidateShape();
     if (buildMesh())
     {
         // Prefer the modal cache saved with the state; fall back to a fresh
         // background computation when it is missing or inconsistent.
-        if (! modesFromTree (pendingModesTree))
+        //
+        // FxmeNet: on the server, a state without modes is the mirror's
+        // geometry being edited (it is sent at each edit, before Compute);
+        // the mirror solves and sends the modes when Compute is pressed.
+        // Solving here too would cost the server a full eigensolve per
+        // edit, so the previous plate keeps sounding instead. The server
+        // still solves when nothing sounds yet: a session reloaded from a
+        // state saved without its cache, before any editor is opened.
+        if (! modesFromTree (pendingModesTree)
+             && (! net.isSource() || publishedModel.load (std::memory_order_acquire) == nullptr))
             computeModes();
     }
     pendingModesTree = {};

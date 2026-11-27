@@ -29,6 +29,7 @@ ModalDish adds two geometric nonlinearities to the modal bank: a dynamic tension
 - [Geometry files](#geometry-files)
 - [Presets](#presets)
 - [Building](#building)
+- [Under FxmeNet](#under-fxmenet)
 - [Repo layout](#repo-layout)
 - [References](#references)
 - [License](#license)
@@ -78,7 +79,7 @@ The detailed path, from a note or a sample arriving to a sample leaving.
 
 ## Installing
 
-Builds are published on the [releases page](https://github.com/odoare/ModalDish/releases): a zip per platform, plus a `.pkg` installer for macOS. VST3 and AU on macOS, VST3 on Windows and Linux, with a standalone application everywhere.
+Builds are published on the [releases page](https://github.com/odoare/ModalDish/releases): a zip per platform, plus a `.pkg` installer for macOS. VST3, AU and CLAP on macOS, VST3 and CLAP on Windows and Linux, with a standalone application everywhere.
 
 ### macOS
 
@@ -91,6 +92,7 @@ installed:
 ```sh
 xattr -dr com.apple.quarantine /Library/Audio/Plug-Ins/VST3/ModalDish.vst3
 xattr -dr com.apple.quarantine /Library/Audio/Plug-Ins/Components/ModalDish.component
+xattr -dr com.apple.quarantine /Library/Audio/Plug-Ins/CLAP/ModalDish.clap
 ```
 
 Then rescan. If you used the `.pkg` and macOS refused to open it, right-click it and choose Open rather than double-clicking.
@@ -101,7 +103,9 @@ The builds are universal (Apple Silicon and Intel) and target macOS 10.13 and la
 
 Copy `ModalDish.vst3` into the VST3 folder your host scans
 (`C:\Program Files\Common Files\VST3` on Windows, `~/.vst3` on Linux) and
-rescan. Nothing else is needed.
+rescan. Nothing else is needed. For hosts that load CLAP, copy `ModalDish.clap`
+into the CLAP folder instead (`C:\Program Files\Common Files\CLAP` on Windows,
+`~/.clap` on Linux).
 
 ## The interface
 
@@ -516,14 +520,23 @@ The eigensolver computation is still there as the fallback, and runs in the back
 
 ## Building
 
-JUCE 8 is expected as a sibling directory (`../JUCE`); FxmeTools is a git
-submodule:
+JUCE 9, FxmeTools and clap-juce-extensions are resolved by
+`cmake/FxmeDeps.cmake`. Locally, sibling clones next to the repo win
+(`../JUCE`, `../FxmeTools`, `../clap-juce-extensions`). Otherwise, or with
+`-DFXME_USE_SIBLINGS=OFF` (what releases and CI use), CMake downloads with
+FetchContent the commits pinned in `cmake/Dependencies.cmake` (JUCE 9.0.4,
+FxmeTools `bd9d225`, clap-juce-extensions `7adee3a`). The configure step prints
+where each dependency came from. There is no submodule: a plain `git clone`
+followed by `cmake -B Builds` works with no sibling at all.
 
 ```sh
-git clone --recurse-submodules <this repo>
+git clone <this repo>
 cmake -B Builds
 cmake --build Builds -j2 --target ModalDish_VST3
 ```
+
+The plugin is built as AU, VST3, Standalone and CLAP (CLAP id
+`com.fx-mechanics.ModalDish`); each has its own `ModalDish_<format>` target.
 
 Console validation suites:
 
@@ -536,8 +549,20 @@ ctest --test-dir Builds
 `ShapeFileTests` is the one suite that links JUCE (juce_core only, for its
 JSON parser); the rest are JUCE-free and run without a plugin host.
 
-Building does not install. Copy the `.vst3` into the folder your host scans
+Building does not install. Copy the `.vst3` (or `.clap`) into the folder your host scans
 and make it rescan.
+
+## Under FxmeNet
+
+ModalDish is FxmeNet-aware. FxmeNet runs a plugin's DSP on a LAN server while its editor stays in the DAW; the copy of the plugin left in the DAW is a "mirror", which shows the editor and never processes audio.
+
+The geometry and the computed modes are state, not parameters. In the mirror, *Compute* runs locally, because the editor needs the modes to draw them. Each geometry edit and each completed computation calls `NetBridge::notifyStateChanged()`, so FxmeNet sends the whole state, modal cache included, to the server, which restores the modes from the cache without solving again.
+
+On the server, a state arriving without modes (an edit made before *Compute*) does not start a solve: the previous plate keeps sounding until the mirror sends the new modes. The server solves only when nothing sounds yet, which is a session reloaded from a state saved without its cache.
+
+Telemetry sent back to the mirror: the output peak meters (`outL`, `outR`).
+
+Not working yet under FxmeNet: mouse strikes on the plate, MIDI learn, the pickup panel's meter, the hit markers and the animated displacement/velocity view. They need an event channel from client to server (FxmeNet todo items 17b and 17c). MIDI and audio input do sound.
 
 ## Repo layout
 
@@ -550,9 +575,9 @@ and make it rescan.
 | `Source/Components/PlatePointPanel.h` | the pickup and source panels |
 | `Source/ShapeFile.*` | JSON geometry reader (see `Shapes/`) |
 | `Source/PluginEditor.*` | FX-Mechanics UI (top bar, panels, plate view) |
-| `lib/FxmeTools/core/FxmeTools/acoustics/` | reusable FEM library (mesh, Morley plate solver) |
-| `lib/FxmeTools/core/FxmeTools/math/` | the linear algebra under it (sparse/dense storage, Cholesky, subspace eigensolver) |
-| `lib/FxmeTools/FxmeTools/acoustics/` | the contour and 3D plate view components |
+| FxmeTools: `core/FxmeTools/acoustics/` | reusable FEM library (mesh, Morley plate solver) |
+| FxmeTools: `core/FxmeTools/math/` | the linear algebra under it (sparse/dense storage, Cholesky, subspace eigensolver) |
+| FxmeTools: `FxmeTools/acoustics/` | the contour and 3D plate view components |
 | `Tests/FemTests.cpp` | numerical validation against analytic plates |
 | `Tests/IoTests.cpp` | source mappings, pickup mix, stereo tail |
 | `Tests/CascadeMeasure.cpp` | cascade level and sample-rate independence |

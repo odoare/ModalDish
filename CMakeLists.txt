@@ -23,22 +23,13 @@ project(ModalDish VERSION 0.1.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# JUCE is expected as a sibling of this repo; FxmeTools lives in-tree as a git
-# submodule under lib/ (registered directly: ModalDish does not need the WDL
-# sources, so fxmetools_attach is not used).
-#
-# FxmeTools is split in two, and the FEM code ModalDish is built on (FemMesh and
-# PlateModes) is entirely in the JUCE-free half under lib/FxmeTools/core. That
-# directory is a second include root for the same <FxmeTools/...> spelling, so
-# no include changes, but the target has to be added or nothing resolves.
-add_subdirectory(../JUCE JUCE)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/lib/FxmeTools/core FxmeCore)
-juce_add_module(${CMAKE_CURRENT_SOURCE_DIR}/lib/FxmeTools/FxmeTools)
-
-# The module's own sources include core headers, and juce_add_module creates an
-# INTERFACE target whose sources compile into the consumer, so core travels
-# with it.
-target_link_libraries(FxmeTools INTERFACE FxmeCore)
+# JUCE, FxmeTools, clap-juce-extensions: sibling clones (../JUCE, ../FxmeTools,
+# ../clap-juce-extensions) or, with -DFXME_USE_SIBLINGS=OFF, the commits pinned
+# in cmake/Dependencies.cmake. That file registers the FxmeTools module and
+# FxmeCore, the JUCE-free half the FEM code (FemMesh, PlateModes) lives in.
+# ModalDish links both directly: it does not need the WDL sources, so
+# fxmetools_attach is not used.
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Dependencies.cmake)
 
 juce_add_plugin(ModalDish
     COMPANY_NAME                "FX-Mechanics"
@@ -58,6 +49,13 @@ juce_add_plugin(ModalDish
     AU_MAIN_TYPE                kAudioUnitType_MusicEffect
     BUNDLE_ID                   "com.FXMechanics.ModalDish"
 )
+
+# CLAP, beside AU/VST3/Standalone. The ID is permanent once released.
+# An audio effect played by MIDI: a modal filter bank driven by the input
+# and by strikes.
+fxmetools_add_clap(ModalDish
+    ID       "com.fx-mechanics.ModalDish"
+    FEATURES audio-effect filter stereo)
 
 # Source files are discovered recursively so adding a new module/component
 # does not require editing this file. Re-run CMake configure after adding files.

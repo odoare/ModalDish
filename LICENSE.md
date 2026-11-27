@@ -1,11 +1,11 @@
 # Licensing
 
 ModalDish is a JUCE plugin built on [FxmeTools](https://github.com/odoare/FxmeTools)
-(vendored as the `lib/FxmeTools` submodule), which is itself split into a
+(a separate dependency, fetched at build time rather than vendored), which is itself split into a
 framework-free half and a JUCE half under different licences. Which one
 applies to a given file in this repository is stated in that file's own
 header as an SPDX identifier; this document explains why, mirroring
-`lib/FxmeTools/LICENSE.md`.
+the `LICENSE.md` of the FxmeTools repository.
 
 ```
 Almost everything in Source/ and Tests/   AGPL-3.0-or-later, or commercial terms
@@ -18,7 +18,7 @@ Tests/juce_stub/JuceHeader.h              LGPL-3.0-or-later
 ## The plugin itself — AGPL-3.0-or-later, or commercial
 
 ModalDish's GUI, DSP glue, processor and editor all compile against JUCE and
-against `lib/FxmeTools/FxmeTools/` (FxmeTools' own JUCE module). JUCE 8 is
+against FxmeTools' `FxmeTools/` JUCE module. JUCE 9 is
 itself dual-licensed - AGPLv3, or a commercial JUCE licence - and FxmeTools'
 JUCE module mirrors that shape rather than fighting it. Distributing ModalDish
 therefore means one of:
@@ -87,8 +87,8 @@ for the Markdown under `doc/`.
 
 The finite-element mesher and the plate eigensolver are not in this repository.
 They live in FxmeTools' framework-free half
-(`lib/FxmeTools/core/FxmeTools/acoustics/`) under `LGPL-3.0-or-later`, and are
-covered by that submodule's own `LICENSE.md`.
+(`core/FxmeTools/acoustics/` in that repository) under `LGPL-3.0-or-later`, and are
+covered by the FxmeTools repository's own `LICENSE.md`.
 
 ---
 
