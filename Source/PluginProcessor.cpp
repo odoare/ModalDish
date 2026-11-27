@@ -205,6 +205,29 @@ ModalDishAudioProcessor::ModalDishAudioProcessor()
     // the mirror can be given. Names are stable: the mirror skips unknown ones.
     net.telemetry().addValue ("outL", peakHoldL);   // the output meters
     net.telemetry().addValue ("outR", peakHoldR);
+
+    // The hit markers: the ring the editor drains, slot by slot, and the
+    // count it drains up to (exact as a float up to 2^24 hits).
+    net.telemetry().addScalar (hitCountName, [this] { return (float) synth.getHitCount(); });
+    for (int i = 0; i < fem::PlateSynth::hitRingSize; ++i)
+    {
+        auto& n = hitNames[(std::size_t) i];
+        n = { "hitX" + std::to_string (i), "hitY" + std::to_string (i), "hitA" + std::to_string (i) };
+        net.telemetry().addScalar (n.x,         [this, i] { return synth.getHit (i).x; });
+        net.telemetry().addScalar (n.y,         [this, i] { return synth.getHit (i).y; });
+        net.telemetry().addScalar (n.amplitude, [this, i] { return synth.getHit (i).amplitude; });
+    }
+
+    // FxmeNet: on the server, the strikes clicked in the mirror's editor.
+    net.onEvent = [this] (const std::uint8_t* data, std::size_t size)
+    {
+        fxme::net::ByteReader r (data, size);
+        if (r.u8() != strikeEvent)
+            return;
+        const float x = r.f32(), y = r.f32(), velocity = r.f32();
+        if (r.ok())
+            postStrike (x, y, velocity);
+    };
 }
 
 ModalDishAudioProcessor::~ModalDishAudioProcessor()
@@ -909,6 +932,22 @@ void ModalDishAudioProcessor::reclaimModels (bool audioStopped)
 }
 
 void ModalDishAudioProcessor::requestStrike (float x, float y, float velocity)
+{
+    // FxmeNet: a mirror never processes, so the strike goes to the server's
+    // instance (onEvent, in the constructor). Elsewhere postEvent declines.
+    std::vector<std::uint8_t> event;
+    fxme::net::ByteWriter w (event);
+    w.u8 (strikeEvent);
+    w.f32 (x);
+    w.f32 (y);
+    w.f32 (velocity);
+    if (net.postEvent (event.data(), event.size()))
+        return;
+
+    postStrike (x, y, velocity);
+}
+
+void ModalDishAudioProcessor::postStrike (float x, float y, float velocity)
 {
     strikeX.store (x);
     strikeY.store (y);

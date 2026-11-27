@@ -229,10 +229,17 @@ the server restores the modes from the cache without solving. A state that
 arrives without modes (an edit before *Compute*) starts no solve on the
 server: the previous plate keeps sounding until the mirror sends the new
 modes. The server falls back to `computeModes()` only when nothing sounds yet
-(a session reloaded from a state saved without its cache). Telemetry is the
-output peak meters (`outL`, `outR`). Strikes, MIDI learn, the pickup meter,
-hit markers and the animated field need a client-to-server event channel and
-do not work yet.
+(a session reloaded from a state saved without its cache).
+
+`requestStrike()` in a mirror queues an FxmeNet event (`net.postEvent`,
+first byte `strikeEvent`, then x, y, velocity as f32) instead of writing the
+mailbox, which the mirror's audio thread never reads; the server's instance
+gets it in `net.onEvent` (a host thread, not the audio thread) and writes
+its own mailbox through `postStrike()`. Telemetry is the output peak meters
+(`outL`, `outR`) and the hit ring (`hits` and `hitX/Y/A0..15`, one scalar
+per ring slot): on a mirror `getHitCount()` and `getHit()` read them, so
+the editor drains the server's hits unchanged. MIDI learn, the pickup meter
+and the animated field do not work yet.
 
 ---
 

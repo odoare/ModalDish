@@ -13,6 +13,9 @@ include(${CMAKE_CURRENT_LIST_DIR}/FxmeDeps.cmake)
 fxme_dependency(JUCE https://github.com/juce-framework/JUCE 9.0.4 SHALLOW)
 # FxmeTools brings the FEM code (core/FxmeTools/acoustics) and the FxmeNet
 # bridge (FxmeTools/net/NetBridge.h).
+# TODO before the next release: bump to the FxmeTools commit with FxmeNet
+# ABI 2 (NetBridge::postEvent / onEvent, 2026-11-27; not pushed when this was
+# written, the sibling clone has it). The pin below does not compile.
 fxme_dependency(FxmeTools https://github.com/odoare/FxmeTools
     bd9d225ba2275b9d931136af04abd9b73fcbb7b0)
 # CLAP format (fxmetools_add_clap). Its last tag predates JUCE 9 support:

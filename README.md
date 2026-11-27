@@ -560,9 +560,11 @@ The geometry and the computed modes are state, not parameters. In the mirror, *C
 
 On the server, a state arriving without modes (an edit made before *Compute*) does not start a solve: the previous plate keeps sounding until the mirror sends the new modes. The server solves only when nothing sounds yet, which is a session reloaded from a state saved without its cache.
 
-Telemetry sent back to the mirror: the output peak meters (`outL`, `outR`).
+Clicks on the plate in the mirror's editor are sent to the server as FxmeNet events (ABI 2, `NetBridge::postEvent`), where they strike the plate as they would locally, about 20 ms later (the client reads events at 50 Hz).
 
-Not working yet under FxmeNet: mouse strikes on the plate, MIDI learn, the pickup panel's meter, the hit markers and the animated displacement/velocity view. They need an event channel from client to server (FxmeNet todo items 17b and 17c). MIDI and audio input do sound.
+Telemetry sent back to the mirror: the output peak meters (`outL`, `outR`) and the hit ring the markers are drawn from (`hits`, `hitX0`… `hitA15`), so clicks, MIDI notes and sources all flash on the mirror's plate.
+
+Not working yet under FxmeNet: MIDI learn, the pickup panel's meter and the animated displacement/velocity view. The first two can use the same event channel; the third needs the modal field as telemetry.
 
 ## Repo layout
 

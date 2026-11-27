@@ -42,7 +42,9 @@
 #include <FxmeTools/dsp/VuMeter.h>
 #include <FxmeTools/net/NetBridge.h>   // FxmeNet
 
+#include <array>
 #include <atomic>
+#include <string>
 #include <vector>
 
 //==============================================================================
@@ -226,8 +228,26 @@ public:
         return peakHoldPickup.load (std::memory_order_relaxed);
     }
 
-    int getHitCount() const noexcept              { return synth.getHitCount(); }
-    fem::PlateSynth::HitPoint getHit (int i) const noexcept { return synth.getHit (i); }
+    /** The hit ring, forwarded from the synth. On an FxmeNet mirror the
+        synth never plays: count and ring come from the server's telemetry. */
+    int getHitCount() const noexcept
+    {
+        if (net.isMirror())
+            return (int) net.telemetry().scalar (hitCountName);
+        return synth.getHitCount();
+    }
+
+    fem::PlateSynth::HitPoint getHit (int i) const noexcept
+    {
+        if (net.isMirror())
+        {
+            const auto& n = hitNames[(std::size_t) (((i % fem::PlateSynth::hitRingSize)
+                                                     + fem::PlateSynth::hitRingSize) % fem::PlateSynth::hitRingSize)];
+            return { net.telemetry().scalar (n.x), net.telemetry().scalar (n.y),
+                     net.telemetry().scalar (n.amplitude) };
+        }
+        return synth.getHit (i);
+    }
 
 private:
     fxme::PresetManager presetManager;
@@ -366,6 +386,19 @@ private:
         edit, so it is not reported to FxmeNet as a change: the mirror would
         send the server back the state the server just gave it. */
     bool restoringState = false;
+
+    /** Into the strike mailbox the audio thread reads; what requestStrike
+        does without FxmeNet, and what the server's instance does with the
+        mirror's strike events. */
+    void postStrike (float x, float y, float velocity);
+
+    /** FxmeNet events (NetBridge::postEvent), first byte. */
+    enum EventKind : std::uint8_t { strikeEvent = 1 };
+
+    /** Telemetry channel names of the hit ring, one per ring slot. */
+    struct HitNames { std::string x, y, amplitude; };
+    static constexpr const char* hitCountName = "hits";
+    std::array<HitNames, (std::size_t) fem::PlateSynth::hitRingSize> hitNames;
 
     /** FxmeNet (FxmeTools doc/fxmenet-howto.md). Declared last: it holds
         references to the peak-hold atomics above.
