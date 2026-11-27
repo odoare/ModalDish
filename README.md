@@ -81,6 +81,13 @@ The detailed path, from a note or a sample arriving to a sample leaving.
 
 Builds are published on the [releases page](https://github.com/odoare/ModalDish/releases): a zip per platform, plus a `.pkg` installer for macOS. VST3, AU and CLAP on macOS, VST3 and CLAP on Windows and Linux, with a standalone application everywhere.
 
+Each comes as two plugins, the same plate with the same presets:
+
+- **ModalDish**, an audio effect with MIDI input: put it on an audio track, where the track's sound and MIDI notes both excite the plate.
+- **ModalDish Instrument**, an instrument: put it on a MIDI or instrument track, for hosts that send no MIDI to effects (Ableton Live) or simply to play it from a keyboard. Its audio input is off by default; hosts offer it as a sidechain, to excite the plate with a signal as the effect does.
+
+A session made with one does not open with the other (hosts tell them apart), but a preset saved in one loads in the other.
+
 ### macOS
 
 ModalDish is free software and is **not signed with an Apple Developer ID**
@@ -93,6 +100,9 @@ installed:
 xattr -dr com.apple.quarantine /Library/Audio/Plug-Ins/VST3/ModalDish.vst3
 xattr -dr com.apple.quarantine /Library/Audio/Plug-Ins/Components/ModalDish.component
 xattr -dr com.apple.quarantine /Library/Audio/Plug-Ins/CLAP/ModalDish.clap
+xattr -dr com.apple.quarantine "/Library/Audio/Plug-Ins/VST3/ModalDish Instrument.vst3"
+xattr -dr com.apple.quarantine "/Library/Audio/Plug-Ins/Components/ModalDish Instrument.component"
+xattr -dr com.apple.quarantine "/Library/Audio/Plug-Ins/CLAP/ModalDish Instrument.clap"
 ```
 
 Then rescan. If you used the `.pkg` and macOS refused to open it, right-click it and choose Open rather than double-clicking.
@@ -101,10 +111,10 @@ The builds are universal (Apple Silicon and Intel) and target macOS 10.13 and la
 
 ### Windows and Linux
 
-Copy `ModalDish.vst3` into the VST3 folder your host scans
-(`C:\Program Files\Common Files\VST3` on Windows, `~/.vst3` on Linux) and
-rescan. Nothing else is needed. For hosts that load CLAP, copy `ModalDish.clap`
-into the CLAP folder instead (`C:\Program Files\Common Files\CLAP` on Windows,
+Copy `ModalDish.vst3` and `ModalDish Instrument.vst3` into the VST3 folder
+your host scans (`C:\Program Files\Common Files\VST3` on Windows, `~/.vst3`
+on Linux) and rescan. Nothing else is needed. For hosts that load CLAP, copy
+the two `.clap` files into the CLAP folder instead (`C:\Program Files\Common Files\CLAP` on Windows,
 `~/.clap` on Linux).
 
 ## The interface
@@ -535,8 +545,13 @@ cmake -B Builds
 cmake --build Builds -j2 --target ModalDish_VST3
 ```
 
-The plugin is built as AU, VST3, Standalone and CLAP (CLAP id
-`com.fx-mechanics.ModalDish`); each has its own `ModalDish_<format>` target.
+The effect is built as AU, VST3, Standalone and CLAP (CLAP id
+`com.fx-mechanics.ModalDish`), each with its own `ModalDish_<format>` target;
+the instrument as AU, VST3 and CLAP (`com.fx-mechanics.ModalDishInstrument`),
+targets `ModalDishInstrument_<format>`. Both come from the same sources: the
+instrument is compiled with `MODALDISH_INSTRUMENT=1`, which only turns its
+audio input into a bus disabled by default. `ModalDish_All` and
+`ModalDishInstrument_All` build every format of one.
 
 Console validation suites:
 

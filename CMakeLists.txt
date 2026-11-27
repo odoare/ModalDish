@@ -18,7 +18,9 @@ if(APPLE)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Target architectures")
 endif()
 
-project(ModalDish VERSION 0.1.0 LANGUAGES C CXX)
+# The version is the git tag's (cmake/Version.cmake), nowhere else.
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Version.cmake)
+project(ModalDish VERSION ${MODALDISH_VERSION_NUMBER} LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -31,6 +33,22 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # fxmetools_attach is not used.
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Dependencies.cmake)
 
+# Two plugins from the same sources, for the hosts' sake. Some send no MIDI
+# to an audio effect (Ableton Live) or file it badly, and an instrument is
+# what a MIDI track expects:
+#
+#   ModalDish             an audio effect with MIDI input: the plate on an
+#                         audio track, excited by its input and by notes.
+#   ModalDish Instrument  an instrument: the plate played from a MIDI track.
+#                         Its audio input is a bus disabled by default, which
+#                         hosts offer as a sidechain to excite the plate.
+#
+# They differ only in their identity and in MODALDISH_INSTRUMENT (the input
+# bus, PluginProcessor.cpp); state and presets are the same, presets in the
+# same user folder. The effect's codes and IDs are those of the first release
+# and must never change: hosts find a plugin in a session by them. Each
+# compiles the shared code once, because JUCE bakes a plugin's identity into
+# it.
 juce_add_plugin(ModalDish
     COMPANY_NAME                "FX-Mechanics"
     COMPANY_WEBSITE             "www.fx-mechanics.com"
@@ -50,12 +68,36 @@ juce_add_plugin(ModalDish
     BUNDLE_ID                   "com.FXMechanics.ModalDish"
 )
 
-# CLAP, beside AU/VST3/Standalone. The ID is permanent once released.
-# An audio effect played by MIDI: a modal filter bank driven by the input
-# and by strikes.
+# No standalone for the instrument: the effect's standalone already takes
+# MIDI and audio, and is the same program.
+juce_add_plugin(ModalDishInstrument
+    COMPANY_NAME                "FX-Mechanics"
+    COMPANY_WEBSITE             "www.fx-mechanics.com"
+    PLUGIN_MANUFACTURER_CODE    FXME
+    PLUGIN_CODE                 MDSI
+    FORMATS                     AU VST3
+    COPY_PLUGIN_AFTER_BUILD     TRUE
+    PRODUCT_NAME                "ModalDish Instrument"
+    DESCRIPTION                 "FX-Mechanics finite-element plate physical model, as an instrument"
+    IS_SYNTH                    TRUE
+    NEEDS_MIDI_INPUT            TRUE
+    NEEDS_MIDI_OUTPUT           FALSE
+    IS_MIDI_EFFECT              FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
+    VST3_CATEGORIES             Instrument Synth
+    AU_MAIN_TYPE                kAudioUnitType_MusicDevice
+    BUNDLE_ID                   "com.fx-mechanics.ModalDishInstrument"
+)
+target_compile_definitions(ModalDishInstrument PRIVATE MODALDISH_INSTRUMENT=1)
+
+# CLAP, beside AU/VST3/Standalone. The IDs are permanent once released.
+# The effect: a modal filter bank driven by the input and by strikes.
 fxmetools_add_clap(ModalDish
     ID       "com.fx-mechanics.ModalDish"
     FEATURES audio-effect filter stereo)
+fxmetools_add_clap(ModalDishInstrument
+    ID       "com.fx-mechanics.ModalDishInstrument"
+    FEATURES instrument synthesizer stereo)
 
 # Source files are discovered recursively so adding a new module/component
 # does not require editing this file. Re-run CMake configure after adding files.
@@ -64,8 +106,6 @@ file(GLOB_RECURSE MODALDISH_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/*.h
 )
 
-target_sources(ModalDish PRIVATE ${MODALDISH_SOURCES})
-
 # Make every subdirectory under Source/ an include root so headers can be
 # included by name regardless of where a module lives.
 file(GLOB MODALDISH_INCLUDE_DIRS LIST_DIRECTORIES true
@@ -73,7 +113,14 @@ file(GLOB MODALDISH_INCLUDE_DIRS LIST_DIRECTORIES true
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/*
 )
 list(FILTER MODALDISH_INCLUDE_DIRS EXCLUDE REGEX "\\.(c|cc|cpp|cxx|h|hpp|hxx|mm)$")
-target_include_directories(ModalDish PRIVATE ${MODALDISH_INCLUDE_DIRS})
+
+# The version the window shows, in a generated header (rewritten only when
+# it changes, so a new commit recompiles the editor, not the whole plugin);
+# version.txt for the release workflow (zip names, the macOS installer's
+# version, and the check against the tag).
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/ModalDishVersion.h.in
+               ${CMAKE_CURRENT_BINARY_DIR}/generated/ModalDishVersion.h @ONLY)
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/version.txt "${MODALDISH_VERSION_NUMBER}\n")
 
 # Image assets (logo, etc.)
 # Images, plus the factory presets: PresetManager reads every embedded
@@ -82,6 +129,7 @@ target_include_directories(ModalDish PRIVATE ${MODALDISH_INCLUDE_DIRS})
 # CONFIGURE_DEPENDS as the source glob has: without it, renaming or removing
 # an asset leaves the build tree pointing at a file that is no longer there,
 # and the failure names the old path rather than the stale glob.
+# One binary-data target, linked by both plugins.
 file(GLOB MODALDISH_ASSETS CONFIGURE_DEPENDS
                           ${CMAKE_CURRENT_SOURCE_DIR}/Source/Assets/*.png
                           ${CMAKE_CURRENT_SOURCE_DIR}/Source/Assets/*.jpg
@@ -90,43 +138,56 @@ if(MODALDISH_ASSETS)
     juce_add_binary_data(ModalDishBinaryData SOURCES ${MODALDISH_ASSETS})
     set_target_properties(ModalDishBinaryData PROPERTIES
         INTERPROCEDURAL_OPTIMIZATION OFF)
-    target_link_libraries(ModalDish PRIVATE ModalDishBinaryData)
 endif()
 
-juce_generate_juce_header(ModalDish)
+# Everything but the identity, for each of the two plugins.
+function(modaldish_configure_plugin target)
+    target_sources(${target} PRIVATE ${MODALDISH_SOURCES})
+    target_include_directories(${target} PRIVATE
+        ${MODALDISH_INCLUDE_DIRS}
+        ${CMAKE_CURRENT_BINARY_DIR}/generated)
+    if(TARGET ModalDishBinaryData)
+        target_link_libraries(${target} PRIVATE ModalDishBinaryData)
+    endif()
 
-target_compile_definitions(ModalDish
-    PUBLIC
-        JUCE_STRICT_REFCOUNTEDPOINTER=1
-        JUCE_VST3_CAN_REPLACE_VST2=0
-        JUCE_WEB_BROWSER=0
-        JUCE_USE_CURL=0
-        JUCE_DISPLAY_SPLASH_SCREEN=0
-        JUCE_MODAL_LOOPS_PERMITTED=1
-)
+    juce_generate_juce_header(${target})
 
-target_link_libraries(ModalDish
-    PRIVATE
-        FxmeTools
-        FxmeCore
-        juce::juce_audio_basics
-        juce::juce_audio_devices
-        juce::juce_audio_formats
-        juce::juce_audio_plugin_client
-        juce::juce_audio_processors
-        juce::juce_audio_utils
-        juce::juce_core
-        juce::juce_data_structures
-        juce::juce_dsp
-        juce::juce_events
-        juce::juce_graphics
-        juce::juce_gui_basics
-        juce::juce_gui_extra
-    PUBLIC
-        juce::juce_recommended_config_flags
-        juce::juce_recommended_lto_flags
-        juce::juce_recommended_warning_flags
-)
+    target_compile_definitions(${target}
+        PUBLIC
+            JUCE_STRICT_REFCOUNTEDPOINTER=1
+            JUCE_VST3_CAN_REPLACE_VST2=0
+            JUCE_WEB_BROWSER=0
+            JUCE_USE_CURL=0
+            JUCE_DISPLAY_SPLASH_SCREEN=0
+            JUCE_MODAL_LOOPS_PERMITTED=1
+    )
+
+    target_link_libraries(${target}
+        PRIVATE
+            FxmeTools
+            FxmeCore
+            juce::juce_audio_basics
+            juce::juce_audio_devices
+            juce::juce_audio_formats
+            juce::juce_audio_plugin_client
+            juce::juce_audio_processors
+            juce::juce_audio_utils
+            juce::juce_core
+            juce::juce_data_structures
+            juce::juce_dsp
+            juce::juce_events
+            juce::juce_graphics
+            juce::juce_gui_basics
+            juce::juce_gui_extra
+        PUBLIC
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_lto_flags
+            juce::juce_recommended_warning_flags
+    )
+endfunction()
+
+modaldish_configure_plugin(ModalDish)
+modaldish_configure_plugin(ModalDishInstrument)
 
 # Console validation of the JUCE-free FEM core (mesh generation, Morley plate
 # eigensolver vs analytic references). Build with -DMODALDISH_BUILD_TESTS=ON,

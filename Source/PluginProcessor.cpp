@@ -106,8 +106,12 @@ namespace
 
 //==============================================================================
 ModalDishAudioProcessor::ModalDishAudioProcessor()
+    // The effect needs its input (it is on an audio track). The instrument
+    // keeps one, disabled by default, which hosts show as a sidechain: a
+    // signal can still excite the plate (MODALDISH_INSTRUMENT, CMakeLists).
+    // processBlock and isBusesLayoutSupported take a disabled input either way.
     : AudioProcessor (BusesProperties()
-                          .withInput ("Input", juce::AudioChannelSet::stereo(), true)
+                          .withInput ("Input", juce::AudioChannelSet::stereo(), ! isInstrumentBuild)
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "Parameters", createLayout()),
       presetManager (apvts,

@@ -28,6 +28,7 @@
 #include "Components/ShapeCanvas.h"
 #include "Components/PlatePointPanel.h"
 #include "Components/PointToggle.h"
+#include "ModalDishVersion.h"   // generated: MODALDISH_VERSION_DISPLAY
 #include "ShapeFile.h"
 
 #include <FxmeTools/components/InfoButton.h>
@@ -225,8 +226,8 @@ private:
     TriangleButton presetsButton;
     PresetOverlay presetOverlay { processor.getPresetManager() };
 
-    fxme::TopBar topBar { "ModalDish", "finite-element plate physical model",
-                          JucePlugin_VersionString,
+    fxme::TopBar topBar { JucePlugin_Name, "finite-element plate physical model",
+                          MODALDISH_VERSION_DISPLAY,
                           juce::ImageCache::getFromMemory (BinaryData::logo686_png,
                                                            BinaryData::logo686_pngSize) };
 

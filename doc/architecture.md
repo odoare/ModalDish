@@ -304,6 +304,14 @@ on the processor (`editorState`, `splashClaimed`).
 | FxmeTools `core/FxmeTools/acoustics` (separate repo) | mesher and eigensolver, JUCE-free |
 | `Tests/CascadeMeasure.cpp` | offline render; the sample-rate and cascade guards |
 
+Two plugins are built from these sources (`CMakeLists.txt`): ModalDish, the
+audio effect with MIDI input, and ModalDish Instrument, compiled with
+`MODALDISH_INSTRUMENT=1` (`isInstrumentBuild` in `PluginProcessor.h`). The
+only difference in code is the instrument's input bus, disabled by default
+(a sidechain in hosts); everything else, state and presets included, is
+shared. The effect's plugin code, bundle id and CLAP id are those of the
+first release and must not change.
+
 `Source/ParamIDs.h`, `Source/Dsp/ModalModel.h`, `Tests/FemTests.cpp` and
 `Tests/juce_stub/JuceHeader.h` are framework-free and LGPL — check
 `LICENSE.md` before adding a JUCE include to any of them.

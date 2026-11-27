@@ -9,20 +9,33 @@ on:
 
 # JUCE, FxmeTools and clap-juce-extensions are fetched by CMake at the commits
 # pinned in cmake/Dependencies.cmake; -DFXME_USE_SIBLINGS=OFF makes sure of it.
-env:
-  # Fallback for manual runs, which have no tag to take a version from. Keep
-  # in step with project(ModalDish VERSION ...) in CMakeLists.txt; this is the
-  # one place the number is duplicated.
-  FALLBACK_VERSION: 0.1.0
+#
+# The version is the tag's: cmake/Version.cmake reads it with git describe
+# (hence fetch-depth: 0), for the hosts, the window, the archive names and the
+# macOS installer, all through build/version.txt. A manual run builds whatever
+# the latest tag gives. The release notes are the tag's section of
+# CHANGELOG.md (.github/changelog-notes.sh): a tag without one stops the
+# workflow at its first job.
 
 jobs:
+  # ------------------------------------------------------------ changelog ---
+  changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check CHANGELOG.md has the tag's section
+        if: startsWith(github.ref, 'refs/tags/')
+        run: bash .github/changelog-notes.sh "${GITHUB_REF_NAME#v}" > /dev/null
+
   # ---------------------------------------------------------------- Linux ---
   build-linux:
+    needs: changelog
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           path: ModalDish
+          fetch-depth: 0   # history and tags: the version is the tag's (cmake/Version.cmake)
 
       - name: Install JUCE build dependencies
         run: |
@@ -51,6 +64,15 @@ jobs:
       - name: Build
         run: cmake --build ModalDish/build --config Release --parallel 2
 
+      - name: Check the version against the tag
+        shell: bash
+        run: |
+          BUILT=$(tr -d '[:space:]' < ModalDish/build/version.txt)
+          echo "Version built: $BUILT"
+          if [[ "$GITHUB_REF" == refs/tags/* && "$BUILT" != "${GITHUB_REF_NAME#v}" ]]; then
+            echo "::error::built $BUILT, but the tag is $GITHUB_REF_NAME"; exit 1
+          fi
+
       # CascadeMeasure is excluded deliberately. It is a measurement harness
       # rather than a pass/fail suite, and it currently reports one known
       # failure (shimmer tracking the Material knob) that is a voicing
@@ -61,12 +83,14 @@ jobs:
       - name: Package
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
-          [[ "$VERSION" =~ ^[0-9] ]] || VERSION="${FALLBACK_VERSION}"
+          VERSION=$(tr -d '[:space:]' < ModalDish/build/version.txt)   # the tag's, as CMake found it
           ART=ModalDish/build/ModalDish_artefacts/Release
           mkdir -p stage
+          ART_I=ModalDish/build/ModalDishInstrument_artefacts/Release
           cp -r "$ART/VST3/ModalDish.vst3" stage/
           cp -r "$ART/CLAP/ModalDish.clap" stage/
+          cp -r "$ART_I/VST3/ModalDish Instrument.vst3" stage/
+          cp -r "$ART_I/CLAP/ModalDish Instrument.clap" stage/
           cp -r "$ART/Standalone/ModalDish" stage/ModalDish-standalone
           cp ModalDish/README.md stage/
           cd stage && zip -r "../ModalDish-${VERSION}-linux-x86_64.zip" .
@@ -78,11 +102,13 @@ jobs:
 
   # -------------------------------------------------------------- Windows ---
   build-windows:
+    needs: changelog
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with:
           path: ModalDish
+          fetch-depth: 0   # history and tags: the version is the tag's (cmake/Version.cmake)
 
       - uses: ilammy/msvc-dev-cmd@v1
 
@@ -95,16 +121,27 @@ jobs:
       - name: Build
         run: cmake --build ModalDish/build --config Release --parallel 2
 
+      - name: Check the version against the tag
+        shell: bash
+        run: |
+          BUILT=$(tr -d '[:space:]' < ModalDish/build/version.txt)
+          echo "Version built: $BUILT"
+          if [[ "$GITHUB_REF" == refs/tags/* && "$BUILT" != "${GITHUB_REF_NAME#v}" ]]; then
+            echo "::error::built $BUILT, but the tag is $GITHUB_REF_NAME"; exit 1
+          fi
+
       - name: Package
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
-          [[ "$VERSION" =~ ^[0-9] ]] || VERSION="${FALLBACK_VERSION}"
+          VERSION=$(tr -d '[:space:]' < ModalDish/build/version.txt)   # the tag's, as CMake found it
           ART=ModalDish/build/ModalDish_artefacts/Release
           mkdir -p stage
+          ART_I=ModalDish/build/ModalDishInstrument_artefacts/Release
           cp -r "$ART/VST3/ModalDish.vst3" stage/
           cp -r "$ART/CLAP/ModalDish.clap" stage/
+          cp -r "$ART_I/VST3/ModalDish Instrument.vst3" stage/
+          cp -r "$ART_I/CLAP/ModalDish Instrument.clap" stage/
           cp -r "$ART/Standalone/ModalDish.exe" stage/
           cp ModalDish/README.md stage/
           cd stage && 7z a "../ModalDish-${VERSION}-windows-x86_64.zip" .
@@ -116,6 +153,7 @@ jobs:
 
   # ---------------------------------------------------------------- macOS ---
   build-macos:
+    needs: changelog
     # macos-14 is Apple Silicon. A build that loses the architecture list here
     # produces an arm64-only bundle that looks perfectly fine on the runner.
     runs-on: macos-14
@@ -123,6 +161,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: ModalDish
+          fetch-depth: 0   # history and tags: the version is the tag's (cmake/Version.cmake)
 
       # Passed as -D as well as being set in CMakeLists: a -D is in the cache
       # before any line of CMakeLists runs, so it cannot be lost to file
@@ -144,6 +183,15 @@ jobs:
       - name: Build
         run: cmake --build ModalDish/build --config Release --parallel 2
 
+      - name: Check the version against the tag
+        shell: bash
+        run: |
+          BUILT=$(tr -d '[:space:]' < ModalDish/build/version.txt)
+          echo "Version built: $BUILT"
+          if [[ "$GITHUB_REF" == refs/tags/* && "$BUILT" != "${GITHUB_REF_NAME#v}" ]]; then
+            echo "::error::built $BUILT, but the tag is $GITHUB_REF_NAME"; exit 1
+          fi
+
       # A verification step that cannot fail is not one. lipo printing "arm64"
       # while the job goes green is exactly how an arm64-only "universal"
       # release ships. Every bundle, because they are separate link
@@ -153,12 +201,16 @@ jobs:
         run: |
           set -euo pipefail
           ART=ModalDish/build/ModalDish_artefacts/Release
+          ART_I=ModalDish/build/ModalDishInstrument_artefacts/Release
           status=0
           for bundle in \
             "$ART/VST3/ModalDish.vst3/Contents/MacOS/ModalDish" \
             "$ART/AU/ModalDish.component/Contents/MacOS/ModalDish" \
             "$ART/CLAP/ModalDish.clap/Contents/MacOS/ModalDish" \
-            "$ART/Standalone/ModalDish.app/Contents/MacOS/ModalDish"
+            "$ART/Standalone/ModalDish.app/Contents/MacOS/ModalDish" \
+            "$ART_I/VST3/ModalDish Instrument.vst3/Contents/MacOS/ModalDish Instrument" \
+            "$ART_I/AU/ModalDish Instrument.component/Contents/MacOS/ModalDish Instrument" \
+            "$ART_I/CLAP/ModalDish Instrument.clap/Contents/MacOS/ModalDish Instrument"
           do
             if [[ ! -f "$bundle" ]]; then
               echo "::error::missing binary: $bundle"; status=1; continue
@@ -181,10 +233,14 @@ jobs:
         run: |
           set -euo pipefail
           ART=ModalDish/build/ModalDish_artefacts/Release
+          ART_I=ModalDish/build/ModalDishInstrument_artefacts/Release
           for b in "$ART/VST3/ModalDish.vst3" \
                    "$ART/AU/ModalDish.component" \
                    "$ART/CLAP/ModalDish.clap" \
-                   "$ART/Standalone/ModalDish.app"; do
+                   "$ART/Standalone/ModalDish.app" \
+                   "$ART_I/VST3/ModalDish Instrument.vst3" \
+                   "$ART_I/AU/ModalDish Instrument.component" \
+                   "$ART_I/CLAP/ModalDish Instrument.clap"; do
             codesign --force --deep --sign - --timestamp=none "$b"
             codesign --verify --verbose "$b"
           done
@@ -192,8 +248,7 @@ jobs:
       - name: Build pkg installer
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
-          [[ "$VERSION" =~ ^[0-9] ]] || VERSION="${FALLBACK_VERSION}"
+          VERSION=$(tr -d '[:space:]' < ModalDish/build/version.txt)   # the tag's, as CMake found it
           ART=ModalDish/build/ModalDish_artefacts/Release
           mkdir -p pkg_root/Library/Audio/Plug-Ins/VST3
           mkdir -p pkg_root/Library/Audio/Plug-Ins/Components
@@ -201,6 +256,10 @@ jobs:
           cp -r "$ART/VST3/ModalDish.vst3"    pkg_root/Library/Audio/Plug-Ins/VST3/
           cp -r "$ART/AU/ModalDish.component" pkg_root/Library/Audio/Plug-Ins/Components/
           cp -r "$ART/CLAP/ModalDish.clap"   pkg_root/Library/Audio/Plug-Ins/CLAP/
+          ART_I=ModalDish/build/ModalDishInstrument_artefacts/Release
+          cp -r "$ART_I/VST3/ModalDish Instrument.vst3"    pkg_root/Library/Audio/Plug-Ins/VST3/
+          cp -r "$ART_I/AU/ModalDish Instrument.component" pkg_root/Library/Audio/Plug-Ins/Components/
+          cp -r "$ART_I/CLAP/ModalDish Instrument.clap"    pkg_root/Library/Audio/Plug-Ins/CLAP/
           pkgbuild --root pkg_root --identifier com.fx-mechanics.ModalDish \
                    --version "$VERSION" --install-location / \
                    "ModalDish-${VERSION}-macOS.pkg"
@@ -208,14 +267,17 @@ jobs:
       - name: Package zip
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
-          [[ "$VERSION" =~ ^[0-9] ]] || VERSION="${FALLBACK_VERSION}"
+          VERSION=$(tr -d '[:space:]' < ModalDish/build/version.txt)   # the tag's, as CMake found it
           ART=ModalDish/build/ModalDish_artefacts/Release
           mkdir -p stage
           cp -r "$ART/VST3/ModalDish.vst3"       stage/
           cp -r "$ART/AU/ModalDish.component"    stage/
           cp -r "$ART/CLAP/ModalDish.clap"       stage/
           cp -r "$ART/Standalone/ModalDish.app"  stage/
+          ART_I=ModalDish/build/ModalDishInstrument_artefacts/Release
+          cp -r "$ART_I/VST3/ModalDish Instrument.vst3"       stage/
+          cp -r "$ART_I/AU/ModalDish Instrument.component"    stage/
+          cp -r "$ART_I/CLAP/ModalDish Instrument.clap"       stage/
           cp ModalDish/README.md stage/
           cd stage && zip -ry "../ModalDish-${VERSION}-macOS.zip" .
 
@@ -237,10 +299,17 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            CHANGELOG.md
+            .github
+      - name: Release notes from CHANGELOG.md
+        run: bash .github/changelog-notes.sh "${GITHUB_REF_NAME#v}" > release-notes.md
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
-          generate_release_notes: true
+          body_path: release-notes.md

@@ -47,6 +47,14 @@
 #include <string>
 #include <vector>
 
+/** True in ModalDish Instrument, false in the effect: the two plugins are
+    built from these same sources (CMakeLists.txt). */
+#if defined (MODALDISH_INSTRUMENT) && MODALDISH_INSTRUMENT
+inline constexpr bool isInstrumentBuild = true;
+#else
+inline constexpr bool isInstrumentBuild = false;
+#endif
+
 //==============================================================================
 class ModalDishAudioProcessor : public juce::AudioProcessor,
                                public juce::ChangeBroadcaster,
