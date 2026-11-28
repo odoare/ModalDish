@@ -124,15 +124,25 @@ namespace
     /** Equal-power pan normalised so that a centred position is unity in both
         channels rather than the usual -3 dB. Shared by the pickup pan and by
         the tail spread, which needs the same "centre changes nothing" property
-        for a different reason: see updateTailSpread. */
+        for a different reason: see updateTailSpread.
+
+        Both gains are the same cosine, of mirrored arguments, rather than a
+        cosine and a sine of one: cos^2(x) + cos^2(pi/2 - x) = 1 all the same,
+        but now it is exact where it matters, not merely to within float
+        rounding. Opposite pans swap the two gains bit for bit (1 + p and
+        1 - p are exact); the centre gives one value twice; a hard pan gives
+        exactly 0 to the far side, because cos(pi/2) in float is a tiny
+        negative number, clamped. With cos and sin of one angle, cos(pi/2)
+        left a residue of 4e-8 in the far channel, which the tests' exact
+        symmetry checks caught on one compiler and not another. */
     inline void equalPowerPan (float pan, float level, float& gainL, float& gainR) noexcept
     {
         constexpr float centreUnity = 1.41421356f;   // sqrt(2)
-        const float theta = 0.25f * juce::MathConstants<float>::pi
-                            * (juce::jlimit (-1.0f, 1.0f, pan) + 1.0f);
+        constexpr float quarterPi = 0.25f * juce::MathConstants<float>::pi;
+        const float p = juce::jlimit (-1.0f, 1.0f, pan);
         const float g = centreUnity * level;
-        gainL = g * std::cos (theta);
-        gainR = g * std::sin (theta);
+        gainL = g * std::max (0.0f, std::cos (quarterPi * (1.0f + p)));
+        gainR = g * std::max (0.0f, std::cos (quarterPi * (1.0f - p)));
     }
 
     // Hammer forces are impulsive and benefit from a little headroom. Note
@@ -749,7 +759,8 @@ void PlateSynth::updateTailSpread() noexcept
         // Equal power, and unity both sides when a band has no preference.
         // One centred pickup weights both channels alike, so every band lands
         // there and a single pickup still cannot manufacture a stereo image
-        // out of nothing (to within the last bit of cos and sin).
+        // out of nothing (exactly: equalPowerPan gives one value twice at
+        // the centre).
         float gainL = 1.0f, gainR = 1.0f;
         equalPowerPan (centred, 1.0f, gainL, gainR);
         for (int k = edge[b]; k < edge[b + 1]; ++k)

@@ -47,10 +47,16 @@
 
 #include "PlateSynth.h"
 
+#include <memory>
 #include <cstdio>
 #include <cstdint>
 #include <vector>
 #include <algorithm>
+
+// fem::PlateSynth is about 230 kB, and these tests make dozens of them in
+// one function: each lives on the heap (make_unique, then a reference of the
+// same name), so the stack stays far below its 8 MB, AddressSanitizer's
+// larger frames included.
 
 using namespace fxme::acoustics;
 
@@ -173,7 +179,7 @@ namespace
                                std::vector<float>* modalProbe = nullptr,
                                double probeSeconds = 0.3)
     {
-        fem::PlateSynth synth;
+        auto synthOwner = std::make_unique<fem::PlateSynth>(); auto& synth = *synthOwner;
         synth.prepare (sampleRate);
 
         fem::PlateSynth::Params p;
@@ -580,7 +586,7 @@ int main()
 
         auto byWindow = [&] (double fs, float amount, float deplete, float nonlin, double* out)
         {
-            fem::PlateSynth s;
+            auto sOwner = std::make_unique<fem::PlateSynth>(); auto& s = *sOwner;
             s.prepare (fs);
             fem::PlateSynth::Params p;
             p.f1 = 110.0f; p.viscDamp = 1.0e-4f; p.matDamp = 7.0e-6f;

@@ -35,7 +35,13 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <vector>
+
+// fem::PlateSynth is about 230 kB, and these tests make dozens of them in
+// one function: each lives on the heap (make_unique, then a reference of the
+// same name), so the stack stays far below its 8 MB, AddressSanitizer's
+// larger frames included.
 using namespace fxme::acoustics;
 static constexpr double fs = 48000.0;
 static int failures = 0;
@@ -158,7 +164,7 @@ int main()
         // A centred pickup at unity is the mono output this replaced: equal
         // power would put 0.707 in each channel, which would have made the
         // plugin 3 dB quieter for no reason a player would recognise.
-        fem::PlateSynth s1; s1.prepare (fs); s1.update (&model, p);
+        auto s1Owner = std::make_unique<fem::PlateSynth>(); auto& s1 = *s1Owner; s1.prepare (fs); s1.update (&model, p);
         s1.strike (0.42f, 0.45f, 1.0f);
         render (s1, 2.0, [] (int, float&, float&) {}, l0, r0);
         std::printf ("  centred, unity: L %.5f  R %.5f\n", l0, r0);
@@ -166,7 +172,7 @@ int main()
 
         // Hard left: everything in L, silence in R, and +3 dB for equal power.
         p.pickups[0].pan = -1.0f;
-        fem::PlateSynth s2; s2.prepare (fs); s2.update (&model, p);
+        auto s2Owner = std::make_unique<fem::PlateSynth>(); auto& s2 = *s2Owner; s2.prepare (fs); s2.update (&model, p);
         s2.strike (0.42f, 0.45f, 1.0f);
         double l1 = 0.0, r1 = 0.0;
         render (s2, 2.0, [] (int, float&, float&) {}, l1, r1);
@@ -179,14 +185,14 @@ int main()
         // Level, and a pickup that is off.
         p.pickups[0].pan = 0.0f;
         p.pickups[0].level = 0.5f;
-        fem::PlateSynth s3; s3.prepare (fs); s3.update (&model, p);
+        auto s3Owner = std::make_unique<fem::PlateSynth>(); auto& s3 = *s3Owner; s3.prepare (fs); s3.update (&model, p);
         s3.strike (0.42f, 0.45f, 1.0f);
         double l2 = 0.0, r2 = 0.0;
         render (s3, 2.0, [] (int, float&, float&) {}, l2, r2);
         check (std::abs (l2 / l0 - 0.5) < 0.01, "level scales the pickup linearly");
 
         p.pickups[0].on = false;
-        fem::PlateSynth s4; s4.prepare (fs); s4.update (&model, p);
+        auto s4Owner = std::make_unique<fem::PlateSynth>(); auto& s4 = *s4Owner; s4.prepare (fs); s4.update (&model, p);
         s4.strike (0.42f, 0.45f, 1.0f);
         double l3 = 0.0, r3 = 0.0;
         render (s4, 2.0, [] (int, float&, float&) {}, l3, r3);
@@ -198,7 +204,7 @@ int main()
         p.pickups[1] = p.pickups[0];
         p.pickups[1].pan = 1.0f;
         p.pickups[1].on = true;
-        fem::PlateSynth s5; s5.prepare (fs); s5.update (&model, p);
+        auto s5Owner = std::make_unique<fem::PlateSynth>(); auto& s5 = *s5Owner; s5.prepare (fs); s5.update (&model, p);
         s5.strike (0.42f, 0.45f, 1.0f);
         double l4 = 0.0, r4 = 0.0;
         render (s5, 2.0, [] (int, float&, float&) {}, l4, r4);
@@ -215,7 +221,7 @@ int main()
         // the zeros it left leaves the new pickup silent.
         p = basePatch();
         p.pickups[1].x = 0.30f; p.pickups[1].y = 0.62f;   // placed, still off
-        fem::PlateSynth s6; s6.prepare (fs); s6.update (&model, p);
+        auto s6Owner = std::make_unique<fem::PlateSynth>(); auto& s6 = *s6Owner; s6.prepare (fs); s6.update (&model, p);
         p.pickups[1].on = true;                 // the only change: the switch
         s6.update (&model, p);                  // second update: no retune
         s6.strike (0.42f, 0.45f, 1.0f);
@@ -223,7 +229,7 @@ int main()
         render (s6, 2.0, [] (int, float&, float&) {}, l5, r5);
 
         // The same patch reached by a rebuild, which resamples everything.
-        fem::PlateSynth s7; s7.prepare (fs); s7.update (&model, p);
+        auto s7Owner = std::make_unique<fem::PlateSynth>(); auto& s7 = *s7Owner; s7.prepare (fs); s7.update (&model, p);
         s7.strike (0.42f, 0.45f, 1.0f);
         double l6 = 0.0, r6 = 0.0;
         render (s7, 2.0, [] (int, float&, float&) {}, l6, r6);
@@ -249,7 +255,7 @@ int main()
         p.sources[0].x = 0.30f; p.sources[0].y = 0.40f;
         p.sources[0].velX = 0.40f; p.sources[0].velY = 0.20f;
 
-        fem::PlateSynth s; s.prepare (fs); s.update (&model, p);
+        auto sOwner = std::make_unique<fem::PlateSynth>(); auto& s = *sOwner; s.prepare (fs); s.update (&model, p);
 
         auto hitAt = [&] (float vel)
         {
@@ -280,7 +286,7 @@ int main()
         // every other test below — gets a fixed point.
         p.sources[0].velX = 0.0f;
         p.sources[0].velY = 0.0f;
-        fem::PlateSynth f; f.prepare (fs); f.update (&model, p);
+        auto fOwner = std::make_unique<fem::PlateSynth>(); auto& f = *fOwner; f.prepare (fs); f.update (&model, p);
         f.strikeSourcesForNote (60, 0.1f);
         const auto soft = f.getHit (f.getHitCount() - 1);
         f.strikeSourcesForNote (60, 1.0f);
@@ -314,13 +320,13 @@ int main()
             auto p = base;
             p.sources[0].force = 2.0f; p.sources[0].forceMax = 9.0f;
             p.sources[0].forceCtl = fem::ctlOff;
-            fem::PlateSynth s; s.prepare (fs); s.update (&model, p);
+            auto sOwner = std::make_unique<fem::PlateSynth>(); auto& s = *sOwner; s.prepare (fs); s.update (&model, p);
             s.strikeSourcesForNote (60, 1.0f);
             const float off = lastHit (s).amplitude;
             check (std::abs (off - 2.0f) < 1e-4f, "Off holds a mapping at its min");
 
             p.sources[0].forceCtl = fem::ctlVelocity;
-            fem::PlateSynth v; v.prepare (fs); v.update (&model, p);
+            auto vOwner = std::make_unique<fem::PlateSynth>(); auto& v = *vOwner; v.prepare (fs); v.update (&model, p);
             v.strikeSourcesForNote (60, 0.0f);
             const float lo = lastHit (v).amplitude;
             v.strikeSourcesForNote (60, 1.0f);
@@ -338,7 +344,7 @@ int main()
             auto p = base;
             p.sources[0].force = 9.0f; p.sources[0].forceMax = 2.0f;
             p.sources[0].forceCtl = fem::ctlVelocity;
-            fem::PlateSynth s; s.prepare (fs); s.update (&model, p);
+            auto sOwner = std::make_unique<fem::PlateSynth>(); auto& s = *sOwner; s.prepare (fs); s.update (&model, p);
             s.strikeSourcesForNote (60, 0.0f);
             const float lo = lastHit (s).amplitude;
             s.strikeSourcesForNote (60, 1.0f);
@@ -353,7 +359,7 @@ int main()
             auto p = base;
             p.sources[0].force = 0.0f; p.sources[0].forceMax = 4.0f;
             p.sources[0].forceCtl = fem::ctlCcBase + 74;
-            fem::PlateSynth s; s.prepare (fs); s.update (&model, p);
+            auto sOwner = std::make_unique<fem::PlateSynth>(); auto& s = *sOwner; s.prepare (fs); s.update (&model, p);
 
             s.strikeSourcesForNote (60, 1.0f);
             check (std::abs (lastHit (s).amplitude) < 1e-4f,
@@ -381,7 +387,7 @@ int main()
             auto at = [&] (int curve)
             {
                 p.sources[0].velCurve = curve;
-                fem::PlateSynth s; s.prepare (fs); s.update (&model, p);
+                auto sOwner = std::make_unique<fem::PlateSynth>(); auto& s = *sOwner; s.prepare (fs); s.update (&model, p);
                 s.strikeSourcesForNote (60, 0.5f);
                 return s.getHit (s.getHitCount() - 1).amplitude;
             };
@@ -408,7 +414,7 @@ int main()
             // into the high modes: compare the peak of a rendered hit.
             auto peakAt = [&] (float vel)
             {
-                fem::PlateSynth s; s.prepare (fs); s.update (&model, p);
+                auto sOwner = std::make_unique<fem::PlateSynth>(); auto& s = *sOwner; s.prepare (fs); s.update (&model, p);
                 s.strikeSourcesForNote (60, vel);
                 double l = 0.0, r = 0.0;
                 render (s, 0.5, [] (int, float&, float&) {}, l, r);
@@ -430,7 +436,7 @@ int main()
             p.sources[0].forceCtl = fem::ctlVelocity;
             p.sources[0].force = 0.0f; p.sources[0].forceMax = 5.0f;
 
-            fem::PlateSynth s; s.prepare (fs); s.update (&model, p);
+            auto sOwner = std::make_unique<fem::PlateSynth>(); auto& s = *sOwner; s.prepare (fs); s.update (&model, p);
             s.setControllerValue (1, 1.0f);
             s.strikeSourcesForNote (60, 0.4f);
             const auto h = lastHit (s);
@@ -469,7 +475,7 @@ int main()
 
         auto p = basePatch();
         p.meteredPickup = 0;
-        fem::PlateSynth m1; m1.prepare (fs); m1.update (&model, p);
+        auto m1Owner = std::make_unique<fem::PlateSynth>(); auto& m1 = *m1Owner; m1.prepare (fs); m1.update (&model, p);
         m1.strike (0.42f, 0.45f, 1.0f);
         const double centred = meterPeak (m1, 2.0);
         std::printf ("  centred unity: meter %.5f  L %.5f\n", centred, outPk);
@@ -478,7 +484,7 @@ int main()
 
         // Pan is the one thing the meter must ignore.
         p.pickups[0].pan = -1.0f;
-        fem::PlateSynth m2; m2.prepare (fs); m2.update (&model, p);
+        auto m2Owner = std::make_unique<fem::PlateSynth>(); auto& m2 = *m2Owner; m2.prepare (fs); m2.update (&model, p);
         m2.strike (0.42f, 0.45f, 1.0f);
         const double panned = meterPeak (m2, 2.0);
         std::printf ("  hard left:     meter %.5f\n", panned);
@@ -488,7 +494,7 @@ int main()
         // Level is the one thing it must follow.
         p.pickups[0].pan = 0.0f;
         p.pickups[0].level = 0.5f;
-        fem::PlateSynth m3; m3.prepare (fs); m3.update (&model, p);
+        auto m3Owner = std::make_unique<fem::PlateSynth>(); auto& m3 = *m3Owner; m3.prepare (fs); m3.update (&model, p);
         m3.strike (0.42f, 0.45f, 1.0f);
         const double halved = meterPeak (m3, 2.0);
         check (std::abs (halved / centred - 0.5) < 1e-6,
@@ -497,12 +503,12 @@ int main()
         // No panel open, and a panel on a pickup that is switched off.
         p = basePatch();
         p.meteredPickup = -1;
-        fem::PlateSynth m4; m4.prepare (fs); m4.update (&model, p);
+        auto m4Owner = std::make_unique<fem::PlateSynth>(); auto& m4 = *m4Owner; m4.prepare (fs); m4.update (&model, p);
         m4.strike (0.42f, 0.45f, 1.0f);
         check (meterPeak (m4, 0.5) == 0.0, "no panel open meters nothing");
 
         p.meteredPickup = 1;                 // pickup 2, which is off
-        fem::PlateSynth m5; m5.prepare (fs); m5.update (&model, p);
+        auto m5Owner = std::make_unique<fem::PlateSynth>(); auto& m5 = *m5Owner; m5.prepare (fs); m5.update (&model, p);
         m5.strike (0.42f, 0.45f, 1.0f);
         check (meterPeak (m5, 0.5) == 0.0, "a pickup that is off meters silence");
 
@@ -511,7 +517,7 @@ int main()
         p = basePatch();
         p.pickups[1].x = 0.30f; p.pickups[1].y = 0.62f; p.pickups[1].on = true;
         p.meteredPickup = 0;
-        fem::PlateSynth m6; m6.prepare (fs); m6.update (&model, p);
+        auto m6Owner = std::make_unique<fem::PlateSynth>(); auto& m6 = *m6Owner; m6.prepare (fs); m6.update (&model, p);
         m6.strike (0.42f, 0.45f, 1.0f);
         const double first = meterPeak (m6, 1.0);
         p.meteredPickup = 1;
@@ -533,12 +539,12 @@ int main()
         // used to mean is min 0, max N, velocity.
         p.sources[2].force = 0.0f; p.sources[2].forceCtl = fem::ctlVelocity;
         p.sources[2].forceMax = 1.0f;
-        fem::PlateSynth s1; s1.prepare(fs); s1.update(&model,p);
+        auto s1Owner = std::make_unique<fem::PlateSynth>(); auto& s1 = *s1Owner; s1.prepare(fs); s1.update(&model,p);
         s1.strikeSource(2, 1.0f);
         render(s1, 2.0, [](int,float&,float&){}, lo, a);
 
         p.sources[2].forceMax = 4.0f;
-        fem::PlateSynth s2; s2.prepare(fs); s2.update(&model,p);
+        auto s2Owner = std::make_unique<fem::PlateSynth>(); auto& s2 = *s2Owner; s2.prepare(fs); s2.update(&model,p);
         s2.strikeSource(2, 1.0f);
         render(s2, 2.0, [](int,float&,float&){}, hi, b);
         const double ratio = hi/std::max(lo,1e-12);
@@ -554,9 +560,9 @@ int main()
         p.sources[0].force = 0.0f; p.sources[0].forceMax = 4.0f;
         p.sources[0].forceCtl = fem::ctlVelocity;
         double half=0, full=0, d=0;
-        fem::PlateSynth s1; s1.prepare(fs); s1.update(&model,p);
+        auto s1Owner = std::make_unique<fem::PlateSynth>(); auto& s1 = *s1Owner; s1.prepare(fs); s1.update(&model,p);
         s1.strikeSource(0, 0.5f); render(s1,2.0,[](int,float&,float&){},half,d);
-        fem::PlateSynth s2; s2.prepare(fs); s2.update(&model,p);
+        auto s2Owner = std::make_unique<fem::PlateSynth>(); auto& s2 = *s2Owner; s2.prepare(fs); s2.update(&model,p);
         s2.strikeSource(0, 1.0f); render(s2,2.0,[](int,float&,float&){},full,d);
         std::printf("  velocity 0.5 -> %.5f, 1.0 -> %.5f (x%.2f)\n", half, full, full/half);
         check(std::abs(full/half - 2.0) < 0.05, "velocity scales the hit linearly");
@@ -571,11 +577,11 @@ int main()
         auto spreadOf = [&](float sigma, int hits)
         {
             p.sources[0].spread = sigma;
-            fem::PlateSynth s; s.prepare(fs); s.update(&model,p);
+            auto sOwner = std::make_unique<fem::PlateSynth>(); auto& s = *sOwner; s.prepare(fs); s.update(&model,p);
             double lo=1e30, hi=-1e30; bool anySilent=false;
             for (int t=0;t<hits;++t)
             {
-                fem::PlateSynth one; one.prepare(fs); one.update(&model,p);
+                auto oneOwner = std::make_unique<fem::PlateSynth>(); auto& one = *oneOwner; one.prepare(fs); one.update(&model,p);
                 for (int w=0; w<t; ++w) one.strikeSource(0, 0.0f);  // advance the rng
                 one.strikeSource(0, 1.0f);
                 double pk=0,d=0; render(one, 0.5, [](int,float&,float&){}, pk, d);
@@ -603,13 +609,13 @@ int main()
         { l = r = 0.2f*std::sin(2.0*M_PI*110.0*i/fs); };
 
         double pk=0,d=0;
-        fem::PlateSynth s; s.prepare(fs); s.update(&model,p);
+        auto sOwner = std::make_unique<fem::PlateSynth>(); auto& s = *sOwner; s.prepare(fs); s.update(&model,p);
         render(s, 1.0, tone, pk, d);
         check(pk > 1e-4, "a source with a send passes the input to the plate");
 
         // Hard left source, right-only input -> nothing.
         p.sources[0].pan = -1.0f;
-        fem::PlateSynth s2; s2.prepare(fs); s2.update(&model,p);
+        auto s2Owner = std::make_unique<fem::PlateSynth>(); auto& s2 = *s2Owner; s2.prepare(fs); s2.update(&model,p);
         double pkR=0; 
         render(s2, 1.0, [](int i, float& l, float& r)
                { l = 0.0f; r = 0.2f*std::sin(2.0*M_PI*110.0*i/fs); }, pkR, d);
@@ -618,14 +624,14 @@ int main()
 
         // ...and the same source fed the left channel does sound.
         double pkL=0;
-        fem::PlateSynth s3; s3.prepare(fs); s3.update(&model,p);
+        auto s3Owner = std::make_unique<fem::PlateSynth>(); auto& s3 = *s3Owner; s3.prepare(fs); s3.update(&model,p);
         render(s3, 1.0, [](int i, float& l, float& r)
                { l = 0.2f*std::sin(2.0*M_PI*110.0*i/fs); r = 0.0f; }, pkL, d);
         check(pkL > 1e-4, "balance -1 still takes the left channel");
 
         // A source that is off injects nothing.
         p.sources[0].on = false;
-        fem::PlateSynth s4; s4.prepare(fs); s4.update(&model,p);
+        auto s4Owner = std::make_unique<fem::PlateSynth>(); auto& s4 = *s4Owner; s4.prepare(fs); s4.update(&model,p);
         double pkOff=0;
         render(s4, 1.0, tone, pkOff, d);
         check(pkOff < 1e-9, "a source that is off passes no input");
@@ -639,7 +645,7 @@ int main()
         p.sources[3].on=true; p.sources[3].note=60;   // two sources, same note
         p.sources[4].on=true; p.sources[4].note=64;
         p.sources[5].on=false; p.sources[5].note=60;  // off: must not fire
-        fem::PlateSynth s; s.prepare(fs); s.update(&model,p);
+        auto sOwner = std::make_unique<fem::PlateSynth>(); auto& s = *sOwner; s.prepare(fs); s.update(&model,p);
         check(s.strikeSourcesForNote(60, 1.0f) == 2, "both sources on note 60 fire");
         check(s.strikeSourcesForNote(64, 1.0f) == 1, "one source on note 64 fires");
         check(s.strikeSourcesForNote(62, 1.0f) == 0, "an unmapped note fires nothing");
@@ -657,7 +663,7 @@ int main()
         p.sources[1].on = true; p.sources[1].x = 0.62f; p.sources[1].y = 0.44f;
         p.sources[0].note = 60; p.sources[1].note = 60;
 
-        fem::PlateSynth s; s.prepare (fs); s.update (&model, p);
+        auto sOwner = std::make_unique<fem::PlateSynth>(); auto& s = *sOwner; s.prepare (fs); s.update (&model, p);
         check (s.getHitCount() == 0, "no hits before anything is struck");
 
         // A plain strike reports exactly where it was aimed.
@@ -693,7 +699,7 @@ int main()
             q.sources[3].forceMax = 8.0f;
             q.sources[3].forceCtl = fem::ctlVelocity;
 
-            fem::PlateSynth u; u.prepare (fs); u.update (&model, q);
+            auto uOwner = std::make_unique<fem::PlateSynth>(); auto& u = *uOwner; u.prepare (fs); u.update (&model, q);
             u.strikeSource (3, 1.0f);
             const float loud = u.getHit (u.getHitCount() - 1).amplitude;
             u.strikeSource (3, 0.25f);
@@ -717,7 +723,7 @@ int main()
 
         // Spread shows up as scatter in the published points, all on the plate.
         p.sources[0].spread = 0.10f;
-        fem::PlateSynth t; t.prepare (fs); t.update (&model, p);
+        auto tOwner = std::make_unique<fem::PlateSynth>(); auto& t = *tOwner; t.prepare (fs); t.update (&model, p);
         float minX = 1e30f, maxX = -1e30f;
         bool allInside = true;
         for (int i = 0; i < 24; ++i)
@@ -764,7 +770,7 @@ int main()
         double mean = 0.0;
         auto rmsIld = [&] (const fem::PlateSynth::Params& p, const char* what)
         {
-            fem::PlateSynth s; s.prepare (fs); s.update (&model2, p);
+            auto sOwner = std::make_unique<fem::PlateSynth>(); auto& s = *sOwner; s.prepare (fs); s.update (&model2, p);
             s.strike (0.42f, 0.45f, 1.0f);
             const int n = (int) (1.5 * fs);
             std::vector<float> L ((size_t) n), R ((size_t) n);
@@ -835,7 +841,7 @@ int main()
         auto p = basePatch();
         p.glideMs = 50.0f;
 
-        fem::PlateSynth s; s.prepare (fs); s.update (&model, p);
+        auto sOwner = std::make_unique<fem::PlateSynth>(); auto& s = *sOwner; s.prepare (fs); s.update (&model, p);
         s.glideToNote (69);                       // A4
         std::printf ("  first note (69): %.1f Hz\n", (double) s.getBaseFrequency());
         check (std::abs (s.getBaseFrequency() - 440.0f) < 1.0f,
@@ -859,7 +865,7 @@ int main()
         {
             auto q = basePatch();
             q.glideMs = 50.0f;
-            fem::PlateSynth t; t.prepare (rate); t.update (&model, q);
+            auto tOwner = std::make_unique<fem::PlateSynth>(); auto& t = *tOwner; t.prepare (rate); t.update (&model, q);
             t.glideToNote (69);
             advance (t, 1.0, rate);
             t.glideToNote (81);
@@ -872,7 +878,7 @@ int main()
                "the glide takes the same time at any sample rate");
 
         // Tuning does not strike.
-        fem::PlateSynth quiet; quiet.prepare (fs); quiet.update (&model, p);
+        auto quietOwner = std::make_unique<fem::PlateSynth>(); auto& quiet = *quietOwner; quiet.prepare (fs); quiet.update (&model, p);
         quiet.glideToNote (69);
         double pk = 0.0, d = 0.0;
         render (quiet, 0.5, [] (int, float&, float&) {}, pk, d);
@@ -880,7 +886,7 @@ int main()
         check (pk < 1e-9, "tuning the plate does not strike it");
 
         // ...and striking does not tune.
-        fem::PlateSynth hit; hit.prepare (fs); hit.update (&model, p);
+        auto hitOwner = std::make_unique<fem::PlateSynth>(); auto& hit = *hitOwner; hit.prepare (fs); hit.update (&model, p);
         hit.glideToNote (69);
         const float before = hit.getBaseFrequency();
         hit.noteOn (1.0f);

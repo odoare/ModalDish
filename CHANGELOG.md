@@ -12,7 +12,7 @@ here (`.github/changelog-notes.sh`).
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-09-04
+## [0.2.0] - 2026-11-28
 
 ### Added
 
@@ -50,9 +50,20 @@ here (`.github/changelog-notes.sh`).
   in `CMakeLists.txt` or the release workflow any more.
 - Tooltip wording.
 
+### Fixed
+
+- Pickup pan is now exact at the ends and in the middle: a hard-panned pickup
+  leaves exactly nothing in the other channel (it left a residue of about
+  4e-8), a centred one is exactly equal in both, and opposite pans mirror bit
+  for bit. Inaudible, but the IoTests symmetry checks failed on some compilers
+  (Linux CI).
+- The test suites no longer overflow the stack under AddressSanitizer: their
+  synth instances (about 230 kB each) are made on the heap.
+
 ## [0.1.0] - 2026-09-04
 
 First release.
 
-[Unreleased]: https://github.com/odoare/ModalDish/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/odoare/ModalDish/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/odoare/ModalDish/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/odoare/ModalDish/releases/tag/v0.1.0

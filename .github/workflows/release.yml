@@ -75,8 +75,9 @@ jobs:
 
       # CascadeMeasure is excluded deliberately. It is a measurement harness
       # rather than a pass/fail suite, and it currently reports one known
-      # failure (shimmer tracking the Material knob) that is a voicing
-      # question, not a regression. The other three suites must pass.
+      # failure ("modal injection depends far less on the hit point", above
+      # its 60% bound) that is a voicing question, not a regression. The
+      # other three suites must pass.
       - name: Test
         run: ctest --test-dir ModalDish/build --output-on-failure -E CascadeMeasure
 
